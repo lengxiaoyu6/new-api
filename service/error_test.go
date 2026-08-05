@@ -11,8 +11,8 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
-	"github.com/QuantumNous/new-api/types"
+	taskdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -216,7 +216,7 @@ func TestApplyStatusCodeResponseMappingWith403QuotaError(t *testing.T) {
 func TestApplyStatusCodeResponseMappingToTaskError(t *testing.T) {
 	t.Parallel()
 
-	taskErr := &dto.TaskError{
+	taskErr := &taskdto.TaskError{
 		Code:               "upstream_error",
 		Message:            "too many requests",
 		StatusCode:         http.StatusTooManyRequests,
