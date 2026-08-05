@@ -92,6 +92,38 @@ func TestUpdateUserSettingOnlyUpdatesSetting(t *testing.T) {
 	assert.Equal(t, "zh", got.GetSetting().Language)
 }
 
+func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
+	setupUserUpdateTestState(t)
+
+	oldAccessToken := "old-access-token"
+	user := User{
+		Id:           3,
+		Username:     "access-token-user",
+		Password:     "password",
+		Status:       common.UserStatusEnabled,
+		AccessToken:  &oldAccessToken,
+		Quota:        1000,
+		UsedQuota:    20,
+		RequestCount: 3,
+	}
+	require.NoError(t, DB.Create(&user).Error)
+
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
+		"quota":         gorm.Expr("quota - ?", 300),
+		"used_quota":    gorm.Expr("used_quota + ?", 300),
+		"request_count": gorm.Expr("request_count + ?", 1),
+	}).Error)
+
+	require.NoError(t, UpdateUserAccessToken(user.Id, "new-access-token"))
+
+	var got User
+	require.NoError(t, DB.First(&got, user.Id).Error)
+	assert.Equal(t, "new-access-token", got.GetAccessToken())
+	assert.Equal(t, 700, got.Quota)
+	assert.Equal(t, 320, got.UsedQuota)
+	assert.Equal(t, 4, got.RequestCount)
+}
+
 func TestEnsureEmailAvailableRejectsExistingEmailCaseInsensitive(t *testing.T) {
 	setupUserUpdateTestState(t)
 
