@@ -57,3 +57,9 @@ func IsOpenAITextModel(modelName string) bool {
 	}
 	return false
 }
+
+// IsXaiVideoModel reports whether the model is an xAI video generation model,
+// which must be served through the OpenAI Video endpoint rather than chat.
+func IsXaiVideoModel(modelName string) bool {
+	return strings.Contains(strings.ToLower(modelName), "grok-imagine-video")
+}
