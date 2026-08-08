@@ -125,7 +125,10 @@ const statusItems: ModelStatusItem[] = [
   },
 ]
 
-async function renderModelStatus(items: ModelStatusItem[] = statusItems) {
+async function renderModelStatus(
+  items: ModelStatusItem[] = statusItems,
+  props: { lastUpdated?: string | number } = {}
+) {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
@@ -133,7 +136,7 @@ async function renderModelStatus(items: ModelStatusItem[] = statusItems) {
   await act(async () => {
     root.render(
       <I18nextProvider i18n={i18n}>
-        <ModelStatusContent items={items} />
+        <ModelStatusContent items={items} {...props} />
       </I18nextProvider>
     )
   })
@@ -324,6 +327,22 @@ describe('model status', () => {
       assert.ok(rowTexts[0].includes('—'))
     } finally {
       await cleanupRendered(root, container)
+    }
+  })
+
+  test('formats the last update time when the active language is zhCN', async () => {
+    await i18n.changeLanguage('zhCN')
+    const { container, root } = await renderModelStatus(statusItems, {
+      lastUpdated: 1_704_067_200,
+    })
+
+    try {
+      const pageText = container.textContent ?? ''
+      assert.ok(pageText.includes('Last updated:'))
+      assert.ok(pageText.includes('2024'))
+    } finally {
+      await cleanupRendered(root, container)
+      await i18n.changeLanguage('en')
     }
   })
 })

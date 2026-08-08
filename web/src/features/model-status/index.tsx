@@ -41,6 +41,7 @@ import {
   getSuccessRateDotClass,
   getSuccessRateTextClass,
 } from '@/features/performance-metrics/lib/format'
+import { toIntlLocale } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
 import { getModelStatus } from './api'
@@ -493,7 +494,7 @@ function formatLastUpdated(value: string | number, language: string): string {
   )
   if (Number.isNaN(date.getTime())) return String(value)
 
-  return new Intl.DateTimeFormat(language, {
+  return new Intl.DateTimeFormat(toIntlLocale(language), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(date)
