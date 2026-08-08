@@ -20,10 +20,8 @@ export type ModelHealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown'
 
 export type ModelStatusFilter = Exclude<ModelHealthStatus, 'unknown'> | 'all'
 
-export type ModelStatusItem = {
-  providerId: string
-  provider: string
-  modelName: string
+export type ModelStatusGroupMetric = {
+  group: string
   healthScore: number
   fastestTtftMs: number
   slowestTtftMs: number
@@ -34,10 +32,41 @@ export type ModelStatusItem = {
   status: ModelHealthStatus
 }
 
+export type ModelStatusItem = {
+  providerId: string
+  provider: string
+  vendorId?: number
+  modelName: string
+  healthScore: number
+  fastestTtftMs: number
+  slowestTtftMs: number
+  successRate: number
+  requestCount: number
+  ttftSampleCount?: number
+  lastUpdated?: string | number
+  groups: ModelStatusGroupMetric[]
+  status: ModelHealthStatus
+}
+
+export type ModelStatusApiGroup = {
+  group: string
+  health?: ModelHealthStatus
+  status?: ModelHealthStatus
+  health_score?: number | null
+  fastest_ttft_ms?: number | null
+  slowest_ttft_ms?: number | null
+  success_rate?: number | null
+  request_count?: number
+  ttft_sample_count?: number
+  last_updated?: string | number
+}
+
 export type ModelStatusApiItem = {
   provider_id?: string
   provider_name?: string
   provider?: string
+  vendor_id?: number
+  channel_type?: number
   model_name: string
   health?: ModelHealthStatus
   health_score?: number | null
@@ -48,12 +77,14 @@ export type ModelStatusApiItem = {
   ttft_sample_count?: number
   owner_by?: string
   last_updated?: string | number
+  groups?: ModelStatusApiGroup[]
   status?: ModelHealthStatus
 }
 
 export type ModelStatusApiProvider = {
   provider_id: string
   provider_name: string
+  vendor_id?: number
   icon?: string
   health?: ModelHealthStatus
   models: ModelStatusApiItem[]
@@ -75,8 +106,5 @@ export type ProviderStatusGroup = {
   providerId: string
   provider: string
   models: ModelStatusItem[]
-  averageHealth: number
-  averageSuccessRate: number
-  requestCount: number
   status: ModelHealthStatus
 }

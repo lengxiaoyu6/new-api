@@ -6,7 +6,6 @@ import (
 	"sort"
 	"time"
 
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 )
 
@@ -27,6 +26,7 @@ type ModelStatusProvider struct {
 	ProviderID      string            `json:"provider_id"`
 	ProviderName    string            `json:"provider_name"`
 	Provider        string            `json:"provider"`
+	VendorID        int               `json:"vendor_id,omitempty"`
 	ChannelType     int               `json:"channel_type"`
 	Health          string            `json:"health"`
 	Status          string            `json:"status"`
@@ -41,11 +41,26 @@ type ModelStatusProvider struct {
 }
 
 type ModelStatusItem struct {
-	ProviderID      string  `json:"provider_id"`
-	ProviderName    string  `json:"provider_name"`
-	Provider        string  `json:"provider"`
-	ChannelType     int     `json:"channel_type"`
-	ModelName       string  `json:"model_name"`
+	ProviderID      string             `json:"provider_id"`
+	ProviderName    string             `json:"provider_name"`
+	Provider        string             `json:"provider"`
+	VendorID        int                `json:"vendor_id,omitempty"`
+	ChannelType     int                `json:"channel_type"`
+	ModelName       string             `json:"model_name"`
+	Health          string             `json:"health"`
+	Status          string             `json:"status"`
+	HealthScore     float64            `json:"health_score"`
+	FastestTtftMs   int64              `json:"fastest_ttft_ms"`
+	SlowestTtftMs   int64              `json:"slowest_ttft_ms"`
+	SuccessRate     float64            `json:"success_rate"`
+	RequestCount    int64              `json:"request_count"`
+	TtftSampleCount int64              `json:"ttft_sample_count"`
+	LastUpdated     string             `json:"last_updated"`
+	Groups          []ModelStatusGroup `json:"groups"`
+}
+
+type ModelStatusGroup struct {
+	Group           string  `json:"group"`
 	Health          string  `json:"health"`
 	Status          string  `json:"status"`
 	HealthScore     float64 `json:"health_score"`
@@ -58,8 +73,22 @@ type ModelStatusItem struct {
 }
 
 type modelStatusKey struct {
-	channelType int
-	modelName   string
+	modelName string
+	group     string
+}
+
+type modelStatusCatalogItem struct {
+	providerID   string
+	providerName string
+	vendorID     int
+	modelName    string
+	groups       []string
+}
+
+type modelStatusProviderCatalog struct {
+	providerID   string
+	providerName string
+	vendorID     int
 }
 
 type modelStatusAccumulator struct {
@@ -83,8 +112,8 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 		return ModelStatusResponse{}, err
 	}
 
-	modelTotals := make(map[modelStatusKey]modelStatusAccumulator)
-	providerTotals := make(map[int]modelStatusAccumulator)
+	catalog := buildModelStatusCatalog(model.GetPricing(), model.GetVendors(), params.Groups)
+	groupTotals := make(map[modelStatusKey]modelStatusAccumulator)
 	allowedGroups := allowedGroupSet(params.Groups)
 	for _, row := range rows {
 		value := counters{
@@ -98,8 +127,7 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
 		}
-		addModelStatusCounters(modelTotals, modelStatusKey{channelType: row.ChannelType, modelName: row.ModelName}, value, row.BucketTs)
-		addProviderStatusCounters(providerTotals, row.ChannelType, value, row.BucketTs)
+		addModelStatusCounters(groupTotals, modelStatusKey{modelName: row.ModelName, group: row.Group}, value, row.BucketTs)
 	}
 
 	hotBuckets.Range(func(key, value any) bool {
@@ -116,78 +144,73 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 		if snapshot.requestCount == 0 {
 			return true
 		}
-		addModelStatusCounters(modelTotals, modelStatusKey{channelType: k.channelType, modelName: k.model}, snapshot, k.bucketTs)
-		addProviderStatusCounters(providerTotals, k.channelType, snapshot, k.bucketTs)
+		addModelStatusCounters(groupTotals, modelStatusKey{modelName: k.model, group: k.group}, snapshot, k.bucketTs)
 		return true
 	})
 
-	items := make([]ModelStatusItem, 0, len(modelTotals))
-	latestBucketTs := int64(0)
-	for key, total := range modelTotals {
-		if total.requestCount == 0 {
-			continue
+	items := make([]ModelStatusItem, 0, len(catalog))
+	providerCatalog := make(map[string]modelStatusProviderCatalog)
+	providerTotals := make(map[string]modelStatusAccumulator)
+	modelsByProvider := make(map[string][]ModelStatusItem)
+	for _, catalogItem := range catalog {
+		total := modelStatusAccumulator{}
+		groups := make([]ModelStatusGroup, 0, len(catalogItem.groups))
+		for _, group := range catalogItem.groups {
+			groupTotal := groupTotals[modelStatusKey{modelName: catalogItem.modelName, group: group}]
+			addStatusAccumulatorCounters(&total, groupTotal.counters, groupTotal.lastUpdated)
+			groups = append(groups, buildModelStatusGroup(group, groupTotal))
 		}
-		if total.lastUpdated > latestBucketTs {
-			latestBucketTs = total.lastUpdated
+
+		item := buildModelStatusItem(catalogItem, total, groups)
+		items = append(items, item)
+		modelsByProvider[item.ProviderID] = append(modelsByProvider[item.ProviderID], item)
+		current := providerTotals[item.ProviderID]
+		addStatusAccumulatorCounters(&current, total.counters, total.lastUpdated)
+		providerTotals[item.ProviderID] = current
+		if _, ok := providerCatalog[item.ProviderID]; !ok {
+			providerCatalog[item.ProviderID] = modelStatusProviderCatalog{
+				providerID:   item.ProviderID,
+				providerName: item.ProviderName,
+				vendorID:     item.VendorID,
+			}
 		}
-		items = append(items, buildModelStatusItem(key.channelType, key.modelName, total))
 	}
 	sort.Slice(items, func(i, j int) bool {
 		if items[i].ProviderName != items[j].ProviderName {
 			return items[i].ProviderName < items[j].ProviderName
 		}
-		if items[i].ChannelType != items[j].ChannelType {
-			return items[i].ChannelType < items[j].ChannelType
-		}
 		return items[i].ModelName < items[j].ModelName
 	})
 
-	modelsByProvider := make(map[int][]ModelStatusItem)
-	for _, item := range items {
-		modelsByProvider[item.ChannelType] = append(modelsByProvider[item.ChannelType], item)
-	}
-
-	providers := make([]ModelStatusProvider, 0, len(providerTotals))
-	for channelType, total := range providerTotals {
-		if total.requestCount == 0 {
-			continue
-		}
-		provider := buildModelStatusProvider(channelType, total)
-		provider.Models = modelsByProvider[channelType]
+	providers := make([]ModelStatusProvider, 0, len(modelsByProvider))
+	for providerID, models := range modelsByProvider {
+		provider := buildModelStatusProvider(providerCatalog[providerID], providerTotals[providerID])
+		provider.Models = models
 		providers = append(providers, provider)
 	}
 	sort.Slice(providers, func(i, j int) bool {
 		if providers[i].ProviderName != providers[j].ProviderName {
 			return providers[i].ProviderName < providers[j].ProviderName
 		}
-		return providers[i].ChannelType < providers[j].ChannelType
+		return providers[i].ProviderID < providers[j].ProviderID
 	})
 
 	return ModelStatusResponse{
 		WindowHours: hours,
 		GeneratedAt: endTs,
-		LastUpdated: formatStatusTime(latestBucketTs),
+		LastUpdated: formatStatusTime(endTs),
 		Providers:   providers,
 		Models:      items,
 	}, nil
 }
 
 func addModelStatusCounters(totals map[modelStatusKey]modelStatusAccumulator, key modelStatusKey, value counters, bucketTs int64) {
-	if value.requestCount == 0 || key.modelName == "" {
+	if value.requestCount == 0 || key.modelName == "" || key.group == "" {
 		return
 	}
 	current := totals[key]
 	addStatusAccumulatorCounters(&current, value, bucketTs)
 	totals[key] = current
-}
-
-func addProviderStatusCounters(totals map[int]modelStatusAccumulator, channelType int, value counters, bucketTs int64) {
-	if value.requestCount == 0 {
-		return
-	}
-	current := totals[channelType]
-	addStatusAccumulatorCounters(&current, value, bucketTs)
-	totals[channelType] = current
 }
 
 func addStatusAccumulatorCounters(current *modelStatusAccumulator, value counters, bucketTs int64) {
@@ -204,16 +227,34 @@ func addStatusAccumulatorCounters(current *modelStatusAccumulator, value counter
 	}
 }
 
-func buildModelStatusItem(channelType int, modelName string, total modelStatusAccumulator) ModelStatusItem {
-	providerName := constant.GetChannelTypeName(channelType)
+func buildModelStatusItem(catalogItem modelStatusCatalogItem, total modelStatusAccumulator, groups []ModelStatusGroup) ModelStatusItem {
 	status := statusForCounters(total.counters)
 	successRateValue := roundStatusMetric(successRate(total.counters))
 	return ModelStatusItem{
-		ProviderID:      modelStatusProviderID(channelType),
-		ProviderName:    providerName,
-		Provider:        providerName,
-		ChannelType:     channelType,
-		ModelName:       modelName,
+		ProviderID:      catalogItem.providerID,
+		ProviderName:    catalogItem.providerName,
+		Provider:        catalogItem.providerName,
+		VendorID:        catalogItem.vendorID,
+		ChannelType:     0,
+		ModelName:       catalogItem.modelName,
+		Health:          status,
+		Status:          status,
+		HealthScore:     successRateValue,
+		FastestTtftMs:   statusFastestTtft(total.counters),
+		SlowestTtftMs:   statusSlowestTtft(total.counters),
+		SuccessRate:     successRateValue,
+		RequestCount:    total.requestCount,
+		TtftSampleCount: total.ttftCount,
+		LastUpdated:     formatStatusTime(total.lastUpdated),
+		Groups:          groups,
+	}
+}
+
+func buildModelStatusGroup(group string, total modelStatusAccumulator) ModelStatusGroup {
+	status := statusForCounters(total.counters)
+	successRateValue := roundStatusMetric(successRate(total.counters))
+	return ModelStatusGroup{
+		Group:           group,
 		Health:          status,
 		Status:          status,
 		HealthScore:     successRateValue,
@@ -226,15 +267,15 @@ func buildModelStatusItem(channelType int, modelName string, total modelStatusAc
 	}
 }
 
-func buildModelStatusProvider(channelType int, total modelStatusAccumulator) ModelStatusProvider {
-	providerName := constant.GetChannelTypeName(channelType)
+func buildModelStatusProvider(catalog modelStatusProviderCatalog, total modelStatusAccumulator) ModelStatusProvider {
 	status := statusForCounters(total.counters)
 	successRateValue := roundStatusMetric(successRate(total.counters))
 	return ModelStatusProvider{
-		ProviderID:      modelStatusProviderID(channelType),
-		ProviderName:    providerName,
-		Provider:        providerName,
-		ChannelType:     channelType,
+		ProviderID:      catalog.providerID,
+		ProviderName:    catalog.providerName,
+		Provider:        catalog.providerName,
+		VendorID:        catalog.vendorID,
+		ChannelType:     0,
 		Health:          status,
 		Status:          status,
 		HealthScore:     successRateValue,
@@ -248,8 +289,75 @@ func buildModelStatusProvider(channelType int, total modelStatusAccumulator) Mod
 	}
 }
 
-func modelStatusProviderID(channelType int) string {
-	return fmt.Sprintf("channel:%d", channelType)
+func buildModelStatusCatalog(pricing []model.Pricing, vendors []model.PricingVendor, groups []string) []modelStatusCatalogItem {
+	vendorNames := make(map[int]string, len(vendors))
+	for _, vendor := range vendors {
+		if vendor.ID <= 0 || vendor.Name == "" {
+			continue
+		}
+		vendorNames[vendor.ID] = vendor.Name
+	}
+
+	allowedGroups := allowedGroupSet(groups)
+	seenModels := make(map[string]struct{}, len(pricing))
+	catalog := make([]modelStatusCatalogItem, 0, len(pricing))
+	for _, item := range pricing {
+		if item.ModelName == "" {
+			continue
+		}
+		if _, ok := seenModels[item.ModelName]; ok {
+			continue
+		}
+		statusGroups := modelStatusCatalogGroups(item.EnableGroup, allowedGroups)
+		if allowedGroups != nil && len(statusGroups) == 0 {
+			continue
+		}
+		providerName := vendorNames[item.VendorID]
+		if providerName == "" {
+			providerName = "Unknown"
+		}
+		seenModels[item.ModelName] = struct{}{}
+		catalog = append(catalog, modelStatusCatalogItem{
+			providerID:   modelStatusVendorID(item.VendorID),
+			providerName: providerName,
+			vendorID:     item.VendorID,
+			modelName:    item.ModelName,
+			groups:       statusGroups,
+		})
+	}
+	sort.Slice(catalog, func(i, j int) bool {
+		if catalog[i].providerName != catalog[j].providerName {
+			return catalog[i].providerName < catalog[j].providerName
+		}
+		return catalog[i].modelName < catalog[j].modelName
+	})
+	return catalog
+}
+
+func modelStatusCatalogGroups(groups []string, allowedGroups map[string]struct{}) []string {
+	seen := make(map[string]struct{}, len(groups))
+	result := make([]string, 0, len(groups))
+	for _, group := range groups {
+		if group == "" {
+			continue
+		}
+		if allowedGroups != nil && group != "all" {
+			if _, ok := allowedGroups[group]; !ok {
+				continue
+			}
+		}
+		if _, ok := seen[group]; ok {
+			continue
+		}
+		seen[group] = struct{}{}
+		result = append(result, group)
+	}
+	sort.Strings(result)
+	return result
+}
+
+func modelStatusVendorID(vendorID int) string {
+	return fmt.Sprintf("vendor:%d", vendorID)
 }
 
 func statusFastestTtft(value counters) int64 {

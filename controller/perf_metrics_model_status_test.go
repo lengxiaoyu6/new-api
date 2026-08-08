@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -28,18 +29,26 @@ func setupModelStatusControllerTest(t *testing.T) *gorm.DB {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.PerfMetric{},
+		&model.Ability{},
+		&model.Channel{},
+		&model.Model{},
+		&model.Vendor{},
+	))
 
 	model.DB = db
 	model.LOG_DB = db
 	common.RedisEnabled = false
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	model.InvalidatePricingCache()
 
 	t.Cleanup(func() {
 		model.DB = oldDB
 		model.LOG_DB = oldLogDB
 		common.RedisEnabled = oldRedisEnabled
 		common.SetMainDatabaseType(oldMainDatabaseType)
+		model.InvalidatePricingCache()
 	})
 	return db
 }
@@ -71,15 +80,22 @@ func newModelStatusTestRouter() *gin.Engine {
 	return router
 }
 
-func TestGetModelStatusReturnsPublicModelMetrics(t *testing.T) {
-	db := setupModelStatusControllerTest(t)
-	setModelStatusHeaderNavModules(t, `{"modelStatus":{"enabled":true,"requireAuth":false}}`)
+func prepareModelStatusControllerFixture(t *testing.T, db *gorm.DB) string {
+	t.Helper()
+
+	vendor := model.Vendor{Name: "CatalogOpenAI", Status: 1}
+	require.NoError(t, db.Create(&vendor).Error)
+	require.NoError(t, db.Create(&model.Model{ModelName: "gpt-test", VendorID: vendor.Id, Status: 1, NameRule: model.NameRuleExact}).Error)
+	channel := model.Channel{Type: constant.ChannelTypeAnthropic, Key: "anthropic-key", Status: 1, Name: "anthropic-channel"}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-test", ChannelId: channel.Id, Enabled: true}).Error)
+	model.InvalidatePricingCache()
 
 	bucketTs := time.Now().Add(-time.Minute).Unix()
 	require.NoError(t, db.Create(&model.PerfMetric{
 		ModelName:      "gpt-test",
 		Group:          "default",
-		ChannelType:    constant.ChannelTypeOpenAI,
+		ChannelType:    constant.ChannelTypeAnthropic,
 		BucketTs:       bucketTs,
 		RequestCount:   5,
 		SuccessCount:   5,
@@ -89,6 +105,21 @@ func TestGetModelStatusReturnsPublicModelMetrics(t *testing.T) {
 		SlowestTtftMs:  300,
 		TotalLatencyMs: 2500,
 	}).Error)
+
+	return modelStatusTestTime(bucketTs)
+}
+
+func modelStatusTestTime(ts int64) string {
+	if ts <= 0 {
+		return ""
+	}
+	return time.Unix(ts, 0).UTC().Format(time.RFC3339)
+}
+
+func TestGetModelStatusReturnsPublicModelMetrics(t *testing.T) {
+	db := setupModelStatusControllerTest(t)
+	setModelStatusHeaderNavModules(t, `{"modelStatus":{"enabled":true,"requireAuth":false}}`)
+	expectedLastUpdated := prepareModelStatusControllerFixture(t, db)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/model-status?hours=24", nil)
 	response := httptest.NewRecorder()
@@ -104,13 +135,18 @@ func TestGetModelStatusReturnsPublicModelMetrics(t *testing.T) {
 	require.Len(t, payload.Data.Models, 1)
 	require.Len(t, payload.Data.Providers, 1)
 	item := payload.Data.Models[0]
-	assert.Equal(t, "OpenAI", item.Provider)
+	assert.Equal(t, "CatalogOpenAI", item.Provider)
 	assert.Equal(t, "gpt-test", item.ModelName)
 	assert.Equal(t, float64(100), item.HealthScore)
 	assert.Equal(t, int64(100), item.FastestTtftMs)
 	assert.Equal(t, int64(300), item.SlowestTtftMs)
 	assert.Equal(t, int64(5), item.RequestCount)
-	assert.NotEmpty(t, item.LastUpdated)
+	assert.Equal(t, expectedLastUpdated, item.LastUpdated)
+	assert.Equal(t, modelStatusTestTime(payload.Data.GeneratedAt), payload.Data.LastUpdated)
+	assert.Equal(t, fmt.Sprintf("vendor:%d", payload.Data.Providers[0].VendorID), payload.Data.Providers[0].ProviderID)
+	require.Len(t, item.Groups, 1)
+	assert.Equal(t, "default", item.Groups[0].Group)
+	assert.Equal(t, expectedLastUpdated, item.Groups[0].LastUpdated)
 }
 
 func TestGetModelStatusRejectsDisabledModule(t *testing.T) {

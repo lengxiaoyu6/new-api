@@ -65,7 +65,7 @@ const monitoringSchema = z.object({
   perf_metrics_setting: z.object({
     enabled: z.boolean(),
     flush_interval: z.coerce.number().min(1),
-    bucket_time: z.enum(['minute', '5min', 'hour']),
+    bucket_time: z.enum(['minute', '5min', '10min', 'hour']),
     retention_days: z.coerce.number().min(0),
   }),
 })
@@ -77,7 +77,7 @@ type FlatMonitoringDefaults = {
   QuotaRemindThreshold: string
   'perf_metrics_setting.enabled': boolean
   'perf_metrics_setting.flush_interval': number
-  'perf_metrics_setting.bucket_time': 'minute' | '5min' | 'hour'
+  'perf_metrics_setting.bucket_time': 'minute' | '5min' | '10min' | 'hour'
   'perf_metrics_setting.retention_days': number
 }
 
@@ -267,6 +267,7 @@ export function MonitoringSettingsSection({
                     items={[
                       { value: 'minute', label: t('1 minute') },
                       { value: '5min', label: t('5 minutes') },
+                      { value: '10min', label: t('10 minutes') },
                       { value: 'hour', label: t('1 hour') },
                     ]}
                     value={field.value}
@@ -282,6 +283,7 @@ export function MonitoringSettingsSection({
                       <SelectGroup>
                         <SelectItem value='minute'>{t('1 minute')}</SelectItem>
                         <SelectItem value='5min'>{t('5 minutes')}</SelectItem>
+                        <SelectItem value='10min'>{t('10 minutes')}</SelectItem>
                         <SelectItem value='hour'>{t('1 hour')}</SelectItem>
                       </SelectGroup>
                     </SelectContent>

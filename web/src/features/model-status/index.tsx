@@ -1,3 +1,5 @@
+import { useQuery } from '@tanstack/react-query'
+import { RefreshCw } from 'lucide-react'
 /*
 Copyright (C) 2023-2026 QuantumNous
 
@@ -17,8 +19,6 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { RefreshCw } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { PublicLayout } from '@/components/layout'
@@ -33,6 +33,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import { Progress } from '@/components/ui/progress'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
@@ -48,8 +49,10 @@ import { getModelStatus } from './api'
 import type {
   ModelHealthStatus,
   ModelStatusApiItem,
+  ModelStatusApiGroup,
   ModelStatusApiProvider,
   ModelStatusFilter,
+  ModelStatusGroupMetric,
   ModelStatusItem,
   ProviderStatusGroup,
 } from './types'
@@ -61,13 +64,11 @@ const STATUS_FILTERS: ModelStatusFilter[] = [
   'down',
 ]
 
-function average(values: number[]): number {
-  if (values.length === 0) return 0
-  return values.reduce((sum, value) => sum + value, 0) / values.length
-}
+const ALL_PROVIDERS_VALUE = 'all'
 
-function roundMetric(value: number): number {
-  return Math.round(value * 100) / 100
+type ProviderFilterOption = {
+  providerId: string
+  provider: string
 }
 
 function formatHealth(value: number): string {
@@ -87,9 +88,7 @@ function filterLabelKey(filter: ModelStatusFilter): string {
   return statusLabelKey(filter)
 }
 
-function aggregateStatus(
-  models: ModelStatusItem[]
-): ModelHealthStatus {
+function aggregateStatus(models: ModelStatusItem[]): ModelHealthStatus {
   const knownModels = models.filter((model) => model.status !== 'unknown')
   if (knownModels.length === 0) return 'unknown'
   if (knownModels.some((model) => model.status === 'down')) return 'down'
@@ -111,9 +110,43 @@ function getModelStatusLevel(
   return 'healthy'
 }
 
+function normalizeStatusMetric(
+  value: number | null | undefined,
+  requestCount: number
+): number {
+  if (requestCount <= 0) return Number.NaN
+  return value ?? Number.NaN
+}
+
+function normalizeModelStatusGroup(
+  group: ModelStatusApiGroup
+): ModelStatusGroupMetric {
+  const requestCount = group.request_count ?? 0
+  const healthScore = normalizeStatusMetric(group.health_score, requestCount)
+  const successRate = normalizeStatusMetric(group.success_rate, requestCount)
+
+  return {
+    group: group.group,
+    healthScore,
+    fastestTtftMs: group.fastest_ttft_ms ?? Number.NaN,
+    slowestTtftMs: group.slowest_ttft_ms ?? Number.NaN,
+    successRate,
+    requestCount,
+    ttftSampleCount: group.ttft_sample_count,
+    lastUpdated: group.last_updated,
+    status:
+      group.status ??
+      group.health ??
+      getModelStatusLevel(healthScore, successRate),
+  }
+}
+
 function normalizeModelStatusItem(
   item: ModelStatusApiItem,
-  provider?: Pick<ModelStatusApiProvider, 'provider_id' | 'provider_name'>
+  provider?: Pick<
+    ModelStatusApiProvider,
+    'provider_id' | 'provider_name' | 'vendor_id'
+  >
 ): ModelStatusItem {
   const providerName =
     item.provider_name ??
@@ -121,8 +154,9 @@ function normalizeModelStatusItem(
     item.provider ??
     item.owner_by ??
     'Unknown'
-  const healthScore = item.health_score ?? Number.NaN
-  const successRate = item.success_rate ?? Number.NaN
+  const requestCount = item.request_count ?? 0
+  const healthScore = normalizeStatusMetric(item.health_score, requestCount)
+  const successRate = normalizeStatusMetric(item.success_rate, requestCount)
 
   return {
     providerId:
@@ -130,14 +164,20 @@ function normalizeModelStatusItem(
       provider?.provider_id ??
       `provider:${providerName.toLowerCase()}`,
     provider: providerName,
+    vendorId: item.vendor_id ?? provider?.vendor_id,
     modelName: item.model_name,
     healthScore,
     fastestTtftMs: item.fastest_ttft_ms ?? Number.NaN,
     slowestTtftMs: item.slowest_ttft_ms ?? Number.NaN,
     successRate,
-    requestCount: item.request_count ?? 0,
+    requestCount,
     ttftSampleCount: item.ttft_sample_count,
     lastUpdated: item.last_updated,
+    groups:
+      item.groups
+        ?.filter((group) => group.group !== '')
+        .map((group) => normalizeModelStatusGroup(group))
+        .sort((a, b) => a.group.localeCompare(b.group)) ?? [],
     status:
       item.status ??
       item.health ??
@@ -192,65 +232,37 @@ function buildProviderGroups(items: ModelStatusItem[]): ProviderStatusGroup[] {
       const models = [...entry[1].models].sort((a, b) =>
         a.modelName.localeCompare(b.modelName)
       )
-      const averageHealth = roundMetric(
-        average(
-          models
-            .map((model) => model.healthScore)
-            .filter((value) => Number.isFinite(value))
-        )
-      )
-      const averageSuccessRate = roundMetric(
-        average(
-          models
-            .map((model) => model.successRate)
-            .filter((value) => Number.isFinite(value))
-        )
-      )
 
       return {
         providerId: entry[0],
         provider: entry[1].provider,
         models,
-        averageHealth,
-        averageSuccessRate,
-        requestCount: models.reduce(
-          (sum, model) => sum + model.requestCount,
-          0
-        ),
         status: aggregateStatus(models),
       }
     })
     .sort((a, b) => a.provider.localeCompare(b.provider))
 }
 
-function buildPageStats(items: ModelStatusItem[]) {
-  const providers = new Set(items.map((item) => item.providerId))
-  const averageHealth = roundMetric(
-    average(
-      items
-        .map((item) => item.healthScore)
-        .filter((value) => Number.isFinite(value))
-    )
-  )
-  const averageSuccessRate = roundMetric(
-    average(
-      items
-        .map((item) => item.successRate)
-        .filter((value) => Number.isFinite(value))
-    )
-  )
-  const requestCount = items.reduce(
-    (sum, item) => sum + item.requestCount,
-    0
-  )
-
-  return {
-    providerCount: providers.size,
-    modelCount: items.length,
-    averageHealth,
-    averageSuccessRate,
-    requestCount,
+function buildProviderOptions(
+  items: ModelStatusItem[]
+): ProviderFilterOption[] {
+  const providers = new Map<string, string>()
+  for (const item of items) {
+    if (!providers.has(item.providerId)) {
+      providers.set(item.providerId, item.provider)
+    }
   }
+
+  return [...providers.entries()]
+    .map<ProviderFilterOption>((entry) => ({
+      providerId: entry[0],
+      provider: entry[1],
+    }))
+    .sort((a, b) => {
+      const providerSort = a.provider.localeCompare(b.provider)
+      if (providerSort !== 0) return providerSort
+      return a.providerId.localeCompare(b.providerId)
+    })
 }
 
 type ModelStatusContentProps = {
@@ -285,7 +297,7 @@ export function ModelStatus() {
   }, [modelStatusQuery.data])
 
   const lastUpdated =
-    modelStatusQuery.data?.data.last_updated ??
+    modelStatusQuery.data?.data.last_updated ||
     modelStatusQuery.data?.data.generated_at
 
   return (
@@ -306,25 +318,34 @@ export function ModelStatusContent(props: ModelStatusContentProps) {
   const { i18n, t } = useTranslation()
   const [searchQuery, setSearchQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<ModelStatusFilter>('all')
+  const [providerFilter, setProviderFilter] = useState(ALL_PROVIDERS_VALUE)
   const items = props.items
 
-  const pageStats = useMemo(() => buildPageStats(items), [items])
+  const providerOptions = useMemo(() => buildProviderOptions(items), [items])
+  const activeProviderFilter = providerOptions.some(
+    (option) => option.providerId === providerFilter
+  )
+    ? providerFilter
+    : ALL_PROVIDERS_VALUE
 
   const filteredItems = useMemo(() => {
     const keyword = searchQuery.trim().toLowerCase()
 
     return items.filter((item) => {
+      if (
+        activeProviderFilter !== ALL_PROVIDERS_VALUE &&
+        item.providerId !== activeProviderFilter
+      ) {
+        return false
+      }
       if (statusFilter !== 'all' && item.status !== statusFilter) {
         return false
       }
       if (keyword === '') return true
 
-      return (
-        item.provider.toLowerCase().includes(keyword) ||
-        item.modelName.toLowerCase().includes(keyword)
-      )
+      return item.modelName.toLowerCase().includes(keyword)
     })
-  }, [items, searchQuery, statusFilter])
+  }, [activeProviderFilter, items, searchQuery, statusFilter])
 
   const providerGroups = useMemo(
     () => buildProviderGroups(filteredItems),
@@ -395,36 +416,9 @@ export function ModelStatusContent(props: ModelStatusContentProps) {
         )}
         {!props.isLoading && !props.isError && (
           <>
-            <section
-              aria-label={t('Model status summary')}
-              className='grid gap-3 sm:grid-cols-2 lg:grid-cols-5'
-            >
-              <SummaryCard
-                label={t('Providers')}
-                value={pageStats.providerCount}
-              />
-              <SummaryCard label={t('Models')} value={pageStats.modelCount} />
-              <SummaryCard
-                label={t('Requests')}
-                value={pageStats.requestCount.toLocaleString()}
-              />
-              <SummaryCard
-                label={t('Average health')}
-                value={formatHealth(pageStats.averageHealth)}
-                valueClassName={healthTextClass(pageStats.averageHealth)}
-              />
-              <SummaryCard
-                label={t('Average success rate')}
-                value={formatUptimePct(pageStats.averageSuccessRate)}
-                valueClassName={getSuccessRateTextClass(
-                  pageStats.averageSuccessRate
-                )}
-              />
-            </section>
-
             <Card className='bg-card/80 backdrop-blur'>
               <CardContent className='space-y-4'>
-                <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]'>
+                <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(180px,240px)_auto]'>
                   <div>
                     <label className='sr-only' htmlFor='model-status-search'>
                       {t('Search model status')}
@@ -433,13 +427,39 @@ export function ModelStatusContent(props: ModelStatusContentProps) {
                       id='model-status-search'
                       value={searchQuery}
                       onChange={(event) => setSearchQuery(event.target.value)}
-                      placeholder={t('Search provider or model...')}
+                      placeholder={t('Search model name...')}
                     />
+                  </div>
+                  <div>
+                    <label className='sr-only' htmlFor='model-status-provider'>
+                      {t('Provider')}
+                    </label>
+                    <NativeSelect
+                      id='model-status-provider'
+                      className='w-full'
+                      value={activeProviderFilter}
+                      onChange={(event) =>
+                        setProviderFilter(event.target.value)
+                      }
+                      aria-label={t('Provider')}
+                    >
+                      <NativeSelectOption value={ALL_PROVIDERS_VALUE}>
+                        {t('All')}
+                      </NativeSelectOption>
+                      {providerOptions.map((option) => (
+                        <NativeSelectOption
+                          key={option.providerId}
+                          value={option.providerId}
+                        >
+                          {option.provider}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
                   </div>
                   <div
                     role='group'
                     aria-label={t('Health status filter')}
-                    className='flex flex-wrap gap-2'
+                    className='flex flex-wrap gap-2 lg:justify-end'
                   >
                     {STATUS_FILTERS.map((filter) => (
                       <Button
@@ -505,8 +525,8 @@ function ModelStatusLoading() {
 
   return (
     <div className='space-y-4' aria-label={t('Loading...')}>
-      <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-5'>
-        {Array.from({ length: 5 }, (_, index) => (
+      <div className='grid gap-3 sm:grid-cols-2'>
+        {Array.from({ length: 2 }, (_, index) => (
           <Card key={index} className='bg-card/80'>
             <CardContent className='space-y-3'>
               <Skeleton className='h-4 w-24' />
@@ -551,34 +571,12 @@ function ModelStatusError(props: { onRetry?: () => void }) {
   )
 }
 
-function SummaryCard(props: {
-  label: string
-  value: number | string
-  valueClassName?: string
-}) {
-  return (
-    <Card className='bg-card/80 backdrop-blur'>
-      <CardContent>
-        <div className='text-muted-foreground text-sm'>{props.label}</div>
-        <div
-          className={cn(
-            'mt-2 text-2xl font-semibold tabular-nums',
-            props.valueClassName
-          )}
-        >
-          {props.value}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
-
 function ProviderCard(props: { group: ProviderStatusGroup }) {
   const { t } = useTranslation()
 
   return (
     <Card className='bg-card/80 backdrop-blur'>
-      <CardHeader className='gap-3 sm:grid-cols-[1fr_auto]'>
+      <CardHeader>
         <div>
           <CardTitle className='flex flex-wrap items-center gap-2'>
             <span>{props.group.provider}</span>
@@ -589,18 +587,6 @@ function ProviderCard(props: { group: ProviderStatusGroup }) {
               count: props.group.models.length,
             })}
           </CardDescription>
-        </div>
-        <div className='grid grid-cols-2 gap-3 text-right text-sm sm:min-w-64'>
-          <ProviderMetric
-            label={t('Average health')}
-            value={formatHealth(props.group.averageHealth)}
-            className={healthTextClass(props.group.averageHealth)}
-          />
-          <ProviderMetric
-            label={t('Average success rate')}
-            value={formatUptimePct(props.group.averageSuccessRate)}
-            className={getSuccessRateTextClass(props.group.averageSuccessRate)}
-          />
         </div>
       </CardHeader>
 
@@ -625,85 +611,191 @@ function ProviderCard(props: { group: ProviderStatusGroup }) {
   )
 }
 
-function ProviderMetric(props: {
-  label: string
-  value: string
-  className?: string
-}) {
+function ModelRow(props: { item: ModelStatusItem }) {
+  const { t } = useTranslation()
+
   return (
-    <div>
-      <div className='text-muted-foreground text-xs'>{props.label}</div>
-      <div className={cn('mt-1 font-semibold tabular-nums', props.className)}>
-        {props.value}
+    <article className='px-4 py-4'>
+      <div className='grid gap-3 md:grid-cols-[minmax(220px,1.4fr)_minmax(170px,1fr)_120px_120px_120px] md:items-center md:gap-4'>
+        <div className='min-w-0'>
+          <div className='text-foreground truncate font-medium'>
+            {props.item.modelName}
+          </div>
+          <div className='mt-1 flex items-center gap-2'>
+            <span
+              aria-hidden
+              className={cn(
+                'size-1.5 rounded-full',
+                statusDotClass(props.item.status)
+              )}
+            />
+            <span className='text-muted-foreground text-xs'>
+              {t(statusLabelKey(props.item.status))}
+            </span>
+          </div>
+          {props.item.requestCount <= 0 && (
+            <p className='text-muted-foreground mt-2 text-xs'>
+              {t('Current model has no request data')}
+            </p>
+          )}
+        </div>
+
+        <div className='space-y-2'>
+          <div className='flex items-center justify-between gap-3 text-xs'>
+            <span className='text-muted-foreground md:hidden'>
+              {t('Health score')}
+            </span>
+            <span
+              className={cn(
+                'font-semibold tabular-nums md:ml-auto',
+                healthTextClass(props.item.healthScore)
+              )}
+            >
+              {formatHealth(props.item.healthScore)}
+            </span>
+          </div>
+          <Progress
+            value={
+              Number.isFinite(props.item.healthScore)
+                ? Math.max(0, Math.min(100, props.item.healthScore))
+                : 0
+            }
+            aria-label={t('{{model}} health score', {
+              model: props.item.modelName,
+            })}
+          />
+        </div>
+
+        <MetricBlock
+          label={t('Fastest first token')}
+          value={formatLatency(props.item.fastestTtftMs)}
+        />
+        <MetricBlock
+          label={t('Slowest first token')}
+          value={formatLatency(props.item.slowestTtftMs)}
+        />
+        <MetricBlock
+          label={t('Success rate')}
+          value={formatUptimePct(props.item.successRate)}
+          className={getSuccessRateTextClass(props.item.successRate)}
+          dotClassName={getSuccessRateDotClass(props.item.successRate)}
+        />
+      </div>
+
+      <ModelGroupMetrics item={props.item} />
+    </article>
+  )
+}
+
+function ModelGroupMetrics(props: { item: ModelStatusItem }) {
+  const { t } = useTranslation()
+
+  if (props.item.groups.length === 0) return null
+
+  const hasRequestData = props.item.groups.some(
+    (group) => group.requestCount > 0
+  )
+
+  if (!hasRequestData) {
+    return (
+      <div className='bg-muted/20 mt-4 rounded-lg border p-3'>
+        <div className='text-muted-foreground text-xs font-medium'>
+          {t('Groups')}
+        </div>
+        <div className='text-muted-foreground mt-3 text-sm'>
+          {t('All groups have no request data yet.')}
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className='bg-muted/20 mt-4 rounded-lg border p-3'>
+      <div className='text-muted-foreground text-xs font-medium'>
+        {t('Groups')}
+      </div>
+      <div className='mt-3 grid gap-3 lg:grid-cols-2 xl:grid-cols-3'>
+        {props.item.groups.map((group) => (
+          <GroupStatusCard
+            key={`${props.item.providerId}-${props.item.modelName}-${group.group}`}
+            group={group}
+          />
+        ))}
       </div>
     </div>
   )
 }
 
-function ModelRow(props: { item: ModelStatusItem }) {
+function GroupStatusCard(props: { group: ModelStatusGroupMetric }) {
   const { t } = useTranslation()
+  const hasRequestData = props.group.requestCount > 0
 
   return (
-    <article className='grid gap-3 px-4 py-4 md:grid-cols-[minmax(220px,1.4fr)_minmax(170px,1fr)_120px_120px_120px] md:items-center md:gap-4'>
-      <div className='min-w-0'>
-        <div className='text-foreground truncate font-medium'>
-          {props.item.modelName}
+    <div className='bg-background/70 rounded-lg border p-3'>
+      <div className='flex items-center justify-between gap-2'>
+        <div className='truncate text-sm font-medium'>{props.group.group}</div>
+        <StatusBadge status={props.group.status} />
+      </div>
+
+      {!hasRequestData ? (
+        <div className='text-muted-foreground mt-3 text-sm'>
+          {t('No data available')}
         </div>
-        <div className='mt-1 flex items-center gap-2'>
+      ) : (
+        <div className='mt-3 grid gap-2 sm:grid-cols-2'>
+          <GroupMetricBlock
+            label={t('Requests')}
+            value={props.group.requestCount.toLocaleString()}
+          />
+          <GroupMetricBlock
+            label={t('Health score')}
+            value={formatHealth(props.group.healthScore)}
+            className={healthTextClass(props.group.healthScore)}
+          />
+          <GroupMetricBlock
+            label={t('Success rate')}
+            value={formatUptimePct(props.group.successRate)}
+            className={getSuccessRateTextClass(props.group.successRate)}
+            dotClassName={getSuccessRateDotClass(props.group.successRate)}
+          />
+          <GroupMetricBlock
+            label={t('Fastest first token')}
+            value={formatLatency(props.group.fastestTtftMs)}
+          />
+          <GroupMetricBlock
+            label={t('Slowest first token')}
+            value={formatLatency(props.group.slowestTtftMs)}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GroupMetricBlock(props: {
+  label: string
+  value: string
+  className?: string
+  dotClassName?: string
+}) {
+  return (
+    <div>
+      <div className='text-muted-foreground text-xs'>{props.label}</div>
+      <div
+        className={cn(
+          'mt-1 inline-flex items-center gap-1.5 font-mono text-sm tabular-nums',
+          props.className
+        )}
+      >
+        {props.dotClassName && (
           <span
             aria-hidden
-            className={cn(
-              'size-1.5 rounded-full',
-              statusDotClass(props.item.status)
-            )}
+            className={cn('size-1.5 rounded-full', props.dotClassName)}
           />
-          <span className='text-muted-foreground text-xs'>
-            {t(statusLabelKey(props.item.status))}
-          </span>
-        </div>
+        )}
+        {props.value}
       </div>
-
-      <div className='space-y-2'>
-        <div className='flex items-center justify-between gap-3 text-xs'>
-          <span className='text-muted-foreground md:hidden'>
-            {t('Health score')}
-          </span>
-          <span
-            className={cn(
-              'font-semibold tabular-nums md:ml-auto',
-              healthTextClass(props.item.healthScore)
-            )}
-          >
-            {formatHealth(props.item.healthScore)}
-          </span>
-        </div>
-        <Progress
-          value={
-            Number.isFinite(props.item.healthScore)
-              ? Math.max(0, Math.min(100, props.item.healthScore))
-              : 0
-          }
-          aria-label={t('{{model}} health score', {
-            model: props.item.modelName,
-          })}
-        />
-      </div>
-
-      <MetricBlock
-        label={t('Fastest first token')}
-        value={formatLatency(props.item.fastestTtftMs)}
-      />
-      <MetricBlock
-        label={t('Slowest first token')}
-        value={formatLatency(props.item.slowestTtftMs)}
-      />
-      <MetricBlock
-        label={t('Success rate')}
-        value={formatUptimePct(props.item.successRate)}
-        className={getSuccessRateTextClass(props.item.successRate)}
-        dotClassName={getSuccessRateDotClass(props.item.successRate)}
-      />
-    </article>
+    </div>
   )
 }
 

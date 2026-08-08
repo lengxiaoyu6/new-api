@@ -32,6 +32,7 @@ const domGlobals = [
   'HTMLElement',
   'HTMLButtonElement',
   'HTMLInputElement',
+  'HTMLSelectElement',
   'SVGElement',
   'Node',
   'Element',
@@ -88,6 +89,26 @@ const statusItems: ModelStatusItem[] = [
     slowestTtftMs: 800,
     successRate: 99.5,
     requestCount: 120,
+    groups: [
+      {
+        group: 'default',
+        healthScore: 99,
+        fastestTtftMs: 120,
+        slowestTtftMs: 800,
+        successRate: 99.5,
+        requestCount: 100,
+        status: 'healthy',
+      },
+      {
+        group: 'vip',
+        healthScore: 100,
+        fastestTtftMs: 100,
+        slowestTtftMs: 700,
+        successRate: 100,
+        requestCount: 20,
+        status: 'healthy',
+      },
+    ],
     status: 'healthy',
   },
   {
@@ -99,6 +120,17 @@ const statusItems: ModelStatusItem[] = [
     slowestTtftMs: 4200,
     successRate: 92.25,
     requestCount: 80,
+    groups: [
+      {
+        group: 'default',
+        healthScore: 76,
+        fastestTtftMs: 880,
+        slowestTtftMs: 4200,
+        successRate: 92.25,
+        requestCount: 80,
+        status: 'degraded',
+      },
+    ],
     status: 'degraded',
   },
   {
@@ -110,6 +142,17 @@ const statusItems: ModelStatusItem[] = [
     slowestTtftMs: 0,
     successRate: 48.75,
     requestCount: 40,
+    groups: [
+      {
+        group: 'default',
+        healthScore: 24,
+        fastestTtftMs: 0,
+        slowestTtftMs: 0,
+        successRate: 48.75,
+        requestCount: 40,
+        status: 'down',
+      },
+    ],
     status: 'down',
   },
   {
@@ -121,6 +164,17 @@ const statusItems: ModelStatusItem[] = [
     slowestTtftMs: 3900,
     successRate: 95.2,
     requestCount: 60,
+    groups: [
+      {
+        group: 'vip',
+        healthScore: 83,
+        fastestTtftMs: 670,
+        slowestTtftMs: 3900,
+        successRate: 95.2,
+        requestCount: 60,
+        status: 'degraded',
+      },
+    ],
     status: 'degraded',
   },
 ]
@@ -161,12 +215,32 @@ function changeInputValue(input: HTMLInputElement, value: string) {
   )
 }
 
+function changeSelectValue(select: HTMLSelectElement, value: string) {
+  const valueSetter = Object.getOwnPropertyDescriptor(
+    domWindow.HTMLSelectElement.prototype,
+    'value'
+  )?.set
+  assert.ok(valueSetter)
+  valueSetter.call(select, value)
+  select.dispatchEvent(
+    new domWindow.Event('change', { bubbles: true }) as unknown as Event
+  )
+}
+
 function getSearchInput(container: ParentNode): HTMLInputElement {
   const searchInput = container.querySelector<HTMLInputElement>(
     '#model-status-search'
   )
   assert.ok(searchInput)
   return searchInput
+}
+
+function getProviderSelect(container: ParentNode): HTMLSelectElement {
+  const providerSelect = container.querySelector<HTMLSelectElement>(
+    '#model-status-provider'
+  )
+  assert.ok(providerSelect)
+  return providerSelect
 }
 
 function getButton(container: ParentNode, label: string): HTMLButtonElement {
@@ -211,16 +285,18 @@ describe('model status', () => {
 
       const rowTexts = getModelRowTexts(container)
       assert.equal(rowTexts.length, 4)
-      assert.ok(
-        rowTexts.some(
-          (rowText) =>
-            rowText.includes('alpha-fast') &&
-            rowText.includes('99%') &&
-            rowText.includes('120ms') &&
-            rowText.includes('800ms') &&
-            rowText.includes('99.50%')
-        )
+      const alphaFastRow = rowTexts.find((rowText) =>
+        rowText.includes('alpha-fast')
       )
+      assert.ok(alphaFastRow)
+      assert.ok(alphaFastRow.includes('99%'))
+      assert.ok(alphaFastRow.includes('120ms'))
+      assert.ok(alphaFastRow.includes('800ms'))
+      assert.ok(alphaFastRow.includes('99.50%'))
+      assert.ok(alphaFastRow.includes('Groups'))
+      assert.ok(alphaFastRow.includes('default'))
+      assert.ok(alphaFastRow.includes('vip'))
+      assert.ok(alphaFastRow.includes('Requests'))
       assert.ok(pageText.includes('Fastest first token'))
       assert.ok(pageText.includes('Slowest first token'))
       assert.ok(pageText.includes('Success rate'))
@@ -229,15 +305,39 @@ describe('model status', () => {
     }
   })
 
-  test('filters rows by provider or model keyword entered in the search field', async () => {
+  test('omits the summary cards while keeping provider groups visible', async () => {
     const { container, root } = await renderModelStatus()
 
     try {
-      const searchInput = getSearchInput(container)
-      assert.equal(searchInput.placeholder, 'Search provider or model...')
+      assert.equal(
+        container.querySelector('section[aria-label="Model status summary"]'),
+        null
+      )
+      const pageText = container.textContent ?? ''
+      assert.equal(pageText.includes('Average health'), false)
+      assert.equal(pageText.includes('Average success rate'), false)
+      const providerCards = [
+        ...container.querySelectorAll<HTMLElement>('[data-slot="card"]'),
+      ].filter((card) => card.textContent?.includes('models monitored'))
+      assert.equal(providerCards.length, 3)
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('filters rows by selected provider in the provider dropdown', async () => {
+    const { container, root } = await renderModelStatus()
+
+    try {
+      const providerSelect = getProviderSelect(container)
+      assert.equal(providerSelect.value, 'all')
+      const optionTexts = [
+        ...providerSelect.querySelectorAll<HTMLOptionElement>('option'),
+      ].map((option) => option.textContent)
+      assert.deepEqual(optionTexts, ['All', 'AlphaAI', 'BetaML', 'GammaWorks'])
 
       await act(async () => {
-        changeInputValue(searchInput, 'beta')
+        changeSelectValue(providerSelect, 'beta')
       })
 
       const rowTexts = getModelRowTexts(container)
@@ -245,6 +345,33 @@ describe('model status', () => {
       assert.ok(rowTexts[0].includes('beta-offline'))
       assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
       assert.equal((container.textContent ?? '').includes('gamma-lag'), false)
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('filters rows by model name keyword entered in the search field', async () => {
+    const { container, root } = await renderModelStatus()
+
+    try {
+      const searchInput = getSearchInput(container)
+      assert.equal(searchInput.placeholder, 'Search model name...')
+
+      await act(async () => {
+        changeInputValue(searchInput, 'reasoner')
+      })
+
+      const rowTexts = getModelRowTexts(container)
+      assert.equal(rowTexts.length, 1)
+      assert.ok(rowTexts[0].includes('alpha-reasoner'))
+      assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
+      assert.equal((container.textContent ?? '').includes('gamma-lag'), false)
+
+      await act(async () => {
+        changeInputValue(searchInput, 'AlphaAI')
+      })
+
+      assert.equal(getModelRowTexts(container).length, 0)
     } finally {
       await cleanupRendered(root, container)
     }
@@ -312,6 +439,7 @@ describe('model status', () => {
         slowestTtftMs: Number.NaN,
         successRate: Number.NaN,
         requestCount: 0,
+        groups: [],
         status: 'unknown',
       },
     ])
@@ -320,11 +448,110 @@ describe('model status', () => {
       const pageText = container.textContent ?? ''
       assert.ok(pageText.includes('DeltaAI'))
       assert.ok(pageText.includes('Unknown'))
+      assert.ok(pageText.includes('Current model has no request data'))
 
       const rowTexts = getModelRowTexts(container)
       assert.equal(rowTexts.length, 1)
       assert.ok(rowTexts[0].includes('delta-pending'))
       assert.ok(rowTexts[0].includes('—'))
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('renders group metrics when a group has no samples', async () => {
+    const { container, root } = await renderModelStatus([
+      {
+        providerId: 'epsilon',
+        provider: 'EpsilonAI',
+        modelName: 'epsilon-live',
+        healthScore: 95,
+        fastestTtftMs: 240,
+        slowestTtftMs: 900,
+        successRate: 99,
+        requestCount: 10,
+        groups: [
+          {
+            group: 'default',
+            healthScore: 95,
+            fastestTtftMs: 240,
+            slowestTtftMs: 900,
+            successRate: 99,
+            requestCount: 10,
+            status: 'healthy',
+          },
+          {
+            group: 'vip',
+            healthScore: Number.NaN,
+            fastestTtftMs: Number.NaN,
+            slowestTtftMs: Number.NaN,
+            successRate: Number.NaN,
+            requestCount: 0,
+            status: 'unknown',
+          },
+        ],
+        status: 'healthy',
+      },
+    ])
+
+    try {
+      const rowTexts = getModelRowTexts(container)
+      assert.equal(rowTexts.length, 1)
+      assert.ok(rowTexts[0].includes('epsilon-live'))
+      assert.ok(rowTexts[0].includes('default'))
+      assert.ok(rowTexts[0].includes('vip'))
+      assert.ok(rowTexts[0].includes('No data available'))
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('shows the all-groups message when every group has no samples', async () => {
+    const { container, root } = await renderModelStatus([
+      {
+        providerId: 'zeta',
+        provider: 'ZetaAI',
+        modelName: 'zeta-empty',
+        healthScore: Number.NaN,
+        fastestTtftMs: Number.NaN,
+        slowestTtftMs: Number.NaN,
+        successRate: Number.NaN,
+        requestCount: 0,
+        groups: [
+          {
+            group: 'default',
+            healthScore: Number.NaN,
+            fastestTtftMs: Number.NaN,
+            slowestTtftMs: Number.NaN,
+            successRate: Number.NaN,
+            requestCount: 0,
+            status: 'unknown',
+          },
+          {
+            group: 'vip',
+            healthScore: Number.NaN,
+            fastestTtftMs: Number.NaN,
+            slowestTtftMs: Number.NaN,
+            successRate: Number.NaN,
+            requestCount: 0,
+            status: 'unknown',
+          },
+        ],
+        status: 'unknown',
+      },
+    ])
+
+    try {
+      const pageText = container.textContent ?? ''
+      assert.ok(pageText.includes('All groups have no request data yet.'))
+      assert.equal(
+        pageText.includes('No data available'),
+        false
+      )
+      assert.equal(
+        container.querySelectorAll('article').length,
+        1
+      )
     } finally {
       await cleanupRendered(root, container)
     }
@@ -343,6 +570,21 @@ describe('model status', () => {
     } finally {
       await cleanupRendered(root, container)
       await i18n.changeLanguage('en')
+    }
+  })
+
+  test('omits the last update text when the update value is empty', async () => {
+    const { container, root } = await renderModelStatus(statusItems, {
+      lastUpdated: '',
+    })
+
+    try {
+      assert.equal(
+        (container.textContent ?? '').includes('Last updated:'),
+        false
+      )
+    } finally {
+      await cleanupRendered(root, container)
     }
   })
 })

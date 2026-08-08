@@ -1,6 +1,7 @@
 package perfmetrics
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -24,13 +25,20 @@ func setupModelStatusTestDB(t *testing.T) {
 
 	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+	require.NoError(t, db.AutoMigrate(
+		&model.PerfMetric{},
+		&model.Ability{},
+		&model.Channel{},
+		&model.Model{},
+		&model.Vendor{},
+	))
 
 	model.DB = db
 	model.LOG_DB = db
 	common.RedisEnabled = false
 	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
 	hotBuckets = sync.Map{}
+	model.InvalidatePricingCache()
 
 	t.Cleanup(func() {
 		model.DB = oldDB
@@ -38,19 +46,75 @@ func setupModelStatusTestDB(t *testing.T) {
 		common.RedisEnabled = oldRedisEnabled
 		common.SetMainDatabaseType(oldMainDatabaseType)
 		hotBuckets = sync.Map{}
+		model.InvalidatePricingCache()
 	})
 }
 
-func TestQueryModelStatusGroupsByChannelTypeAndMergesHotBuckets(t *testing.T) {
+type modelStatusCatalogFixture struct {
+	OpenAIVendorID int
+	ClaudeVendorID int
+	IdleVendorID   int
+	OpenAIProvider string
+	ClaudeProvider string
+	IdleProvider   string
+}
+
+func insertModelStatusCatalogFixture(t *testing.T) modelStatusCatalogFixture {
+	t.Helper()
+
+	vendors := []model.Vendor{
+		{Name: "CatalogOpenAI", Status: 1},
+		{Name: "CatalogClaude", Status: 1},
+		{Name: "CatalogIdle", Status: 1},
+	}
+	require.NoError(t, model.DB.Create(&vendors).Error)
+
+	models := []model.Model{
+		{ModelName: "gpt-test", VendorID: vendors[0].Id, Status: 1, NameRule: model.NameRuleExact},
+		{ModelName: "claude-test", VendorID: vendors[1].Id, Status: 1, NameRule: model.NameRuleExact},
+		{ModelName: "idle-test", VendorID: vendors[2].Id, Status: 1, NameRule: model.NameRuleExact},
+		{ModelName: "vip-only", VendorID: vendors[2].Id, Status: 1, NameRule: model.NameRuleExact},
+	}
+	require.NoError(t, model.DB.Create(&models).Error)
+
+	channels := []model.Channel{
+		{Type: constant.ChannelTypeOpenAI, Key: "openai-key", Status: 1, Name: "openai-channel"},
+		{Type: constant.ChannelTypeAnthropic, Key: "anthropic-key", Status: 1, Name: "anthropic-channel"},
+	}
+	require.NoError(t, model.DB.Create(&channels).Error)
+
+	abilities := []model.Ability{
+		{Group: "default", Model: "gpt-test", ChannelId: channels[1].Id, Enabled: true},
+		{Group: "vip", Model: "gpt-test", ChannelId: channels[1].Id, Enabled: true},
+		{Group: "default", Model: "claude-test", ChannelId: channels[0].Id, Enabled: true},
+		{Group: "default", Model: "idle-test", ChannelId: channels[0].Id, Enabled: true},
+		{Group: "vip", Model: "idle-test", ChannelId: channels[0].Id, Enabled: true},
+		{Group: "vip", Model: "vip-only", ChannelId: channels[0].Id, Enabled: true},
+	}
+	require.NoError(t, model.DB.Create(&abilities).Error)
+	model.InvalidatePricingCache()
+
+	return modelStatusCatalogFixture{
+		OpenAIVendorID: vendors[0].Id,
+		ClaudeVendorID: vendors[1].Id,
+		IdleVendorID:   vendors[2].Id,
+		OpenAIProvider: fmt.Sprintf("vendor:%d", vendors[0].Id),
+		ClaudeProvider: fmt.Sprintf("vendor:%d", vendors[1].Id),
+		IdleProvider:   fmt.Sprintf("vendor:%d", vendors[2].Id),
+	}
+}
+
+func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	setupModelStatusTestDB(t)
+	fixture := insertModelStatusCatalogFixture(t)
 
 	currentBucket := bucketStart(time.Now().Unix())
-	previousBucket := currentBucket - 3600
+	previousBucket := currentBucket - 600
 	require.NoError(t, model.DB.Create([]model.PerfMetric{
 		{
 			ModelName:      "gpt-test",
 			Group:          "default",
-			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelType:    constant.ChannelTypeAnthropic,
 			BucketTs:       previousBucket,
 			RequestCount:   6,
 			SuccessCount:   6,
@@ -63,7 +127,7 @@ func TestQueryModelStatusGroupsByChannelTypeAndMergesHotBuckets(t *testing.T) {
 		{
 			ModelName:      "gpt-test",
 			Group:          "vip",
-			ChannelType:    constant.ChannelTypeOpenAI,
+			ChannelType:    constant.ChannelTypeAnthropic,
 			BucketTs:       previousBucket,
 			RequestCount:   4,
 			SuccessCount:   3,
@@ -74,7 +138,7 @@ func TestQueryModelStatusGroupsByChannelTypeAndMergesHotBuckets(t *testing.T) {
 			SlowestTtftMs:  1500,
 		},
 		{
-			ModelName:    "legacy-test",
+			ModelName:    "stale-test",
 			Group:        "default",
 			ChannelType:  0,
 			BucketTs:     previousBucket,
@@ -89,21 +153,25 @@ func TestQueryModelStatusGroupsByChannelTypeAndMergesHotBuckets(t *testing.T) {
 	hotBuckets.Store(bucketKey{
 		model:       "claude-test",
 		group:       "default",
-		channelType: constant.ChannelTypeAnthropic,
+		channelType: constant.ChannelTypeOpenAI,
 		bucketTs:    currentBucket,
 	}, bucket)
 
 	result, err := QueryModelStatus(ModelStatusQueryParams{Hours: 24, Groups: []string{"default", "vip"}})
 	require.NoError(t, err)
-	require.Len(t, result.Models, 3)
+	require.Len(t, result.Models, 4)
 	require.Len(t, result.Providers, 3)
 	assert.Equal(t, 24, result.WindowHours)
-	assert.Equal(t, formatStatusTime(currentBucket), result.LastUpdated)
+	assert.Equal(t, formatStatusTime(result.GeneratedAt), result.LastUpdated)
+	assert.NotEmpty(t, result.LastUpdated)
+	assert.False(t, hasModelStatusItem(result.Models, "stale-test"))
 
-	openAIModel := requireModelStatusItem(t, result.Models, constant.ChannelTypeOpenAI, "gpt-test")
-	assert.Equal(t, "OpenAI", openAIModel.Provider)
-	assert.Equal(t, "OpenAI", openAIModel.ProviderName)
-	assert.Equal(t, "channel:1", openAIModel.ProviderID)
+	openAIModel := requireModelStatusItem(t, result.Models, "gpt-test")
+	assert.Equal(t, "CatalogOpenAI", openAIModel.Provider)
+	assert.Equal(t, "CatalogOpenAI", openAIModel.ProviderName)
+	assert.Equal(t, fixture.OpenAIProvider, openAIModel.ProviderID)
+	assert.Equal(t, fixture.OpenAIVendorID, openAIModel.VendorID)
+	assert.Equal(t, 0, openAIModel.ChannelType)
 	assert.Equal(t, int64(120), openAIModel.FastestTtftMs)
 	assert.Equal(t, int64(1500), openAIModel.SlowestTtftMs)
 	assert.Equal(t, int64(10), openAIModel.RequestCount)
@@ -112,37 +180,57 @@ func TestQueryModelStatusGroupsByChannelTypeAndMergesHotBuckets(t *testing.T) {
 	assert.InDelta(t, openAIModel.SuccessRate, openAIModel.HealthScore, 0.001)
 	assert.Equal(t, "degraded", openAIModel.Status)
 	assert.Equal(t, formatStatusTime(previousBucket), openAIModel.LastUpdated)
+	require.Len(t, openAIModel.Groups, 2)
+	defaultGroup := requireModelStatusGroup(t, openAIModel.Groups, "default")
+	assert.Equal(t, int64(6), defaultGroup.RequestCount)
+	assert.Equal(t, "healthy", defaultGroup.Status)
+	vipGroup := requireModelStatusGroup(t, openAIModel.Groups, "vip")
+	assert.Equal(t, int64(4), vipGroup.RequestCount)
+	assert.Equal(t, "down", vipGroup.Status)
 
-	anthropicModel := requireModelStatusItem(t, result.Models, constant.ChannelTypeAnthropic, "claude-test")
-	assert.Equal(t, "Anthropic", anthropicModel.Provider)
-	assert.Equal(t, int64(90), anthropicModel.FastestTtftMs)
-	assert.Equal(t, int64(700), anthropicModel.SlowestTtftMs)
-	assert.Equal(t, int64(2), anthropicModel.RequestCount)
-	assert.Equal(t, "healthy", anthropicModel.Status)
-	assert.Equal(t, formatStatusTime(currentBucket), anthropicModel.LastUpdated)
+	claudeModel := requireModelStatusItem(t, result.Models, "claude-test")
+	assert.Equal(t, "CatalogClaude", claudeModel.Provider)
+	assert.Equal(t, fixture.ClaudeProvider, claudeModel.ProviderID)
+	assert.Equal(t, int64(90), claudeModel.FastestTtftMs)
+	assert.Equal(t, int64(700), claudeModel.SlowestTtftMs)
+	assert.Equal(t, int64(2), claudeModel.RequestCount)
+	assert.Equal(t, "healthy", claudeModel.Status)
+	assert.Equal(t, formatStatusTime(currentBucket), claudeModel.LastUpdated)
 
-	legacyModel := requireModelStatusItem(t, result.Models, 0, "legacy-test")
-	assert.Equal(t, "Unknown", legacyModel.Provider)
-	assert.Equal(t, int64(0), legacyModel.FastestTtftMs)
-	assert.Equal(t, int64(0), legacyModel.SlowestTtftMs)
-	assert.Equal(t, "down", legacyModel.Status)
+	idleModel := requireModelStatusItem(t, result.Models, "idle-test")
+	assert.Equal(t, "CatalogIdle", idleModel.Provider)
+	assert.Equal(t, fixture.IdleProvider, idleModel.ProviderID)
+	assert.Equal(t, int64(0), idleModel.RequestCount)
+	assert.Equal(t, int64(0), idleModel.FastestTtftMs)
+	assert.Equal(t, int64(0), idleModel.SlowestTtftMs)
+	assert.Equal(t, "unknown", idleModel.Status)
+	require.Len(t, idleModel.Groups, 2)
+	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "default").Status)
+	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "vip").Status)
 
-	openAIProvider := requireModelStatusProvider(t, result.Providers, constant.ChannelTypeOpenAI)
-	assert.Equal(t, "OpenAI", openAIProvider.Provider)
+	openAIProvider := requireModelStatusProvider(t, result.Providers, fixture.OpenAIProvider)
+	assert.Equal(t, "CatalogOpenAI", openAIProvider.Provider)
 	assert.Equal(t, int64(10), openAIProvider.RequestCount)
 	assert.Equal(t, int64(120), openAIProvider.FastestTtftMs)
 	assert.Equal(t, int64(1500), openAIProvider.SlowestTtftMs)
 	assert.Equal(t, "degraded", openAIProvider.Status)
 	require.Len(t, openAIProvider.Models, 1)
+
+	idleProvider := requireModelStatusProvider(t, result.Providers, fixture.IdleProvider)
+	assert.Equal(t, "CatalogIdle", idleProvider.Provider)
+	assert.Equal(t, int64(0), idleProvider.RequestCount)
+	assert.Equal(t, "unknown", idleProvider.Status)
+	require.Len(t, idleProvider.Models, 2)
 }
 
-func TestQueryModelStatusAppliesGroupFilter(t *testing.T) {
+func TestQueryModelStatusAppliesGroupFilterToCatalogGroups(t *testing.T) {
 	setupModelStatusTestDB(t)
+	insertModelStatusCatalogFixture(t)
 
-	bucketTs := bucketStart(time.Now().Unix()) - 3600
+	bucketTs := bucketStart(time.Now().Unix()) - 600
 	require.NoError(t, model.DB.Create([]model.PerfMetric{
 		{
-			ModelName:    "default-model",
+			ModelName:    "gpt-test",
 			Group:        "default",
 			ChannelType:  constant.ChannelTypeOpenAI,
 			BucketTs:     bucketTs,
@@ -150,49 +238,75 @@ func TestQueryModelStatusAppliesGroupFilter(t *testing.T) {
 			SuccessCount: 1,
 		},
 		{
-			ModelName:    "vip-model",
+			ModelName:    "gpt-test",
 			Group:        "vip",
 			ChannelType:  constant.ChannelTypeOpenAI,
 			BucketTs:     bucketTs,
-			RequestCount: 1,
-			SuccessCount: 1,
+			RequestCount: 9,
+			SuccessCount: 0,
 		},
 	}).Error)
 
 	result, err := QueryModelStatus(ModelStatusQueryParams{Hours: 24, Groups: []string{"default"}})
 	require.NoError(t, err)
-	require.Len(t, result.Models, 1)
-	assert.Equal(t, "default-model", result.Models[0].ModelName)
+	assert.False(t, hasModelStatusItem(result.Models, "vip-only"))
+
+	item := requireModelStatusItem(t, result.Models, "gpt-test")
+	require.Len(t, item.Groups, 1)
+	assert.Equal(t, "default", item.Groups[0].Group)
+	assert.Equal(t, int64(1), item.RequestCount)
+	assert.Equal(t, "healthy", item.Status)
 }
 
-func TestQueryModelStatusReturnsEmptyCollectionsWithoutMetrics(t *testing.T) {
+func TestQueryModelStatusReturnsEmptyCollectionsWithoutCatalogModels(t *testing.T) {
 	setupModelStatusTestDB(t)
 
 	result, err := QueryModelStatus(ModelStatusQueryParams{Hours: 24, Groups: []string{"default"}})
 	require.NoError(t, err)
 	assert.Empty(t, result.Models)
 	assert.Empty(t, result.Providers)
-	assert.Empty(t, result.LastUpdated)
+	assert.Equal(t, formatStatusTime(result.GeneratedAt), result.LastUpdated)
+	assert.NotEmpty(t, result.LastUpdated)
 }
 
-func requireModelStatusItem(t *testing.T, items []ModelStatusItem, channelType int, modelName string) ModelStatusItem {
+func requireModelStatusItem(t *testing.T, items []ModelStatusItem, modelName string) ModelStatusItem {
 	t.Helper()
 	for _, item := range items {
-		if item.ChannelType == channelType && item.ModelName == modelName {
+		if item.ModelName == modelName {
 			return item
 		}
 	}
-	require.Failf(t, "model status item missing", "channel_type=%d model=%s", channelType, modelName)
+	require.Failf(t, "model status item missing", "model=%s", modelName)
 	return ModelStatusItem{}
 }
 
-func requireModelStatusProvider(t *testing.T, providers []ModelStatusProvider, channelType int) ModelStatusProvider {
+func hasModelStatusItem(items []ModelStatusItem, modelName string) bool {
+	for _, item := range items {
+		if item.ModelName == modelName {
+			return true
+		}
+	}
+	return false
+}
+
+func requireModelStatusGroup(t *testing.T, groups []ModelStatusGroup, groupName string) ModelStatusGroup {
+	t.Helper()
+	for _, group := range groups {
+		if group.Group == groupName {
+			return group
+		}
+	}
+	require.Failf(t, "model status group missing", "group=%s", groupName)
+	return ModelStatusGroup{}
+}
+
+func requireModelStatusProvider(t *testing.T, providers []ModelStatusProvider, providerID string) ModelStatusProvider {
 	t.Helper()
 	for _, provider := range providers {
-		if provider.ChannelType == channelType {
+		if provider.ProviderID == providerID {
 			return provider
 		}
 	}
-	require.Failf(t, "model status provider missing", "channel_type=%d", channelType)
+	require.Failf(t, "model status provider missing", "provider_id=%s", providerID)
 	return ModelStatusProvider{}
 }
