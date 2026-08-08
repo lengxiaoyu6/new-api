@@ -25,9 +25,11 @@ import (
 // Request / Response structures
 // ============================
 
-// submitResponse is the xAI video submission response. The task identifier is
-// returned as request_id (unlike the Sora/OpenAI id/task_id convention).
+// submitResponse is the xAI video submission response. The native task
+// identifier is request_id; id is accepted for compatibility with older relay
+// shapes.
 type submitResponse struct {
+	ID        string         `json:"id"`
 	RequestID string         `json:"request_id"`
 	Error     *upstreamError `json:"error,omitempty"`
 }
@@ -36,13 +38,21 @@ type submitResponse struct {
 //
 //	{"status":"pending","progress":1}
 //	{"status":"done","progress":100,"video":{"duration":8,"url":"/v1/videos/<id>/content"}}
-//
-// The video result URL is intentionally not parsed here: on success the content
-// proxy rebuilds the authenticated content URL from the upstream task ID.
 type fetchResponse struct {
-	Status   string         `json:"status"`
-	Progress int            `json:"progress"`
-	Error    *upstreamError `json:"error,omitempty"`
+	Status   string `json:"status"`
+	Progress int    `json:"progress"`
+	VideoURL string `json:"video_url,omitempty"`
+	Video    struct {
+		URL string `json:"url"`
+	} `json:"video"`
+	Error *upstreamError `json:"error,omitempty"`
+}
+
+func (r fetchResponse) resultURL() string {
+	if r.Video.URL != "" {
+		return r.Video.URL
+	}
+	return r.VideoURL
 }
 
 type upstreamError struct {
@@ -148,8 +158,12 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 		taskErr = service.TaskErrorWrapper(fmt.Errorf("%s", dResp.Error.Message), "task_submit_failed", http.StatusInternalServerError)
 		return
 	}
-	if dResp.RequestID == "" {
-		taskErr = service.TaskErrorWrapper(fmt.Errorf("request_id is empty"), "invalid_response", http.StatusInternalServerError)
+	upstreamTaskID := dResp.RequestID
+	if upstreamTaskID == "" {
+		upstreamTaskID = dResp.ID
+	}
+	if upstreamTaskID == "" {
+		taskErr = service.TaskErrorWrapper(fmt.Errorf("request_id/id is empty"), "invalid_response", http.StatusInternalServerError)
 		return
 	}
 
@@ -161,7 +175,7 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	openAIVideo.Status = videodto.VideoStatusQueued
 	c.JSON(http.StatusOK, openAIVideo)
 
-	return dResp.RequestID, responseBody, nil
+	return upstreamTaskID, responseBody, nil
 }
 
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
@@ -201,17 +215,15 @@ func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, e
 
 	taskResult := relaycommon.TaskInfo{Code: 0}
 
-	switch strings.ToLower(resTask.Status) {
+	switch strings.ToLower(strings.TrimSpace(resTask.Status)) {
 	case "pending", "queued":
 		taskResult.Status = model.TaskStatusQueued
 	case "processing", "in_progress", "running":
 		taskResult.Status = model.TaskStatusInProgress
-	case "done", "completed", "success":
+	case "done", "completed", "success", "succeeded":
 		taskResult.Status = model.TaskStatusSuccess
-		// Url intentionally left empty — the content proxy builds the
-		// authenticated /v1/videos/{id}/content URL from the upstream task ID,
-		// which matches xAI's video.url (often a relative content path).
-	case "failed", "error", "cancelled":
+		taskResult.Url = resTask.resultURL()
+	case "failed", "failure", "error", "cancelled", "canceled", "expired":
 		taskResult.Status = model.TaskStatusFailure
 		if resTask.Error != nil && resTask.Error.Message != "" {
 			taskResult.Reason = resTask.Error.Message
@@ -237,7 +249,17 @@ func (a *TaskAdaptor) ConvertToOpenAIVideo(task *model.Task) ([]byte, error) {
 	openAIVideo.Model = task.Properties.OriginModelName
 	openAIVideo.CreatedAt = task.CreatedAt
 	openAIVideo.CompletedAt = task.UpdatedAt
-	openAIVideo.SetMetadata("url", task.GetResultURL())
+
+	resultURL := task.GetResultURL()
+	if len(task.Data) > 0 {
+		resTask := fetchResponse{}
+		if err := common.Unmarshal(task.Data, &resTask); err == nil {
+			if dataURL := resTask.resultURL(); dataURL != "" {
+				resultURL = dataURL
+			}
+		}
+	}
+	openAIVideo.SetMetadata("url", resultURL)
 
 	if task.Status == model.TaskStatusFailure && task.FailReason != "" {
 		openAIVideo.Error = &videodto.OpenAIVideoError{Message: task.FailReason}
