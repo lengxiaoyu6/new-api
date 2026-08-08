@@ -1,6 +1,9 @@
 package perfmetrics
 
-import "sync/atomic"
+import (
+	"math"
+	"sync/atomic"
+)
 
 type Store interface {
 	Record(sample Sample)
@@ -10,6 +13,7 @@ type Store interface {
 type Sample struct {
 	Model        string
 	Group        string
+	ChannelType  int
 	LatencyMs    int64
 	TtftMs       int64
 	HasTtft      bool
@@ -61,9 +65,10 @@ type SummaryAllResult struct {
 }
 
 type bucketKey struct {
-	model    string
-	group    string
-	bucketTs int64
+	model       string
+	group       string
+	channelType int
+	bucketTs    int64
 }
 
 type counters struct {
@@ -72,6 +77,8 @@ type counters struct {
 	totalLatencyMs int64
 	ttftSumMs      int64
 	ttftCount      int64
+	fastestTtftMs  int64
+	slowestTtftMs  int64
 	outputTokens   int64
 	generationMs   int64
 }
@@ -82,8 +89,16 @@ type atomicBucket struct {
 	totalLatencyMs atomic.Int64
 	ttftSumMs      atomic.Int64
 	ttftCount      atomic.Int64
+	fastestTtftMs  atomic.Int64
+	slowestTtftMs  atomic.Int64
 	outputTokens   atomic.Int64
 	generationMs   atomic.Int64
+}
+
+func newAtomicBucket() *atomicBucket {
+	bucket := &atomicBucket{}
+	bucket.fastestTtftMs.Store(math.MaxInt64)
+	return bucket
 }
 
 func (b *atomicBucket) add(sample Sample) {
@@ -97,6 +112,8 @@ func (b *atomicBucket) add(sample Sample) {
 	if sample.HasTtft && sample.TtftMs >= 0 {
 		b.ttftSumMs.Add(sample.TtftMs)
 		b.ttftCount.Add(1)
+		b.updateFastestTtft(sample.TtftMs)
+		b.updateSlowestTtft(sample.TtftMs)
 	}
 	if sample.OutputTokens > 0 && sample.GenerationMs > 0 {
 		b.outputTokens.Add(sample.OutputTokens)
@@ -111,6 +128,8 @@ func (b *atomicBucket) snapshot() counters {
 		totalLatencyMs: b.totalLatencyMs.Load(),
 		ttftSumMs:      b.ttftSumMs.Load(),
 		ttftCount:      b.ttftCount.Load(),
+		fastestTtftMs:  normalizeFastestTtft(b.fastestTtftMs.Load()),
+		slowestTtftMs:  b.slowestTtftMs.Load(),
 		outputTokens:   b.outputTokens.Load(),
 		generationMs:   b.generationMs.Load(),
 	}
@@ -123,6 +142,8 @@ func (b *atomicBucket) drain() counters {
 		totalLatencyMs: b.totalLatencyMs.Swap(0),
 		ttftSumMs:      b.ttftSumMs.Swap(0),
 		ttftCount:      b.ttftCount.Swap(0),
+		fastestTtftMs:  normalizeFastestTtft(b.fastestTtftMs.Swap(math.MaxInt64)),
+		slowestTtftMs:  b.slowestTtftMs.Swap(0),
 		outputTokens:   b.outputTokens.Swap(0),
 		generationMs:   b.generationMs.Swap(0),
 	}
@@ -144,10 +165,47 @@ func (b *atomicBucket) addCounters(c counters) {
 	if c.ttftCount != 0 {
 		b.ttftCount.Add(c.ttftCount)
 	}
+	if c.ttftCount != 0 {
+		b.updateFastestTtft(c.fastestTtftMs)
+	}
+	if c.ttftCount != 0 {
+		b.updateSlowestTtft(c.slowestTtftMs)
+	}
 	if c.outputTokens != 0 {
 		b.outputTokens.Add(c.outputTokens)
 	}
 	if c.generationMs != 0 {
 		b.generationMs.Add(c.generationMs)
 	}
+}
+
+func (b *atomicBucket) updateFastestTtft(value int64) {
+	for {
+		current := b.fastestTtftMs.Load()
+		if current <= value {
+			return
+		}
+		if b.fastestTtftMs.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
+func (b *atomicBucket) updateSlowestTtft(value int64) {
+	for {
+		current := b.slowestTtftMs.Load()
+		if current >= value {
+			return
+		}
+		if b.slowestTtftMs.CompareAndSwap(current, value) {
+			return
+		}
+	}
+}
+
+func normalizeFastestTtft(value int64) int64 {
+	if value == math.MaxInt64 {
+		return 0
+	}
+	return value
 }

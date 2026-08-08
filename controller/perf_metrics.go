@@ -73,6 +73,33 @@ func GetPerfMetrics(c *gin.Context) {
 	})
 }
 
+func GetModelStatus(c *gin.Context) {
+	hours := 24
+	if rawHours := c.Query("hours"); rawHours != "" {
+		if parsed, err := strconv.Atoi(rawHours); err == nil {
+			hours = parsed
+		}
+	}
+
+	activeGroups := append(lo.Keys(ratio_setting.GetGroupRatioCopy()), "auto")
+	result, err := perfmetrics.QueryModelStatus(perfmetrics.ModelStatusQueryParams{
+		Hours:  hours,
+		Groups: activeGroups,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    result,
+	})
+}
+
 func filterActiveGroups(groups []perfmetrics.GroupResult) []perfmetrics.GroupResult {
 	activeRatios := ratio_setting.GetGroupRatioCopy()
 	return lo.Filter(groups, func(g perfmetrics.GroupResult, _ int) bool {

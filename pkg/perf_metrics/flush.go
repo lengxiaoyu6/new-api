@@ -41,18 +41,21 @@ func flushCompletedBuckets() {
 		err := model.UpsertPerfMetric(&model.PerfMetric{
 			ModelName:      k.model,
 			Group:          k.group,
+			ChannelType:    k.channelType,
 			BucketTs:       k.bucketTs,
 			RequestCount:   drained.requestCount,
 			SuccessCount:   drained.successCount,
 			TotalLatencyMs: drained.totalLatencyMs,
 			TtftSumMs:      drained.ttftSumMs,
 			TtftCount:      drained.ttftCount,
+			FastestTtftMs:  drained.fastestTtftMs,
+			SlowestTtftMs:  drained.slowestTtftMs,
 			OutputTokens:   drained.outputTokens,
 			GenerationMs:   drained.generationMs,
 		})
 		if err != nil {
 			bucket.addCounters(drained)
-			common.SysError(fmt.Sprintf("failed to flush perf metric bucket model=%s group=%s bucket=%d: %s", k.model, k.group, k.bucketTs, err.Error()))
+			common.SysError(fmt.Sprintf("failed to flush perf metric bucket model=%s group=%s channel=%d bucket=%d: %s", k.model, k.group, k.channelType, k.bucketTs, err.Error()))
 			return true
 		}
 
@@ -84,6 +87,8 @@ func redisCounters(values map[string]string) counters {
 		totalLatencyMs: parseRedisInt(values["lat"]),
 		ttftSumMs:      parseRedisInt(values["ttft"]),
 		ttftCount:      parseRedisInt(values["ttft_n"]),
+		fastestTtftMs:  parseRedisInt(values["ttft_min"]),
+		slowestTtftMs:  parseRedisInt(values["ttft_max"]),
 		outputTokens:   parseRedisInt(values["out"]),
 		generationMs:   parseRedisInt(values["gen_ms"]),
 	}

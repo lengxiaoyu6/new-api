@@ -23,9 +23,16 @@ export const STATIC_I18N_KEYS = [
   'Home',
   'Console',
   'Model Square',
+  'Model Status',
   'Rankings',
   'Docs',
   'About',
+
+  // Model status
+  'Degraded',
+  'Down',
+  'Healthy',
+  'Unknown',
 
   // Sidebar views (drill-in workspaces)
   'System Settings',

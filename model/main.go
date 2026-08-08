@@ -296,6 +296,9 @@ func migrateDB() error {
 	if err != nil {
 		return err
 	}
+	if err := migratePerfMetricIndexes(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -377,6 +380,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migratePerfMetricIndexes(); err != nil {
+		return err
+	}
 	if err := InitializeUserAuthVersions(); err != nil {
 		return err
 	}
@@ -393,6 +399,29 @@ func migrateDBFast() error {
 		}
 	}
 	common.SysLog("database migrated")
+	return nil
+}
+
+func migratePerfMetricIndexes() error {
+	migrator := DB.Migrator()
+	const legacyIndexName = "idx_perf_model_group_bucket"
+	const currentIndexName = "idx_perf_model_group_channel_bucket"
+
+	if migrator.HasColumn(&PerfMetric{}, "channel_type") {
+		if err := DB.Model(&PerfMetric{}).Where("channel_type IS NULL").Update("channel_type", 0).Error; err != nil {
+			return err
+		}
+	}
+	if migrator.HasIndex(&PerfMetric{}, legacyIndexName) {
+		if err := migrator.DropIndex(&PerfMetric{}, legacyIndexName); err != nil {
+			return err
+		}
+	}
+	if !migrator.HasIndex(&PerfMetric{}, currentIndexName) {
+		if err := migrator.CreateIndex(&PerfMetric{}, currentIndexName); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
