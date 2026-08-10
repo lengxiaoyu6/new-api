@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, CornerDownRight } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -172,10 +172,10 @@ function ModelRow(props: { item: ModelStatusItem }) {
       </article>
       {hasGroups && (
         <CollapsibleContent
-          className='bg-muted/10 border-border/70 border-t px-4 py-3 sm:pl-[4.5rem]'
+          className='bg-muted/10 border-border/70 border-t'
           data-group-details
         >
-          <div className='grid gap-2 lg:grid-cols-2'>
+          <div className='divide-border divide-y'>
             {props.item.groups.map((group) => (
               <GroupDetail key={group.group} group={group} />
             ))}
@@ -190,15 +190,25 @@ function GroupDetail(props: { group: ModelStatusGroupMetric }) {
   const { t } = useTranslation()
 
   return (
-    <div className='bg-background/70 border-border/70 rounded-md border px-3 py-2.5'>
-      <div className='mb-2 truncate text-sm font-medium'>
-        {props.group.group}
+    <div
+      data-group-row={props.group.group}
+      className={cn(
+        'grid gap-2 px-4 py-2.5 sm:pl-6 lg:items-center lg:gap-4',
+        MODEL_STATUS_GRID
+      )}
+    >
+      <div className='text-muted-foreground flex min-w-0 items-center gap-2 pl-8'>
+        <CornerDownRight aria-hidden className='size-3.5 shrink-0' />
+        <span className='text-foreground/80 truncate text-xs font-medium'>
+          {props.group.group}
+        </span>
       </div>
       <TrendTimeline
         values={props.group.recentSuccessRates}
         currentValue={props.group.successRate}
         label={`${props.group.group}: ${t('24h trend')}`}
         emptyLabel={t('No data yet')}
+        compact
       />
     </div>
   )

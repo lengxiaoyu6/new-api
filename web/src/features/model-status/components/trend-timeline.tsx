@@ -25,6 +25,7 @@ export function TrendTimeline(props: {
   currentValue: number
   label: string
   emptyLabel: string
+  compact?: boolean
 }) {
   const values = props.values.slice(-MAX_TREND_BARS)
   const hasData = values.some(Number.isFinite)
@@ -35,10 +36,15 @@ export function TrendTimeline(props: {
     ? values
     : Array.from({ length: MAX_TREND_BARS }, () => Number.NaN)
   const bars = buildTrendBars(timelineValues)
-  const timelineWidth = Math.min(bars.length * 5, 480)
+  const timelineWidth = Math.min(bars.length * (props.compact ? 4 : 5), 480)
 
   return (
-    <div className='flex min-w-0 items-center gap-3'>
+    <div
+      className={cn(
+        'flex min-w-0 items-center',
+        props.compact ? 'gap-2' : 'gap-3'
+      )}
+    >
       <div
         role='img'
         aria-label={
@@ -46,7 +52,10 @@ export function TrendTimeline(props: {
             ? `${props.label}: ${formatTrendRate(currentValue)}`
             : `${props.label}: ${props.emptyLabel}`
         }
-        className='flex h-8 max-w-full min-w-0 shrink items-center gap-px overflow-hidden'
+        className={cn(
+          'flex max-w-full min-w-0 shrink items-center gap-px overflow-hidden',
+          props.compact ? 'h-6' : 'h-8'
+        )}
         style={{ width: `${timelineWidth}px` }}
       >
         {bars.map((bar) => (
@@ -59,7 +68,8 @@ export function TrendTimeline(props: {
             }
             aria-hidden
             className={cn(
-              'h-6 min-w-[1px] max-w-1 flex-1 rounded-[1px] transition-opacity hover:opacity-70',
+              'min-w-[1px] flex-1 rounded-[1px] transition-opacity hover:opacity-70',
+              props.compact ? 'h-4 max-w-[3px]' : 'h-6 max-w-1',
               trendBarClass(bar.value)
             )}
           />
@@ -67,7 +77,8 @@ export function TrendTimeline(props: {
       </div>
       <span
         className={cn(
-          'w-14 shrink-0 text-right font-mono text-sm font-semibold tabular-nums',
+          'w-14 shrink-0 text-right font-mono font-semibold tabular-nums',
+          props.compact ? 'text-xs' : 'text-sm',
           trendTextClass(currentValue)
         )}
       >

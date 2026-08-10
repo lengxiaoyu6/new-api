@@ -368,6 +368,7 @@ describe('model status (public page)', () => {
       assert.ok(details.textContent?.includes('48.0%'))
       assert.equal(details.textContent?.includes('Requests'), false)
       assert.equal(details.querySelectorAll('[role="img"]').length, 2)
+      assert.equal(details.querySelectorAll('[data-group-row]').length, 2)
     } finally {
       await cleanupRendered(root, container)
     }
