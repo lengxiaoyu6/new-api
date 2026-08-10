@@ -89,6 +89,7 @@ var EmailLoginAuthServerList = []string{
 
 var DebugEnabled bool
 var MemoryCacheEnabled bool
+var SkipDatabaseMigration bool
 
 var LogConsumeEnabled = true
 

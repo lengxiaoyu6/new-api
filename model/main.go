@@ -200,6 +200,10 @@ func InitDB() (err error) {
 		if common.UsingMainDatabase(common.DatabaseTypeMySQL) {
 			//_, _ = sqlDB.Exec("ALTER TABLE channels MODIFY model_mapping TEXT;") // TODO: delete this line when most users have upgraded
 		}
+		if common.SkipDatabaseMigration {
+			common.SysLog("SKIP_DB_MIGRATION set, database migration skipped")
+			return nil
+		}
 		common.SysLog("database migration started")
 		err = migrateDB()
 		return err
@@ -239,6 +243,10 @@ func InitLogDB() (err error) {
 		sqlDB.SetConnMaxLifetime(time.Second * time.Duration(common.GetEnvOrDefault("SQL_MAX_LIFETIME", 60)))
 
 		if !common.IsMasterNode {
+			return nil
+		}
+		if common.SkipDatabaseMigration {
+			common.SysLog("SKIP_DB_MIGRATION set, log database migration skipped")
 			return nil
 		}
 		common.SysLog("database migration started")
