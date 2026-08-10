@@ -43,6 +43,7 @@
     "{{count}} days remaining": "剩餘 {{count}} 日",
     "{{count}} disabled channel(s) deleted": "已刪除 {{count}} 個已停用的渠道",
     "{{count}} FAQ entries will be removed from the list.": "將從列表中移除 {{count}} 個 FAQ 條目。",
+    "{{count}} groups": "{{count}} 個分組",
     "{{count}} hours ago": "{{count}} 小時前",
     "{{count}} incidents": "{{count}} 宗事件",
     "{{count}} incidents in the last 24 hours": "最近 24 小時 {{count}} 個異常桶",

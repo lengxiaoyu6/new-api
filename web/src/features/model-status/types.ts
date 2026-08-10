@@ -31,6 +31,7 @@ export type ModelStatusGroupMetric = {
   requestCount: number
   ttftSampleCount?: number
   lastUpdated?: string | number
+  recentSuccessRates: number[]
   status: ModelHealthStatus
 }
 
@@ -62,6 +63,7 @@ export type ModelStatusApiGroup = {
   request_count?: number
   ttft_sample_count?: number
   last_updated?: string | number
+  recent_success_rates?: number[]
 }
 
 export type ModelStatusApiItem = {

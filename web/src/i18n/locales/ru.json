@@ -43,6 +43,7 @@
     "{{count}} days remaining": "Осталось {{count}} дней",
     "{{count}} disabled channel(s) deleted": "Удалено {{count}} отключённых каналов",
     "{{count}} FAQ entries will be removed from the list.": "{{count}} записей FAQ будут удалены из списка.",
+    "{{count}} groups": "{{count}} групп",
     "{{count}} hours ago": "{{count}} часов назад",
     "{{count}} incidents": "{{count}} инцидентов",
     "{{count}} incidents in the last 24 hours": "{{count}} инцидентов за последние 24 часа",

@@ -22,7 +22,7 @@ import { after, describe, test } from 'node:test'
 import { Window } from 'happy-dom'
 import type { Root } from 'react-dom/client'
 
-import type { ModelStatusItem } from '../types'
+import type { ModelStatusGroupMetric, ModelStatusItem } from '../types'
 
 const domWindow = new Window()
 const domGlobals = [
@@ -92,6 +92,22 @@ function makeItem(
     requestCount: 120,
     recentSuccessRates: [99, 99.4, 99.5, 99.8],
     groups: [],
+    status: 'healthy',
+    ...overrides,
+  }
+}
+
+function makeGroup(
+  overrides: Partial<ModelStatusGroupMetric> = {}
+): ModelStatusGroupMetric {
+  return {
+    group: 'default',
+    healthScore: 99,
+    fastestTtftMs: 120,
+    slowestTtftMs: 800,
+    successRate: 99.5,
+    requestCount: 120,
+    recentSuccessRates: [99, 99.4, 99.5, 99.8],
     status: 'healthy',
     ...overrides,
   }
@@ -311,6 +327,47 @@ describe('model status (public page)', () => {
       assert.ok(
         (container.textContent ?? '').includes('Some models are unstable')
       )
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('expands a model row to show its group trend timelines', async () => {
+    const { container, root } = await renderModelStatus([
+      makeItem({
+        modelName: 'alpha-grouped',
+        groups: [
+          makeGroup({ group: 'default' }),
+          makeGroup({
+            group: 'vip',
+            status: 'down',
+            healthScore: 48,
+            successRate: 48,
+            requestCount: 6,
+            recentSuccessRates: [72, 60, 48],
+          }),
+        ],
+      }),
+    ])
+
+    try {
+      const trigger = container.querySelector<HTMLButtonElement>(
+        '[data-group-trigger]'
+      )
+      assert.ok(trigger)
+      assert.equal(trigger.getAttribute('aria-expanded'), 'false')
+      assert.ok(trigger.textContent?.includes('2 groups'))
+
+      await act(async () => trigger.click())
+
+      assert.equal(trigger.getAttribute('aria-expanded'), 'true')
+      const details = container.querySelector('[data-group-details]')
+      assert.ok(details)
+      assert.ok(details.textContent?.includes('default'))
+      assert.ok(details.textContent?.includes('vip'))
+      assert.ok(details.textContent?.includes('48.0%'))
+      assert.equal(details.textContent?.includes('Requests'), false)
+      assert.equal(details.querySelectorAll('[role="img"]').length, 2)
     } finally {
       await cleanupRendered(root, container)
     }

@@ -16,12 +16,19 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { ChevronDown } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Card } from '@/components/ui/card'
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible'
 import { cn } from '@/lib/utils'
 
-import type { ModelStatusItem } from '../types'
+import type { ModelStatusGroupMetric, ModelStatusItem } from '../types'
 import { TrendTimeline } from './trend-timeline'
 
 const MODEL_STATUS_GRID = 'lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,1.3fr)]'
@@ -100,44 +107,99 @@ export function ModelList(props: { items: ModelStatusItem[] }) {
 
 function ModelRow(props: { item: ModelStatusItem }) {
   const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+  const hasGroups = props.item.groups.length > 0
 
   return (
-    <article
-      className='hover:bg-muted/25 px-4 py-3.5 transition-colors sm:pl-6'
-      data-status={props.item.status}
-      data-model={props.item.modelName}
-    >
-      <div
-        className={cn(
-          'grid gap-4 lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,1.3fr)] lg:items-center'
-        )}
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <article
+        className='hover:bg-muted/25 px-4 py-3.5 transition-colors sm:pl-6'
+        data-status={props.item.status}
+        data-model={props.item.modelName}
       >
-        <div className='flex min-w-0 items-center gap-3'>
-          <div
-            aria-hidden
-            className='bg-muted text-muted-foreground ring-border grid size-8 shrink-0 place-items-center rounded-md text-xs font-semibold uppercase ring-1'
-          >
-            {props.item.modelName.trim().charAt(0) || '?'}
-          </div>
-          <div className='min-w-0'>
+        <div
+          className={cn(
+            'grid gap-4 lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,1.3fr)] lg:items-center'
+          )}
+        >
+          <div className='flex min-w-0 items-center gap-3'>
             <div
-              className='text-foreground truncate font-mono text-sm font-semibold'
-              title={props.item.modelName}
+              aria-hidden
+              className='bg-muted text-muted-foreground ring-border grid size-8 shrink-0 place-items-center rounded-md text-xs font-semibold uppercase ring-1'
             >
-              {props.item.modelName}
+              {props.item.modelName.trim().charAt(0) || '?'}
+            </div>
+            <div className='flex min-w-0 items-center gap-2'>
+              <div
+                className='text-foreground min-w-0 truncate font-mono text-sm font-semibold'
+                title={props.item.modelName}
+              >
+                {props.item.modelName}
+              </div>
+              {hasGroups && (
+                <CollapsibleTrigger
+                  type='button'
+                  data-group-trigger
+                  className='text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-ring/50 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[11px] transition-colors outline-none focus-visible:ring-2'
+                  aria-label={t(open ? 'Collapse' : 'Expand')}
+                  title={t(open ? 'Collapse' : 'Expand')}
+                >
+                  {t('{{count}} groups', {
+                    count: props.item.groups.length,
+                  })}
+                  <ChevronDown
+                    aria-hidden
+                    className={cn(
+                      'size-3 transition-transform',
+                      open && 'rotate-180'
+                    )}
+                  />
+                </CollapsibleTrigger>
+              )}
             </div>
           </div>
+
+          <TrendTimeline
+            values={props.item.recentSuccessRates}
+            currentValue={props.item.successRate}
+            label={t('24h trend')}
+            emptyLabel={t('No data yet')}
+          />
+          {props.item.status === 'unknown' && (
+            <span className='sr-only'>{t('This model has no data yet')}</span>
+          )}
         </div>
-        <TrendTimeline
-          values={props.item.recentSuccessRates}
-          currentValue={props.item.successRate}
-          label={t('24h trend')}
-          emptyLabel={t('No data yet')}
-        />
-        {props.item.status === 'unknown' && (
-          <span className='sr-only'>{t('This model has no data yet')}</span>
-        )}
+      </article>
+      {hasGroups && (
+        <CollapsibleContent
+          className='bg-muted/10 border-border/70 border-t px-4 py-3 sm:pl-[4.5rem]'
+          data-group-details
+        >
+          <div className='grid gap-2 lg:grid-cols-2'>
+            {props.item.groups.map((group) => (
+              <GroupDetail key={group.group} group={group} />
+            ))}
+          </div>
+        </CollapsibleContent>
+      )}
+    </Collapsible>
+  )
+}
+
+function GroupDetail(props: { group: ModelStatusGroupMetric }) {
+  const { t } = useTranslation()
+
+  return (
+    <div className='bg-background/70 border-border/70 rounded-md border px-3 py-2.5'>
+      <div className='mb-2 truncate text-sm font-medium'>
+        {props.group.group}
       </div>
-    </article>
+      <TrendTimeline
+        values={props.group.recentSuccessRates}
+        currentValue={props.group.successRate}
+        label={`${props.group.group}: ${t('24h trend')}`}
+        emptyLabel={t('No data yet')}
+      />
+    </div>
   )
 }

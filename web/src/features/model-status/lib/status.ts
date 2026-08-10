@@ -92,6 +92,8 @@ function normalizeModelStatusGroup(
     requestCount,
     ttftSampleCount: group.ttft_sample_count,
     lastUpdated: group.last_updated,
+    recentSuccessRates:
+      group.recent_success_rates?.filter(Number.isFinite) ?? [],
     status:
       group.status ??
       group.health ??

@@ -185,9 +185,11 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	defaultGroup := requireModelStatusGroup(t, openAIModel.Groups, "default")
 	assert.Equal(t, int64(6), defaultGroup.RequestCount)
 	assert.Equal(t, "healthy", defaultGroup.Status)
+	assert.Equal(t, []float64{100}, defaultGroup.RecentSuccessRates)
 	vipGroup := requireModelStatusGroup(t, openAIModel.Groups, "vip")
 	assert.Equal(t, int64(4), vipGroup.RequestCount)
 	assert.Equal(t, "down", vipGroup.Status)
+	assert.Equal(t, []float64{75}, vipGroup.RecentSuccessRates)
 
 	claudeModel := requireModelStatusItem(t, result.Models, "claude-test")
 	assert.Equal(t, "CatalogClaude", claudeModel.Provider)
@@ -210,6 +212,8 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	require.Len(t, idleModel.Groups, 2)
 	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "default").Status)
 	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "vip").Status)
+	assert.Empty(t, requireModelStatusGroup(t, idleModel.Groups, "default").RecentSuccessRates)
+	assert.Empty(t, requireModelStatusGroup(t, idleModel.Groups, "vip").RecentSuccessRates)
 
 	openAIProvider := requireModelStatusProvider(t, result.Providers, fixture.OpenAIProvider)
 	assert.Equal(t, "CatalogOpenAI", openAIProvider.Provider)

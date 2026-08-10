@@ -61,16 +61,17 @@ type ModelStatusItem struct {
 }
 
 type ModelStatusGroup struct {
-	Group           string  `json:"group"`
-	Health          string  `json:"health"`
-	Status          string  `json:"status"`
-	HealthScore     float64 `json:"health_score"`
-	FastestTtftMs   int64   `json:"fastest_ttft_ms"`
-	SlowestTtftMs   int64   `json:"slowest_ttft_ms"`
-	SuccessRate     float64 `json:"success_rate"`
-	RequestCount    int64   `json:"request_count"`
-	TtftSampleCount int64   `json:"ttft_sample_count"`
-	LastUpdated     string  `json:"last_updated"`
+	Group              string    `json:"group"`
+	Health             string    `json:"health"`
+	Status             string    `json:"status"`
+	HealthScore        float64   `json:"health_score"`
+	FastestTtftMs      int64     `json:"fastest_ttft_ms"`
+	SlowestTtftMs      int64     `json:"slowest_ttft_ms"`
+	SuccessRate        float64   `json:"success_rate"`
+	RequestCount       int64     `json:"request_count"`
+	TtftSampleCount    int64     `json:"ttft_sample_count"`
+	LastUpdated        string    `json:"last_updated"`
+	RecentSuccessRates []float64 `json:"recent_success_rates,omitempty"`
 }
 
 type modelStatusKey struct {
@@ -116,6 +117,7 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 	catalog := buildModelStatusCatalog(model.GetPricing(), model.GetVendors(), params.Groups)
 	groupTotals := make(map[modelStatusKey]modelStatusAccumulator)
 	modelBuckets := make(map[string]map[int64]counters)
+	groupBuckets := make(map[modelStatusKey]map[int64]counters)
 	allowedGroups := allowedGroupSet(params.Groups)
 	for _, row := range rows {
 		value := counters{
@@ -129,7 +131,9 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 			outputTokens:   row.OutputTokens,
 			generationMs:   row.GenerationMs,
 		}
-		addModelStatusCounters(groupTotals, modelStatusKey{modelName: row.ModelName, group: row.Group}, value, row.BucketTs)
+		groupKey := modelStatusKey{modelName: row.ModelName, group: row.Group}
+		addModelStatusCounters(groupTotals, groupKey, value, row.BucketTs)
+		mergeModelStatusGroupBucket(groupBuckets, groupKey, row.BucketTs, value)
 		mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, value)
 	}
 
@@ -147,7 +151,9 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 		if snapshot.requestCount == 0 {
 			return true
 		}
-		addModelStatusCounters(groupTotals, modelStatusKey{modelName: k.model, group: k.group}, snapshot, k.bucketTs)
+		groupKey := modelStatusKey{modelName: k.model, group: k.group}
+		addModelStatusCounters(groupTotals, groupKey, snapshot, k.bucketTs)
+		mergeModelStatusGroupBucket(groupBuckets, groupKey, k.bucketTs, snapshot)
 		mergeModelBucket(modelBuckets, k.model, k.bucketTs, snapshot)
 		return true
 	})
@@ -160,9 +166,11 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 		total := modelStatusAccumulator{}
 		groups := make([]ModelStatusGroup, 0, len(catalogItem.groups))
 		for _, group := range catalogItem.groups {
-			groupTotal := groupTotals[modelStatusKey{modelName: catalogItem.modelName, group: group}]
+			groupKey := modelStatusKey{modelName: catalogItem.modelName, group: group}
+			groupTotal := groupTotals[groupKey]
 			addStatusAccumulatorCounters(&total, groupTotal.counters, groupTotal.lastUpdated)
-			groups = append(groups, buildModelStatusGroup(group, groupTotal))
+			groupTrend := statusTrendRates(groupBuckets[groupKey], modelStatusTrendPoints)
+			groups = append(groups, buildModelStatusGroup(group, groupTotal, groupTrend))
 		}
 
 		item := buildModelStatusItem(catalogItem, total, groups, statusTrendRates(modelBuckets[catalogItem.modelName], modelStatusTrendPoints))
@@ -231,6 +239,30 @@ func addStatusAccumulatorCounters(current *modelStatusAccumulator, value counter
 	}
 }
 
+func mergeModelStatusGroupBucket(
+	buckets map[modelStatusKey]map[int64]counters,
+	key modelStatusKey,
+	bucketTs int64,
+	value counters,
+) {
+	if value.requestCount == 0 {
+		return
+	}
+	if buckets[key] == nil {
+		buckets[key] = map[int64]counters{}
+	}
+	current := buckets[key][bucketTs]
+	current.requestCount += value.requestCount
+	current.successCount += value.successCount
+	current.totalLatencyMs += value.totalLatencyMs
+	current.ttftSumMs += value.ttftSumMs
+	current.ttftCount += value.ttftCount
+	mergeTtftBounds(&current, value)
+	current.outputTokens += value.outputTokens
+	current.generationMs += value.generationMs
+	buckets[key][bucketTs] = current
+}
+
 func buildModelStatusItem(catalogItem modelStatusCatalogItem, total modelStatusAccumulator, groups []ModelStatusGroup, trend []float64) ModelStatusItem {
 	status := statusForCounters(total.counters)
 	successRateValue := roundStatusMetric(successRate(total.counters))
@@ -255,20 +287,21 @@ func buildModelStatusItem(catalogItem modelStatusCatalogItem, total modelStatusA
 	}
 }
 
-func buildModelStatusGroup(group string, total modelStatusAccumulator) ModelStatusGroup {
+func buildModelStatusGroup(group string, total modelStatusAccumulator, trend []float64) ModelStatusGroup {
 	status := statusForCounters(total.counters)
 	successRateValue := roundStatusMetric(successRate(total.counters))
 	return ModelStatusGroup{
-		Group:           group,
-		Health:          status,
-		Status:          status,
-		HealthScore:     successRateValue,
-		FastestTtftMs:   statusFastestTtft(total.counters),
-		SlowestTtftMs:   statusSlowestTtft(total.counters),
-		SuccessRate:     successRateValue,
-		RequestCount:    total.requestCount,
-		TtftSampleCount: total.ttftCount,
-		LastUpdated:     formatStatusTime(total.lastUpdated),
+		Group:              group,
+		Health:             status,
+		Status:             status,
+		HealthScore:        successRateValue,
+		FastestTtftMs:      statusFastestTtft(total.counters),
+		SlowestTtftMs:      statusSlowestTtft(total.counters),
+		SuccessRate:        successRateValue,
+		RequestCount:       total.requestCount,
+		TtftSampleCount:    total.ttftCount,
+		LastUpdated:        formatStatusTime(total.lastUpdated),
+		RecentSuccessRates: trend,
 	}
 }
 
