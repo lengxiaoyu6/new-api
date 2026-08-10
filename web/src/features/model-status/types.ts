@@ -20,6 +20,8 @@ export type ModelHealthStatus = 'healthy' | 'degraded' | 'down' | 'unknown'
 
 export type ModelStatusFilter = Exclude<ModelHealthStatus, 'unknown'> | 'all'
 
+export type ModelStatusSort = 'status' | 'name'
+
 export type ModelStatusGroupMetric = {
   group: string
   healthScore: number
@@ -44,6 +46,7 @@ export type ModelStatusItem = {
   requestCount: number
   ttftSampleCount?: number
   lastUpdated?: string | number
+  recentSuccessRates: number[]
   groups: ModelStatusGroupMetric[]
   status: ModelHealthStatus
 }
@@ -77,6 +80,7 @@ export type ModelStatusApiItem = {
   ttft_sample_count?: number
   owner_by?: string
   last_updated?: string | number
+  recent_success_rates?: number[]
   groups?: ModelStatusApiGroup[]
   status?: ModelHealthStatus
 }
@@ -107,4 +111,9 @@ export type ProviderStatusGroup = {
   provider: string
   models: ModelStatusItem[]
   status: ModelHealthStatus
+}
+
+export type ProviderFilterOption = {
+  providerId: string
+  provider: string
 }

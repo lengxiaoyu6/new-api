@@ -180,6 +180,7 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	assert.InDelta(t, openAIModel.SuccessRate, openAIModel.HealthScore, 0.001)
 	assert.Equal(t, "degraded", openAIModel.Status)
 	assert.Equal(t, formatStatusTime(previousBucket), openAIModel.LastUpdated)
+	assert.Equal(t, []float64{90}, openAIModel.RecentSuccessRates)
 	require.Len(t, openAIModel.Groups, 2)
 	defaultGroup := requireModelStatusGroup(t, openAIModel.Groups, "default")
 	assert.Equal(t, int64(6), defaultGroup.RequestCount)
@@ -196,6 +197,7 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	assert.Equal(t, int64(2), claudeModel.RequestCount)
 	assert.Equal(t, "healthy", claudeModel.Status)
 	assert.Equal(t, formatStatusTime(currentBucket), claudeModel.LastUpdated)
+	assert.Equal(t, []float64{100}, claudeModel.RecentSuccessRates)
 
 	idleModel := requireModelStatusItem(t, result.Models, "idle-test")
 	assert.Equal(t, "CatalogIdle", idleModel.Provider)
@@ -204,6 +206,7 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	assert.Equal(t, int64(0), idleModel.FastestTtftMs)
 	assert.Equal(t, int64(0), idleModel.SlowestTtftMs)
 	assert.Equal(t, "unknown", idleModel.Status)
+	assert.Empty(t, idleModel.RecentSuccessRates)
 	require.Len(t, idleModel.Groups, 2)
 	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "default").Status)
 	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "vip").Status)
@@ -267,6 +270,29 @@ func TestQueryModelStatusReturnsEmptyCollectionsWithoutCatalogModels(t *testing.
 	assert.Empty(t, result.Providers)
 	assert.Equal(t, formatStatusTime(result.GeneratedAt), result.LastUpdated)
 	assert.NotEmpty(t, result.LastUpdated)
+}
+
+func TestStatusTrendRatesOrdersByTimeAndDownsamplesEvenly(t *testing.T) {
+	buckets := make(map[int64]counters)
+	for i := int64(0); i < 10; i++ {
+		// requestCount 10, successCount increments → rates 10, 20, ... 100.
+		buckets[1000+i*600] = counters{requestCount: 10, successCount: i + 1}
+	}
+
+	all := statusTrendRates(buckets, 0)
+	assert.Nil(t, all)
+
+	full := statusTrendRates(buckets, 20)
+	require.Len(t, full, 10)
+	assert.Equal(t, 10.0, full[0])
+	assert.Equal(t, 100.0, full[9])
+
+	downsampled := statusTrendRates(buckets, 4)
+	require.Len(t, downsampled, 4)
+	assert.Equal(t, 10.0, downsampled[0])
+	assert.Equal(t, 100.0, downsampled[3])
+
+	assert.Nil(t, statusTrendRates(nil, 4))
 }
 
 func requireModelStatusItem(t *testing.T, items []ModelStatusItem, modelName string) ModelStatusItem {

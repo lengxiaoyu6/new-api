@@ -41,22 +41,23 @@ type ModelStatusProvider struct {
 }
 
 type ModelStatusItem struct {
-	ProviderID      string             `json:"provider_id"`
-	ProviderName    string             `json:"provider_name"`
-	Provider        string             `json:"provider"`
-	VendorID        int                `json:"vendor_id,omitempty"`
-	ChannelType     int                `json:"channel_type"`
-	ModelName       string             `json:"model_name"`
-	Health          string             `json:"health"`
-	Status          string             `json:"status"`
-	HealthScore     float64            `json:"health_score"`
-	FastestTtftMs   int64              `json:"fastest_ttft_ms"`
-	SlowestTtftMs   int64              `json:"slowest_ttft_ms"`
-	SuccessRate     float64            `json:"success_rate"`
-	RequestCount    int64              `json:"request_count"`
-	TtftSampleCount int64              `json:"ttft_sample_count"`
-	LastUpdated     string             `json:"last_updated"`
-	Groups          []ModelStatusGroup `json:"groups"`
+	ProviderID         string             `json:"provider_id"`
+	ProviderName       string             `json:"provider_name"`
+	Provider           string             `json:"provider"`
+	VendorID           int                `json:"vendor_id,omitempty"`
+	ChannelType        int                `json:"channel_type"`
+	ModelName          string             `json:"model_name"`
+	Health             string             `json:"health"`
+	Status             string             `json:"status"`
+	HealthScore        float64            `json:"health_score"`
+	FastestTtftMs      int64              `json:"fastest_ttft_ms"`
+	SlowestTtftMs      int64              `json:"slowest_ttft_ms"`
+	SuccessRate        float64            `json:"success_rate"`
+	RequestCount       int64              `json:"request_count"`
+	TtftSampleCount    int64              `json:"ttft_sample_count"`
+	LastUpdated        string             `json:"last_updated"`
+	RecentSuccessRates []float64          `json:"recent_success_rates,omitempty"`
+	Groups             []ModelStatusGroup `json:"groups"`
 }
 
 type ModelStatusGroup struct {
@@ -114,6 +115,7 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 
 	catalog := buildModelStatusCatalog(model.GetPricing(), model.GetVendors(), params.Groups)
 	groupTotals := make(map[modelStatusKey]modelStatusAccumulator)
+	modelBuckets := make(map[string]map[int64]counters)
 	allowedGroups := allowedGroupSet(params.Groups)
 	for _, row := range rows {
 		value := counters{
@@ -128,6 +130,7 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 			generationMs:   row.GenerationMs,
 		}
 		addModelStatusCounters(groupTotals, modelStatusKey{modelName: row.ModelName, group: row.Group}, value, row.BucketTs)
+		mergeModelBucket(modelBuckets, row.ModelName, row.BucketTs, value)
 	}
 
 	hotBuckets.Range(func(key, value any) bool {
@@ -145,6 +148,7 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 			return true
 		}
 		addModelStatusCounters(groupTotals, modelStatusKey{modelName: k.model, group: k.group}, snapshot, k.bucketTs)
+		mergeModelBucket(modelBuckets, k.model, k.bucketTs, snapshot)
 		return true
 	})
 
@@ -161,7 +165,7 @@ func QueryModelStatus(params ModelStatusQueryParams) (ModelStatusResponse, error
 			groups = append(groups, buildModelStatusGroup(group, groupTotal))
 		}
 
-		item := buildModelStatusItem(catalogItem, total, groups)
+		item := buildModelStatusItem(catalogItem, total, groups, statusTrendRates(modelBuckets[catalogItem.modelName], modelStatusTrendPoints))
 		items = append(items, item)
 		modelsByProvider[item.ProviderID] = append(modelsByProvider[item.ProviderID], item)
 		current := providerTotals[item.ProviderID]
@@ -227,26 +231,27 @@ func addStatusAccumulatorCounters(current *modelStatusAccumulator, value counter
 	}
 }
 
-func buildModelStatusItem(catalogItem modelStatusCatalogItem, total modelStatusAccumulator, groups []ModelStatusGroup) ModelStatusItem {
+func buildModelStatusItem(catalogItem modelStatusCatalogItem, total modelStatusAccumulator, groups []ModelStatusGroup, trend []float64) ModelStatusItem {
 	status := statusForCounters(total.counters)
 	successRateValue := roundStatusMetric(successRate(total.counters))
 	return ModelStatusItem{
-		ProviderID:      catalogItem.providerID,
-		ProviderName:    catalogItem.providerName,
-		Provider:        catalogItem.providerName,
-		VendorID:        catalogItem.vendorID,
-		ChannelType:     0,
-		ModelName:       catalogItem.modelName,
-		Health:          status,
-		Status:          status,
-		HealthScore:     successRateValue,
-		FastestTtftMs:   statusFastestTtft(total.counters),
-		SlowestTtftMs:   statusSlowestTtft(total.counters),
-		SuccessRate:     successRateValue,
-		RequestCount:    total.requestCount,
-		TtftSampleCount: total.ttftCount,
-		LastUpdated:     formatStatusTime(total.lastUpdated),
-		Groups:          groups,
+		ProviderID:         catalogItem.providerID,
+		ProviderName:       catalogItem.providerName,
+		Provider:           catalogItem.providerName,
+		VendorID:           catalogItem.vendorID,
+		ChannelType:        0,
+		ModelName:          catalogItem.modelName,
+		Health:             status,
+		Status:             status,
+		HealthScore:        successRateValue,
+		FastestTtftMs:      statusFastestTtft(total.counters),
+		SlowestTtftMs:      statusSlowestTtft(total.counters),
+		SuccessRate:        successRateValue,
+		RequestCount:       total.requestCount,
+		TtftSampleCount:    total.ttftCount,
+		LastUpdated:        formatStatusTime(total.lastUpdated),
+		RecentSuccessRates: trend,
+		Groups:             groups,
 	}
 }
 
@@ -393,6 +398,39 @@ func roundStatusMetric(value float64) float64 {
 		return math.Round(value*100) / 100
 	}
 	return 0
+}
+
+// modelStatusTrendPoints caps the per-bucket success-rate series so the
+// response stays small even for long windows at fine bucket granularity.
+// Points are downsampled evenly across the requested window.
+const modelStatusTrendPoints = 96
+
+func statusTrendRates(buckets map[int64]counters, maxPoints int) []float64 {
+	if len(buckets) == 0 || maxPoints <= 0 {
+		return nil
+	}
+	timestamps := make([]int64, 0, len(buckets))
+	for ts := range buckets {
+		timestamps = append(timestamps, ts)
+	}
+	sort.Slice(timestamps, func(i, j int) bool {
+		return timestamps[i] < timestamps[j]
+	})
+
+	rates := make([]float64, 0, len(timestamps))
+	for _, ts := range timestamps {
+		rates = append(rates, roundStatusMetric(successRate(buckets[ts])))
+	}
+
+	if len(rates) <= maxPoints {
+		return rates
+	}
+	step := float64(len(rates)-1) / float64(maxPoints-1)
+	out := make([]float64, 0, maxPoints)
+	for i := 0; i < maxPoints; i++ {
+		out = append(out, rates[int(math.Round(step*float64(i)))])
+	}
+	return out
 }
 
 func formatStatusTime(ts int64) string {

@@ -79,39 +79,31 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 }
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
-const statusItems: ModelStatusItem[] = [
-  {
+function makeItem(
+  overrides: Partial<ModelStatusItem> & { modelName: string }
+): ModelStatusItem {
+  return {
     providerId: 'alpha',
     provider: 'AlphaAI',
-    modelName: 'alpha-fast',
     healthScore: 99,
     fastestTtftMs: 120,
     slowestTtftMs: 800,
     successRate: 99.5,
     requestCount: 120,
-    groups: [
-      {
-        group: 'default',
-        healthScore: 99,
-        fastestTtftMs: 120,
-        slowestTtftMs: 800,
-        successRate: 99.5,
-        requestCount: 100,
-        status: 'healthy',
-      },
-      {
-        group: 'vip',
-        healthScore: 100,
-        fastestTtftMs: 100,
-        slowestTtftMs: 700,
-        successRate: 100,
-        requestCount: 20,
-        status: 'healthy',
-      },
-    ],
+    recentSuccessRates: [99, 99.4, 99.5, 99.8],
+    groups: [],
     status: 'healthy',
-  },
-  {
+    ...overrides,
+  }
+}
+
+const statusItems: ModelStatusItem[] = [
+  makeItem({
+    providerId: 'alpha',
+    provider: 'AlphaAI',
+    modelName: 'alpha-fast',
+  }),
+  makeItem({
     providerId: 'alpha',
     provider: 'AlphaAI',
     modelName: 'alpha-reasoner',
@@ -119,21 +111,10 @@ const statusItems: ModelStatusItem[] = [
     fastestTtftMs: 880,
     slowestTtftMs: 4200,
     successRate: 92.25,
-    requestCount: 80,
-    groups: [
-      {
-        group: 'default',
-        healthScore: 76,
-        fastestTtftMs: 880,
-        slowestTtftMs: 4200,
-        successRate: 92.25,
-        requestCount: 80,
-        status: 'degraded',
-      },
-    ],
+    recentSuccessRates: [95, 93, 92.5, 91],
     status: 'degraded',
-  },
-  {
+  }),
+  makeItem({
     providerId: 'beta',
     provider: 'BetaML',
     modelName: 'beta-offline',
@@ -141,21 +122,10 @@ const statusItems: ModelStatusItem[] = [
     fastestTtftMs: 0,
     slowestTtftMs: 0,
     successRate: 48.75,
-    requestCount: 40,
-    groups: [
-      {
-        group: 'default',
-        healthScore: 24,
-        fastestTtftMs: 0,
-        slowestTtftMs: 0,
-        successRate: 48.75,
-        requestCount: 40,
-        status: 'down',
-      },
-    ],
+    recentSuccessRates: [60, 52, 45, 40],
     status: 'down',
-  },
-  {
+  }),
+  makeItem({
     providerId: 'gamma',
     provider: 'GammaWorks',
     modelName: 'gamma-lag',
@@ -163,20 +133,9 @@ const statusItems: ModelStatusItem[] = [
     fastestTtftMs: 670,
     slowestTtftMs: 3900,
     successRate: 95.2,
-    requestCount: 60,
-    groups: [
-      {
-        group: 'vip',
-        healthScore: 83,
-        fastestTtftMs: 670,
-        slowestTtftMs: 3900,
-        successRate: 95.2,
-        requestCount: 60,
-        status: 'degraded',
-      },
-    ],
+    recentSuccessRates: [96, 95, 95, 94],
     status: 'degraded',
-  },
+  }),
 ]
 
 async function renderModelStatus(
@@ -243,11 +202,18 @@ function getProviderSelect(container: ParentNode): HTMLSelectElement {
   return providerSelect
 }
 
+function getSortSelect(container: ParentNode): HTMLSelectElement {
+  const sortSelect =
+    container.querySelector<HTMLSelectElement>('#model-status-sort')
+  assert.ok(sortSelect)
+  return sortSelect
+}
+
 function getButton(container: ParentNode, label: string): HTMLButtonElement {
   const button = [
     ...container.querySelectorAll<HTMLButtonElement>('button'),
   ].find((candidate) => candidate.textContent === label)
-  assert.ok(button)
+  assert.ok(button, `expected a button labelled "${label}"`)
   return button
 }
 
@@ -257,69 +223,137 @@ function getModelRowTexts(container: ParentNode): string[] {
   )
 }
 
-describe('model status', () => {
+function getProviderGroups(container: ParentNode): HTMLElement[] {
+  return [...container.querySelectorAll<HTMLElement>('[data-provider-group]')]
+}
+
+function getVerdictTiles(container: ParentNode): HTMLButtonElement[] {
+  const verdictCard = container.querySelector('[data-slot="card"]')
+  assert.ok(verdictCard)
+  return [
+    ...verdictCard.querySelectorAll<HTMLButtonElement>('button[aria-pressed]'),
+  ]
+}
+
+describe('model status (public page)', () => {
   after(() => {
     domWindow.close()
   })
 
-  test('groups models by provider and renders the requested health metrics', async () => {
+  test('renders the verdict summary and groups model trends by provider', async () => {
     const { container, root } = await renderModelStatus()
 
     try {
       const pageText = container.textContent ?? ''
       assert.ok(pageText.includes('Model Status'))
       assert.ok(
-        pageText.includes(
-          'Monitor model availability and first-token performance by provider.'
-        )
+        pageText.includes('Live 24h availability trends for all models.')
       )
+      assert.ok(pageText.includes('1 models are unavailable'))
+      assert.ok(pageText.includes('Overall 24h availability is 83.9%'))
 
-      const providerCards = [
-        ...container.querySelectorAll<HTMLElement>('[data-slot="card"]'),
-      ].filter((card) => card.textContent?.includes('models monitored'))
-      assert.equal(providerCards.length, 3)
-      assert.ok(providerCards[0].textContent?.includes('AlphaAI'))
-      assert.ok(providerCards[0].textContent?.includes('2 models monitored'))
-      assert.ok(providerCards[1].textContent?.includes('BetaML'))
-      assert.ok(providerCards[2].textContent?.includes('GammaWorks'))
+      const tiles = getVerdictTiles(container)
+      assert.equal(tiles.length, 4)
+      assert.ok(tiles[0].textContent?.includes('Healthy'))
+      assert.ok(tiles[1].textContent?.includes('Unstable'))
+      assert.ok(tiles[2].textContent?.includes('Unavailable'))
+      assert.ok(tiles[3].textContent?.includes('No data yet'))
 
       const rowTexts = getModelRowTexts(container)
       assert.equal(rowTexts.length, 4)
+      const providerGroups = getProviderGroups(container)
+      assert.equal(providerGroups.length, 3)
+      assert.ok(providerGroups[0].textContent?.includes('AlphaAI'))
+      assert.ok(providerGroups[0].textContent?.includes('2 models'))
+      assert.ok(providerGroups[1].textContent?.includes('BetaML'))
+      assert.ok(providerGroups[2].textContent?.includes('GammaWorks'))
       const alphaFastRow = rowTexts.find((rowText) =>
         rowText.includes('alpha-fast')
       )
       assert.ok(alphaFastRow)
-      assert.ok(alphaFastRow.includes('99%'))
-      assert.ok(alphaFastRow.includes('120ms'))
-      assert.ok(alphaFastRow.includes('800ms'))
-      assert.ok(alphaFastRow.includes('99.50%'))
-      assert.ok(alphaFastRow.includes('Groups'))
-      assert.ok(alphaFastRow.includes('default'))
-      assert.ok(alphaFastRow.includes('vip'))
-      assert.ok(alphaFastRow.includes('Requests'))
-      assert.ok(pageText.includes('Fastest first token'))
-      assert.ok(pageText.includes('Slowest first token'))
-      assert.ok(pageText.includes('Success rate'))
+      assert.ok(
+        rowTexts
+          .find((rowText) => rowText.includes('beta-offline'))
+          ?.includes('48.8%')
+      )
+      assert.equal(container.textContent?.includes('models monitored'), false)
     } finally {
       await cleanupRendered(root, container)
     }
   })
 
-  test('omits the summary cards while keeping provider groups visible', async () => {
+  test('shows an all-operational verdict when every model is healthy', async () => {
+    const { container, root } = await renderModelStatus([
+      makeItem({ modelName: 'alpha-fast' }),
+      makeItem({ modelName: 'alpha-mini' }),
+    ])
+
+    try {
+      const pageText = container.textContent ?? ''
+      assert.ok(pageText.includes('All systems operational'))
+      assert.ok(pageText.includes('Overall 24h availability is 99.5%'))
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('shows an unstable verdict when only degraded models exist', async () => {
+    const { container, root } = await renderModelStatus([
+      makeItem({
+        modelName: 'alpha-fast',
+        status: 'degraded',
+        successRate: 92,
+      }),
+      makeItem({ modelName: 'alpha-mini' }),
+    ])
+
+    try {
+      assert.ok(
+        (container.textContent ?? '').includes('Some models are unstable')
+      )
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('filters rows by a health status tab', async () => {
     const { container, root } = await renderModelStatus()
 
     try {
-      assert.equal(
-        container.querySelector('section[aria-label="Model status summary"]'),
-        null
+      const allButton = getButton(container, 'All')
+      const unstableButton = getButton(container, 'Unstable')
+      assert.equal(allButton.getAttribute('aria-pressed'), 'true')
+      assert.equal(unstableButton.getAttribute('aria-pressed'), 'false')
+
+      await act(async () => unstableButton.click())
+
+      assert.equal(allButton.getAttribute('aria-pressed'), 'false')
+      assert.equal(unstableButton.getAttribute('aria-pressed'), 'true')
+
+      const rowTexts = getModelRowTexts(container)
+      assert.equal(rowTexts.length, 2)
+      assert.ok(rowTexts.some((row) => row.includes('alpha-reasoner')))
+      assert.ok(rowTexts.some((row) => row.includes('gamma-lag')))
+      assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('filters rows by clicking a verdict status tile', async () => {
+    const { container, root } = await renderModelStatus()
+
+    try {
+      const unavailableTile = getVerdictTiles(container).find((tile) =>
+        tile.textContent?.includes('Unavailable')
       )
-      const pageText = container.textContent ?? ''
-      assert.equal(pageText.includes('Average health'), false)
-      assert.equal(pageText.includes('Average success rate'), false)
-      const providerCards = [
-        ...container.querySelectorAll<HTMLElement>('[data-slot="card"]'),
-      ].filter((card) => card.textContent?.includes('models monitored'))
-      assert.equal(providerCards.length, 3)
+      assert.ok(unavailableTile)
+
+      await act(async () => unavailableTile.click())
+
+      const rowTexts = getModelRowTexts(container)
+      assert.equal(rowTexts.length, 1)
+      assert.ok(rowTexts[0].includes('beta-offline'))
     } finally {
       await cleanupRendered(root, container)
     }
@@ -334,7 +368,12 @@ describe('model status', () => {
       const optionTexts = [
         ...providerSelect.querySelectorAll<HTMLOptionElement>('option'),
       ].map((option) => option.textContent)
-      assert.deepEqual(optionTexts, ['All', 'AlphaAI', 'BetaML', 'GammaWorks'])
+      assert.deepEqual(optionTexts, [
+        'All providers',
+        'AlphaAI',
+        'BetaML',
+        'GammaWorks',
+      ])
 
       await act(async () => {
         changeSelectValue(providerSelect, 'beta')
@@ -343,8 +382,10 @@ describe('model status', () => {
       const rowTexts = getModelRowTexts(container)
       assert.equal(rowTexts.length, 1)
       assert.ok(rowTexts[0].includes('beta-offline'))
+      const providerGroups = getProviderGroups(container)
+      assert.equal(providerGroups.length, 1)
+      assert.equal(providerGroups[0].getAttribute('aria-label'), 'BetaML')
       assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
-      assert.equal((container.textContent ?? '').includes('gamma-lag'), false)
     } finally {
       await cleanupRendered(root, container)
     }
@@ -364,11 +405,19 @@ describe('model status', () => {
       const rowTexts = getModelRowTexts(container)
       assert.equal(rowTexts.length, 1)
       assert.ok(rowTexts[0].includes('alpha-reasoner'))
-      assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
-      assert.equal((container.textContent ?? '').includes('gamma-lag'), false)
 
       await act(async () => {
         changeInputValue(searchInput, 'AlphaAI')
+      })
+
+      // Search matches the provider name too.
+      const providerRows = getModelRowTexts(container)
+      assert.equal(providerRows.length, 2)
+      assert.ok(providerRows.some((row) => row.includes('alpha-fast')))
+      assert.ok(providerRows.some((row) => row.includes('alpha-reasoner')))
+
+      await act(async () => {
+        changeInputValue(searchInput, 'missing-model')
       })
 
       assert.equal(getModelRowTexts(container).length, 0)
@@ -377,28 +426,83 @@ describe('model status', () => {
     }
   })
 
-  test('filters rows by selected health status and exposes the active filter state', async () => {
+  test('sorts rows by model name in the sort dropdown', async () => {
     const { container, root } = await renderModelStatus()
 
     try {
-      const allButton = getButton(container, 'All')
-      const degradedButton = getButton(container, 'Degraded')
-      assert.equal(allButton.getAttribute('aria-pressed'), 'true')
-      assert.equal(degradedButton.getAttribute('aria-pressed'), 'false')
+      const sortSelect = getSortSelect(container)
+      assert.equal(sortSelect.value, 'status')
 
-      await act(async () => degradedButton.click())
-
-      assert.equal(allButton.getAttribute('aria-pressed'), 'false')
-      assert.equal(degradedButton.getAttribute('aria-pressed'), 'true')
+      await act(async () => {
+        changeSelectValue(sortSelect, 'name')
+      })
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 2)
-      assert.ok(rowTexts.some((rowText) => rowText.includes('alpha-reasoner')))
-      assert.ok(rowTexts.some((rowText) => rowText.includes('gamma-lag')))
-      assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
+      assert.equal(rowTexts.length, 4)
+      assert.ok(rowTexts[0].includes('alpha-fast'))
+      assert.ok(rowTexts[1].includes('alpha-reasoner'))
+      assert.ok(rowTexts[2].includes('beta-offline'))
+      assert.ok(rowTexts[3].includes('gamma-lag'))
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('shows a neutral trend state when no model has trend data', async () => {
+    const { container, root } = await renderModelStatus([
+      makeItem({
+        providerId: 'delta',
+        provider: 'DeltaAI',
+        modelName: 'delta-pending',
+        healthScore: Number.NaN,
+        fastestTtftMs: Number.NaN,
+        slowestTtftMs: Number.NaN,
+        successRate: Number.NaN,
+        requestCount: 0,
+        recentSuccessRates: [],
+        status: 'unknown',
+      }),
+    ])
+
+    try {
+      const pageText = container.textContent ?? ''
+      assert.ok(pageText.includes('delta-pending'))
+      assert.ok(pageText.includes('No data yet'))
+      assert.ok(pageText.includes('This model has no data yet'))
+      assert.ok(pageText.includes('No data available'))
+      assert.equal(pageText.includes('All systems operational'), false)
+      assert.ok(pageText.includes('24h trend'))
+      assert.equal(container.querySelectorAll('[role="img"]').length, 1)
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('shows the 24h trend column when trend data is present', async () => {
+    const { container, root } = await renderModelStatus()
+
+    try {
+      const pageText = container.textContent ?? ''
+      assert.ok(pageText.includes('24h trend'))
+      assert.ok(container.querySelectorAll('[role="img"]').length >= 4)
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('renders one accessible 24h trend per model with the current rate', async () => {
+    const { container, root } = await renderModelStatus()
+
+    try {
+      const trends = container.querySelectorAll('[role="img"]')
+      assert.equal(trends.length, 4)
+      const alphaFastRow = [...container.querySelectorAll('article')].find(
+        (article) => article.textContent?.includes('alpha-fast')
+      )
+      assert.ok(alphaFastRow)
       assert.equal(
-        (container.textContent ?? '').includes('beta-offline'),
-        false
+        alphaFastRow.querySelector('[role="img"]')?.getAttribute('aria-label'),
+        '24h trend: 99.5%'
       )
     } finally {
       await cleanupRendered(root, container)
@@ -417,141 +521,38 @@ describe('model status', () => {
 
       assert.equal(getModelRowTexts(container).length, 0)
       const pageText = container.textContent ?? ''
+      assert.ok(pageText.includes('No matching models'))
       assert.ok(
-        pageText.includes('No model status matches the current filters')
-      )
-      assert.ok(
-        pageText.includes('Adjust the search keyword or health status filter.')
+        pageText.includes('Try a different keyword or clear the filters.')
       )
     } finally {
       await cleanupRendered(root, container)
     }
   })
 
-  test('shows unknown status and placeholder metrics when model has no samples', async () => {
-    const { container, root } = await renderModelStatus([
-      {
-        providerId: 'delta',
-        provider: 'DeltaAI',
-        modelName: 'delta-pending',
-        healthScore: Number.NaN,
-        fastestTtftMs: Number.NaN,
-        slowestTtftMs: Number.NaN,
-        successRate: Number.NaN,
-        requestCount: 0,
-        groups: [],
-        status: 'unknown',
-      },
-    ])
+  test('clears all active filters and restores the default model list', async () => {
+    const { container, root } = await renderModelStatus()
 
     try {
-      const pageText = container.textContent ?? ''
-      assert.ok(pageText.includes('DeltaAI'))
-      assert.ok(pageText.includes('Unknown'))
-      assert.ok(pageText.includes('Current model has no request data'))
+      await act(async () => {
+        changeInputValue(getSearchInput(container), 'reasoner')
+        changeSelectValue(getProviderSelect(container), 'alpha')
+        changeSelectValue(getSortSelect(container), 'name')
+        getButton(container, 'Unstable').click()
+      })
 
-      const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 1)
-      assert.ok(rowTexts[0].includes('delta-pending'))
-      assert.ok(rowTexts[0].includes('—'))
-    } finally {
-      await cleanupRendered(root, container)
-    }
-  })
+      assert.equal(getModelRowTexts(container).length, 1)
 
-  test('renders group metrics when a group has no samples', async () => {
-    const { container, root } = await renderModelStatus([
-      {
-        providerId: 'epsilon',
-        provider: 'EpsilonAI',
-        modelName: 'epsilon-live',
-        healthScore: 95,
-        fastestTtftMs: 240,
-        slowestTtftMs: 900,
-        successRate: 99,
-        requestCount: 10,
-        groups: [
-          {
-            group: 'default',
-            healthScore: 95,
-            fastestTtftMs: 240,
-            slowestTtftMs: 900,
-            successRate: 99,
-            requestCount: 10,
-            status: 'healthy',
-          },
-          {
-            group: 'vip',
-            healthScore: Number.NaN,
-            fastestTtftMs: Number.NaN,
-            slowestTtftMs: Number.NaN,
-            successRate: Number.NaN,
-            requestCount: 0,
-            status: 'unknown',
-          },
-        ],
-        status: 'healthy',
-      },
-    ])
+      await act(async () => getButton(container, 'Clear filters').click())
 
-    try {
-      const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 1)
-      assert.ok(rowTexts[0].includes('epsilon-live'))
-      assert.ok(rowTexts[0].includes('default'))
-      assert.ok(rowTexts[0].includes('vip'))
-      assert.ok(rowTexts[0].includes('No data available'))
-    } finally {
-      await cleanupRendered(root, container)
-    }
-  })
-
-  test('shows the all-groups message when every group has no samples', async () => {
-    const { container, root } = await renderModelStatus([
-      {
-        providerId: 'zeta',
-        provider: 'ZetaAI',
-        modelName: 'zeta-empty',
-        healthScore: Number.NaN,
-        fastestTtftMs: Number.NaN,
-        slowestTtftMs: Number.NaN,
-        successRate: Number.NaN,
-        requestCount: 0,
-        groups: [
-          {
-            group: 'default',
-            healthScore: Number.NaN,
-            fastestTtftMs: Number.NaN,
-            slowestTtftMs: Number.NaN,
-            successRate: Number.NaN,
-            requestCount: 0,
-            status: 'unknown',
-          },
-          {
-            group: 'vip',
-            healthScore: Number.NaN,
-            fastestTtftMs: Number.NaN,
-            slowestTtftMs: Number.NaN,
-            successRate: Number.NaN,
-            requestCount: 0,
-            status: 'unknown',
-          },
-        ],
-        status: 'unknown',
-      },
-    ])
-
-    try {
-      const pageText = container.textContent ?? ''
-      assert.ok(pageText.includes('All groups have no request data yet.'))
+      assert.equal(getSearchInput(container).value, '')
+      assert.equal(getProviderSelect(container).value, 'all')
+      assert.equal(getSortSelect(container).value, 'status')
       assert.equal(
-        pageText.includes('No data available'),
-        false
+        getButton(container, 'All').getAttribute('aria-pressed'),
+        'true'
       )
-      assert.equal(
-        container.querySelectorAll('article').length,
-        1
-      )
+      assert.equal(getModelRowTexts(container).length, 4)
     } finally {
       await cleanupRendered(root, container)
     }
