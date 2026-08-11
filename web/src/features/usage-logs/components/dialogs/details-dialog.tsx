@@ -712,6 +712,14 @@ export function DetailsDialog(props: DetailsDialogProps) {
             />
           )}
 
+          {other?.request_domain && (
+            <DetailRow
+              label={t('Request Domain')}
+              value={other.request_domain}
+              mono
+            />
+          )}
+
           {showTiming && props.log.use_time > 0 && (
             <DetailRow
               label={t('Response Time')}

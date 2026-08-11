@@ -279,12 +279,33 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 	}
 }
 
+// getRequestDomain 返回请求进入网关时使用的域名。
+// 反代场景下优先读取 X-Forwarded-Host（透传的原始域名），否则回退到 Host。
+func getRequestDomain(c *gin.Context) string {
+	if c == nil || c.Request == nil {
+		return ""
+	}
+	if forwarded := c.Request.Header.Get("X-Forwarded-Host"); forwarded != "" {
+		if idx := strings.IndexByte(forwarded, ','); idx >= 0 {
+			forwarded = forwarded[:idx]
+		}
+		return strings.TrimSpace(forwarded)
+	}
+	return c.Request.Host
+}
+
 func RecordErrorLog(c *gin.Context, userId int, channelId int, modelName string, tokenName string, content string, tokenId int, useTimeSeconds int,
 	isStream bool, group string, other map[string]interface{}) {
 	logger.LogInfo(c, fmt.Sprintf("record error log: userId=%d, channelId=%d, modelName=%s, tokenName=%s, content=%s", userId, channelId, modelName, tokenName, common.LocalLogPreview(content)))
 	username := c.GetString("username")
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
+	if domain := getRequestDomain(c); domain != "" {
+		if other == nil {
+			other = make(map[string]interface{})
+		}
+		other["request_domain"] = domain
+	}
 	otherStr := common.MapToJsonStr(other)
 	// 判断是否需要记录 IP
 	needRecordIp := false
@@ -349,6 +370,12 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 	requestId := c.GetString(common.RequestIdKey)
 	upstreamRequestId := c.GetString(common.UpstreamRequestIdKey)
 	createdAt := common.GetTimestamp()
+	if domain := getRequestDomain(c); domain != "" {
+		if params.Other == nil {
+			params.Other = make(map[string]interface{})
+		}
+		params.Other["request_domain"] = domain
+	}
 	otherStr := common.MapToJsonStr(params.Other)
 	// 判断是否需要记录 IP
 	needRecordIp := false

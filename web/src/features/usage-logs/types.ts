@@ -161,6 +161,8 @@ export interface LogOtherData {
   login_method?: string
   user_agent?: string
   request_path?: string
+  // Domain the request arrived on (from X-Forwarded-Host / Host). Visible to the log owner.
+  request_domain?: string
   request_conversion?: string[]
   ws?: boolean
   audio?: boolean
