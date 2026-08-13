@@ -416,12 +416,27 @@ func GetChannel(c *gin.Context) {
 	return
 }
 
-// GetChannelTodayUsage returns each channel's consumed quota since the start of
-// the current server-local day, keyed by channel id.
-func GetChannelTodayUsage(c *gin.Context) {
+// GetChannelUsage returns each channel's consumed quota over a server-local
+// day range, keyed by channel id. days=0 (default) covers today, days=1 only
+// yesterday, and larger values cover the last N days.
+func GetChannelUsage(c *gin.Context) {
+	days := 0
+	if raw := c.Query("days"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 0 || parsed > 366 {
+			common.ApiErrorMsg(c, "invalid days")
+			return
+		}
+		days = parsed
+	}
 	now := time.Now()
-	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
-	usage, err := model.GetTodayChannelQuota(dayStart)
+	todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	start := time.Date(todayStart.Year(), todayStart.Month(), todayStart.Day()-days, 0, 0, 0, 0, now.Location())
+	var endTimestamp int64
+	if days == 1 {
+		endTimestamp = todayStart.Unix()
+	}
+	usage, err := model.GetChannelQuotaBetween(start.Unix(), endTimestamp)
 	if err != nil {
 		common.ApiError(c, err)
 		return

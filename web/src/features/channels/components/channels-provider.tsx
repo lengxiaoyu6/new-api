@@ -28,6 +28,7 @@ import React, {
 
 import { useChannelUpstreamUpdates } from '../hooks/use-channel-upstream-updates'
 import { channelsQueryKeys } from '../lib'
+import { CHANNEL_USAGE_RANGES, type ChannelUsageDays } from '../constants'
 import type { Channel } from '../types'
 
 // ============================================================================
@@ -64,6 +65,8 @@ type ChannelsContextType = {
   setBatchMode: (enabled: boolean) => void
   sensitiveVisible: boolean
   setSensitiveVisible: (visible: boolean) => void
+  usageDays: ChannelUsageDays
+  setUsageDays: (days: ChannelUsageDays) => void
   upstream: UpstreamUpdateState
 }
 
@@ -91,6 +94,20 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
   })
   const [batchMode, setBatchMode] = useState(false)
   const [sensitiveVisible, setSensitiveVisible] = useState(true)
+  const [usageDays, setUsageDays] = useState<ChannelUsageDays>(() => {
+    const stored = localStorage.getItem('channels-usage-days')
+    const parsed = Number(stored)
+    if (Number.isInteger(parsed)) {
+      return CHANNEL_USAGE_RANGES.some((range) => range.days === parsed)
+        ? (parsed as ChannelUsageDays)
+        : 0
+    }
+    return 0
+  })
+  const handleUsageDaysChange = useCallback((days: ChannelUsageDays) => {
+    localStorage.setItem('channels-usage-days', String(days))
+    setUsageDays(days)
+  }, [])
 
   const queryClient = useQueryClient()
   const refreshChannels = useCallback(async () => {
@@ -117,6 +134,8 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       setBatchMode,
       sensitiveVisible,
       setSensitiveVisible,
+      usageDays,
+      setUsageDays: handleUsageDaysChange,
       upstream,
     }),
     [
@@ -127,6 +146,8 @@ export function ChannelsProvider({ children }: { children: React.ReactNode }) {
       idSort,
       batchMode,
       sensitiveVisible,
+      usageDays,
+      handleUsageDaysChange,
       upstream,
     ]
   )

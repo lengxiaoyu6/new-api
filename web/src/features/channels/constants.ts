@@ -299,6 +299,26 @@ export const DEFAULT_CHANNEL_VALUES = {
 export const CHANNELS_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100]
 
 // ============================================================================
+// Usage Column Day Ranges (label values are i18n keys)
+// ============================================================================
+
+export const CHANNEL_USAGE_RANGES = [
+  { days: 0, label: 'Today Usage' },
+  { days: 1, label: 'Yesterday Usage' },
+  { days: 7, label: 'Last 7 Days Usage' },
+  { days: 30, label: 'Last 30 Days Usage' },
+] as const
+
+export type ChannelUsageDays = (typeof CHANNEL_USAGE_RANGES)[number]['days']
+
+export function getChannelUsageRangeLabel(days: number): string {
+  return (
+    CHANNEL_USAGE_RANGES.find((range) => range.days === days)?.label ??
+    'Today Usage'
+  )
+}
+
+// ============================================================================
 // Sort Options (label values are i18n keys)
 // ============================================================================
 

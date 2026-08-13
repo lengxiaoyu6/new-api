@@ -222,6 +222,11 @@ export const STATIC_I18N_KEYS = [
   // Channel Affinity section
   'Channel Affinity',
 
+  // Channels usage column day ranges (dynamic label from CHANNEL_USAGE_RANGES)
+  'Yesterday Usage',
+  'Last 7 Days Usage',
+  'Last 30 Days Usage',
+
   // Models constants
   'Exact Match',
   'Prefix Match',

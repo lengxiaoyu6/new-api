@@ -46,7 +46,7 @@ import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
-import { getChannels, searchChannels, getGroups, getChannelTodayUsage } from '../api'
+import { getChannels, searchChannels, getGroups, getChannelUsage } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -95,6 +95,8 @@ export function ChannelsTable() {
     batchMode,
     sensitiveVisible,
     setSensitiveVisible,
+    usageDays,
+    setUsageDays,
   } = useChannels()
   const isMobile = useMediaQuery('(max-width: 640px)')
 
@@ -304,13 +306,13 @@ export function ChannelsTable() {
   const totalCount = data?.data?.total || 0
   const typeCounts = data?.data?.type_counts
 
-  // Fetch today's consumed quota per channel
+  // Fetch consumed quota per channel for the selected day range
   const {
-    data: todayUsageData,
-    isLoading: isTodayUsageLoading,
+    data: usageData,
+    isLoading: isUsageLoading,
   } = useQuery({
-    queryKey: ['channel-today-usage'],
-    queryFn: getChannelTodayUsage,
+    queryKey: ['channel-usage', usageDays],
+    queryFn: () => getChannelUsage({ days: usageDays }),
     refetchInterval: 60 * 1000,
     retry: false,
   })
@@ -318,8 +320,10 @@ export function ChannelsTable() {
   // Columns configuration
   const columns = useChannelsColumns({
     enableSelection: batchMode,
-    todayUsage: todayUsageData?.data,
-    isTodayUsageLoading,
+    usageData: usageData?.data,
+    isUsageLoading,
+    usageDays,
+    onUsageDaysChange: setUsageDays,
   })
 
   // React Table instance

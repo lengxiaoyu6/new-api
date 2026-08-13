@@ -752,18 +752,24 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return stat, nil
 }
 
-// GetTodayChannelQuota returns each channel's consumed quota since dayStart,
-// aggregated from consume logs.
-func GetTodayChannelQuota(dayStart int64) (map[int]int64, error) {
+// GetChannelQuotaBetween returns each channel's consumed quota within the
+// given timestamp range, aggregated from consume logs. Zero bounds are
+// treated as unbounded.
+func GetChannelQuotaBetween(startTimestamp int64, endTimestamp int64) (map[int]int64, error) {
 	rows := make([]struct {
 		ChannelId int   `gorm:"column:channel_id"`
 		Quota     int64 `gorm:"column:quota"`
 	}, 0)
-	err := LOG_DB.Table("logs").
+	query := LOG_DB.Table("logs").
 		Select("channel_id, COALESCE(sum(quota), 0) as quota").
-		Where("type = ? and channel_id > 0 and created_at >= ?", LogTypeConsume, dayStart).
-		Group("channel_id").
-		Scan(&rows).Error
+		Where("type = ? and channel_id > 0", LogTypeConsume)
+	if startTimestamp > 0 {
+		query = query.Where("created_at >= ?", startTimestamp)
+	}
+	if endTimestamp > 0 {
+		query = query.Where("created_at <= ?", endTimestamp)
+	}
+	err := query.Group("channel_id").Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

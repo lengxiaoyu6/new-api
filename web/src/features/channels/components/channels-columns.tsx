@@ -41,6 +41,13 @@ import { TruncatedText } from '@/components/truncated-text'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
@@ -56,7 +63,13 @@ import { formatTimestampToDate } from '@/lib/format'
 import { truncateText } from '@/lib/utils'
 
 import { getCodexUsage } from '../api'
-import { CHANNEL_STATUS_CONFIG, MODEL_FETCHABLE_TYPES } from '../constants'
+import {
+  CHANNEL_STATUS_CONFIG,
+  CHANNEL_USAGE_RANGES,
+  MODEL_FETCHABLE_TYPES,
+  getChannelUsageRangeLabel,
+  type ChannelUsageDays,
+} from '../constants'
 import {
   formatRelativeTime,
   formatResponseTime,
@@ -542,18 +555,20 @@ function BalanceCell({ channel }: { channel: Channel }) {
 }
 
 /**
- * Today usage cell: consumed quota since the start of the current server day.
+ * Usage cell: consumed quota for the selected day range.
  */
-function TodayUsageCell({
+function ChannelUsageCell({
   channel,
-  todayUsage,
+  usageData,
   isLoading,
+  label,
 }: {
   channel: Channel
-  todayUsage?: Record<string, number>
+  usageData?: Record<string, number>
   isLoading: boolean
+  label: string
 }) {
-  const { t, i18n } = useTranslation()
+  const { i18n } = useTranslation()
   const layout = useContext(ChannelRowActionsLayoutContext)
   const { sensitiveVisible } = useChannels()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -564,7 +579,7 @@ function TodayUsageCell({
 
   const quota = isLoading
     ? undefined
-    : resolveChannelTodayUsage(channel, todayUsage)
+    : resolveChannelTodayUsage(channel, usageData)
 
   if (quota === undefined || !sensitiveVisible) {
     return (
@@ -614,10 +629,54 @@ function TodayUsageCell({
           }
         />
         <TooltipContent>
-          <p>{`${t('Today Usage')}: ${full}`}</p>
+          <p>{`${label}: ${full}`}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
+  )
+}
+
+/**
+ * Usage column header with a day-range picker.
+ */
+function UsageRangeHeader({
+  days,
+  onDaysChange,
+}: {
+  days: ChannelUsageDays
+  onDaysChange: (days: ChannelUsageDays) => void
+}) {
+  const { t } = useTranslation()
+  const currentLabel = t(getChannelUsageRangeLabel(days))
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type='button'
+            className='hover:text-foreground inline-flex cursor-pointer items-center gap-1'
+          />
+        }
+      >
+        {currentLabel}
+        <ChevronDown className='h-3.5 w-3.5' aria-hidden='true' />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent>
+        <DropdownMenuRadioGroup
+          value={String(days)}
+          onValueChange={(value) =>
+            onDaysChange(Number(value) as ChannelUsageDays)
+          }
+        >
+          {CHANNEL_USAGE_RANGES.map((range) => (
+            <DropdownMenuRadioItem key={range.days} value={String(range.days)}>
+              {t(range.label)}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -627,15 +686,20 @@ function TodayUsageCell({
 export function useChannelsColumns(
   options: {
     enableSelection?: boolean
-    todayUsage?: Record<string, number>
-    isTodayUsageLoading?: boolean
+    usageData?: Record<string, number>
+    isUsageLoading?: boolean
+    usageDays?: ChannelUsageDays
+    onUsageDaysChange?: (days: ChannelUsageDays) => void
   } = {}
 ): ColumnDef<Channel>[] {
   const { t, i18n } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const enableSelection = options.enableSelection ?? true
-  const todayUsage = options.todayUsage
-  const isTodayUsageLoading = options.isTodayUsageLoading ?? false
+  const usageData = options.usageData
+  const isUsageLoading = options.isUsageLoading ?? false
+  const usageDays = options.usageDays ?? 0
+  const onUsageDaysChange = options.onUsageDaysChange
+  const usageLabel = t(getChannelUsageRangeLabel(usageDays))
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   // The column definitions only depend on the translation function, the active
   // locale, and sensitive-data visibility. Memoizing keeps the array (and every
@@ -1181,15 +1245,21 @@ export function useChannelsColumns(
         size: 180,
       },
 
-      // Today usage column
+      // Usage column (day-range picker in header)
       {
         accessorKey: 'today_usage',
-        header: t('Today Usage'),
+        header: () => (
+          <UsageRangeHeader
+            days={usageDays}
+            onDaysChange={onUsageDaysChange ?? (() => {})}
+          />
+        ),
         cell: ({ row }) => (
-          <TodayUsageCell
+          <ChannelUsageCell
             channel={row.original}
-            todayUsage={todayUsage}
-            isLoading={isTodayUsageLoading}
+            usageData={usageData}
+            isLoading={isUsageLoading}
+            label={usageLabel}
           />
         ),
         size: 140,
@@ -1284,6 +1354,16 @@ export function useChannelsColumns(
         meta: { pinned: 'right' as const },
       },
     ],
-    [enableSelection, t, locale, sensitiveVisible, todayUsage, isTodayUsageLoading]
+    [
+      enableSelection,
+      t,
+      locale,
+      sensitiveVisible,
+      usageData,
+      isUsageLoading,
+      usageDays,
+      onUsageDaysChange,
+      usageLabel,
+    ]
   )
 }

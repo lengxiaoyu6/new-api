@@ -23,7 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { GroupBadge } from '@/components/group-badge'
 import { cn } from '@/lib/utils'
 
-import { CHANNEL_STATUS } from '../constants'
+import { CHANNEL_STATUS, getChannelUsageRangeLabel } from '../constants'
 import { isTagAggregateRow, parseGroupsList } from '../lib'
 import type { Channel } from '../types'
 import { ChannelRowActionsLayoutContext } from './channel-row-actions-context'
@@ -47,7 +47,7 @@ function ChannelCardComponent({
   isSelected: boolean
 }) {
   const { t } = useTranslation()
-  const { sensitiveVisible } = useChannels()
+  const { sensitiveVisible, usageDays } = useChannels()
   const isTagRow = isTagAggregateRow(row.original)
   const cells = row.getAllCells()
 
@@ -61,7 +61,7 @@ function ChannelCardComponent({
 
   const fieldLabels: Record<string, string> = {
     balance: t('Used / Remaining'),
-    today_usage: t('Today Usage'),
+    today_usage: t(getChannelUsageRangeLabel(usageDays)),
     response_time: t('Response'),
     test_time: t('Last Tested'),
   }
