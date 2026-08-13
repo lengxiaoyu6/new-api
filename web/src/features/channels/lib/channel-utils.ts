@@ -627,6 +627,24 @@ export function getChannelTableRowId(row: Channel | TagRow): string {
 }
 
 /**
+ * Resolve today's consumed quota for a channel row from the per-channel
+ * today-usage map. Tag aggregate rows sum their children's usage.
+ */
+export function resolveChannelTodayUsage(
+  row: Channel | TagRow,
+  todayUsage: Record<string, number> | undefined
+): number {
+  if (isTagAggregateRow(row)) {
+    const children = row.children || []
+    return children.reduce(
+      (sum, child) => sum + (todayUsage?.[String(child.id)] ?? 0),
+      0
+    )
+  }
+  return todayUsage?.[String(row.id)] ?? 0
+}
+
+/**
  * Aggregate channels by tag for tag mode display
  * Converts flat array into tree structure grouped by tag
  */

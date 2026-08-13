@@ -416,6 +416,19 @@ func GetChannel(c *gin.Context) {
 	return
 }
 
+// GetChannelTodayUsage returns each channel's consumed quota since the start of
+// the current server-local day, keyed by channel id.
+func GetChannelTodayUsage(c *gin.Context) {
+	now := time.Now()
+	dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).Unix()
+	usage, err := model.GetTodayChannelQuota(dayStart)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, usage)
+}
+
 // GetChannelKey 获取渠道密钥（需要通过安全验证中间件）
 // 此函数依赖 SecureVerificationRequired 中间件，确保用户已通过安全验证
 func GetChannelKey(c *gin.Context) {

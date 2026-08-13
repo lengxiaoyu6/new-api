@@ -752,6 +752,28 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	return stat, nil
 }
 
+// GetTodayChannelQuota returns each channel's consumed quota since dayStart,
+// aggregated from consume logs.
+func GetTodayChannelQuota(dayStart int64) (map[int]int64, error) {
+	rows := make([]struct {
+		ChannelId int   `gorm:"column:channel_id"`
+		Quota     int64 `gorm:"column:quota"`
+	}, 0)
+	err := LOG_DB.Table("logs").
+		Select("channel_id, COALESCE(sum(quota), 0) as quota").
+		Where("type = ? and channel_id > 0 and created_at >= ?", LogTypeConsume, dayStart).
+		Group("channel_id").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[int]int64, len(rows))
+	for _, row := range rows {
+		result[row.ChannelId] = row.Quota
+	}
+	return result, nil
+}
+
 func sumCacheTokens(modelName string, username string, tokenName string, channel int, group string, startTimestamp int64, endTimestamp int64) (cacheTokens int, totalPrompt int, err error) {
 	var rows []struct {
 		PromptTokens int

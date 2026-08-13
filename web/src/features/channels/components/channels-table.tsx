@@ -46,7 +46,7 @@ import { useMediaQuery } from '@/hooks'
 import { useTableUrlState } from '@/hooks/use-table-url-state'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
-import { getChannels, searchChannels, getGroups } from '../api'
+import { getChannels, searchChannels, getGroups, getChannelTodayUsage } from '../api'
 import {
   DEFAULT_PAGE_SIZE,
   CHANNEL_STATUS,
@@ -304,8 +304,23 @@ export function ChannelsTable() {
   const totalCount = data?.data?.total || 0
   const typeCounts = data?.data?.type_counts
 
+  // Fetch today's consumed quota per channel
+  const {
+    data: todayUsageData,
+    isLoading: isTodayUsageLoading,
+  } = useQuery({
+    queryKey: ['channel-today-usage'],
+    queryFn: getChannelTodayUsage,
+    refetchInterval: 60 * 1000,
+    retry: false,
+  })
+
   // Columns configuration
-  const columns = useChannelsColumns({ enableSelection: batchMode })
+  const columns = useChannelsColumns({
+    enableSelection: batchMode,
+    todayUsage: todayUsageData?.data,
+    isTodayUsageLoading,
+  })
 
   // React Table instance
   const { table } = useDataTable({

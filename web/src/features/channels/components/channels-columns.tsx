@@ -68,6 +68,7 @@ import {
   parseModelsList,
   parseGroupsList,
   parseChannelSettings,
+  resolveChannelTodayUsage,
   handleUpdateChannelField,
   handleUpdateTagField,
   handleUpdateChannelBalance,
@@ -541,16 +542,100 @@ function BalanceCell({ channel }: { channel: Channel }) {
 }
 
 /**
+ * Today usage cell: consumed quota since the start of the current server day.
+ */
+function TodayUsageCell({
+  channel,
+  todayUsage,
+  isLoading,
+}: {
+  channel: Channel
+  todayUsage?: Record<string, number>
+  isLoading: boolean
+}) {
+  const { t, i18n } = useTranslation()
+  const layout = useContext(ChannelRowActionsLayoutContext)
+  const { sensitiveVisible } = useChannels()
+  const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
+  const currencyLabel = getCurrencyLabel()
+  const tokenSuffix = currencyLabel === 'Tokens' ? ' Tokens' : ''
+  const withSuffix = (value: string) =>
+    tokenSuffix && value !== '-' ? `${value}${tokenSuffix}` : value
+
+  const quota = isLoading
+    ? undefined
+    : resolveChannelTodayUsage(channel, todayUsage)
+
+  if (quota === undefined || !sensitiveVisible) {
+    return (
+      <StatusBadge
+        label={quota === undefined ? '-' : SENSITIVE_MASK}
+        variant='neutral'
+        size='sm'
+        copyable={false}
+        showDot={false}
+        className='-ml-1.5 cursor-help'
+      />
+    )
+  }
+
+  const full = withSuffix(
+    formatQuotaWithCurrency(quota, {
+      digitsLarge: 2,
+      digitsSmall: 4,
+      abbreviate: true,
+      showSymbol: layout !== 'card',
+    })
+  )
+  const display =
+    full.length > MAX_INLINE_BALANCE_CHARS
+      ? withSuffix(
+          formatQuotaWithCurrency(quota, {
+            compact: true,
+            locale,
+            showSymbol: layout !== 'card',
+          })
+        )
+      : full
+
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <StatusBadge
+              label={display}
+              variant='neutral'
+              size='sm'
+              copyable={false}
+              showDot={false}
+              className='-ml-1.5 cursor-help'
+            />
+          }
+        />
+        <TooltipContent>
+          <p>{`${t('Today Usage')}: ${full}`}</p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/**
  * Generate channels columns configuration
  */
 export function useChannelsColumns(
   options: {
     enableSelection?: boolean
+    todayUsage?: Record<string, number>
+    isTodayUsageLoading?: boolean
   } = {}
 ): ColumnDef<Channel>[] {
   const { t, i18n } = useTranslation()
   const { sensitiveVisible } = useChannels()
   const enableSelection = options.enableSelection ?? true
+  const todayUsage = options.todayUsage
+  const isTodayUsageLoading = options.isTodayUsageLoading ?? false
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
   // The column definitions only depend on the translation function, the active
   // locale, and sensitive-data visibility. Memoizing keeps the array (and every
@@ -1096,6 +1181,21 @@ export function useChannelsColumns(
         size: 180,
       },
 
+      // Today usage column
+      {
+        accessorKey: 'today_usage',
+        header: t('Today Usage'),
+        cell: ({ row }) => (
+          <TodayUsageCell
+            channel={row.original}
+            todayUsage={todayUsage}
+            isLoading={isTodayUsageLoading}
+          />
+        ),
+        size: 140,
+        enableSorting: false,
+      },
+
       // Response Time column
       {
         accessorKey: 'response_time',
@@ -1184,6 +1284,6 @@ export function useChannelsColumns(
         meta: { pinned: 'right' as const },
       },
     ],
-    [enableSelection, t, locale, sensitiveVisible]
+    [enableSelection, t, locale, sensitiveVisible, todayUsage, isTodayUsageLoading]
   )
 }

@@ -182,6 +182,12 @@ export interface ChannelOpsResponse {
   }
 }
 
+export interface ChannelTodayUsageResponse {
+  success: boolean
+  message?: string
+  data?: Record<string, number>
+}
+
 export interface ChannelTestResponse {
   success: boolean
   message?: string

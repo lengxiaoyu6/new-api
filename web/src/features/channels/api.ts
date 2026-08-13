@@ -27,6 +27,7 @@ import type {
   ChannelBalanceResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
+  ChannelTodayUsageResponse,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -110,6 +111,14 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
  */
 export async function getChannelOps(): Promise<ChannelOpsResponse> {
   const res = await api.get('/api/channel/ops', channelActionConfig())
+  return res.data
+}
+
+/**
+ * Get today's consumed quota for each channel, keyed by channel ID
+ */
+export async function getChannelTodayUsage(): Promise<ChannelTodayUsageResponse> {
+  const res = await api.get('/api/channel/today_usage', channelActionConfig())
   return res.data
 }
 
