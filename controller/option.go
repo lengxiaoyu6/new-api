@@ -142,10 +142,17 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
-	case "QuotaForInviter", "QuotaForInvitee":
+	case "QuotaForInviter", "QuotaForInvitee", "InviterTopupRebatePercent":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 			return
+		}
+		if option.Key == "InviterTopupRebatePercent" {
+			percent, perr := strconv.ParseFloat(strings.TrimSpace(option.Value.(string)), 64)
+			if perr != nil || percent < 0 || percent > 100 {
+				common.ApiErrorMsg(c, "邀请充值返利比例必须在 0-100 之间")
+				return
+			}
 		}
 	default:
 		if isPaymentComplianceOptionKey(option.Key) {
