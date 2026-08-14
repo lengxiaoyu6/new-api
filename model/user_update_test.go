@@ -144,38 +144,6 @@ func TestUsageAccountingSupportsSignedDirectAndBatchDeltas(t *testing.T) {
 	assert.Equal(t, int64(1150), gotChannel.UsedQuota)
 }
 
-func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
-	setupUserUpdateTestState(t)
-
-	user := User{
-		Id:              2,
-		Username:        "token-rotation-user",
-		Password:        "password",
-		DisplayName:     "before",
-		Status:          common.UserStatusEnabled,
-		Quota:           1000,
-		AffQuota:        800,
-		AffHistoryQuota: 1200,
-	}
-	require.NoError(t, DB.Create(&user).Error)
-
-	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Updates(map[string]interface{}{
-		"quota":        gorm.Expr("quota + ?", 500),
-		"aff_quota":    gorm.Expr("aff_quota - ?", 500),
-		"display_name": "concurrent-update",
-	}).Error)
-
-	require.NoError(t, UpdateUserAccessToken(user.Id, "rotated-token"))
-
-	var got User
-	require.NoError(t, DB.First(&got, user.Id).Error)
-	assert.Equal(t, "rotated-token", got.GetAccessToken())
-	assert.Equal(t, "concurrent-update", got.DisplayName)
-	assert.Equal(t, 1500, got.Quota)
-	assert.Equal(t, 300, got.AffQuota)
-	assert.Equal(t, 1200, got.AffHistoryQuota)
-}
-
 func TestUpdateUserAccessTokenRejectsSoftDeletedUser(t *testing.T) {
 	setupUserUpdateTestState(t)
 
@@ -232,14 +200,16 @@ func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 
 	oldAccessToken := "old-access-token"
 	user := User{
-		Id:           3,
-		Username:     "access-token-user",
-		Password:     "password",
-		Status:       common.UserStatusEnabled,
-		AccessToken:  &oldAccessToken,
-		Quota:        1000,
-		UsedQuota:    20,
-		RequestCount: 3,
+		Id:              3,
+		Username:        "access-token-user",
+		Password:        "password",
+		Status:          common.UserStatusEnabled,
+		AccessToken:     &oldAccessToken,
+		Quota:           1000,
+		AffQuota:        800,
+		AffHistoryQuota: 1200,
+		UsedQuota:       20,
+		RequestCount:    3,
 	}
 	require.NoError(t, DB.Create(&user).Error)
 
@@ -247,6 +217,8 @@ func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 		"quota":         gorm.Expr("quota - ?", 300),
 		"used_quota":    gorm.Expr("used_quota + ?", 300),
 		"request_count": gorm.Expr("request_count + ?", 1),
+		"aff_quota":     gorm.Expr("aff_quota - ?", 500),
+		"display_name":  "concurrent-update",
 	}).Error)
 
 	require.NoError(t, UpdateUserAccessToken(user.Id, "new-access-token"))
@@ -257,6 +229,9 @@ func TestUpdateUserAccessTokenOnlyUpdatesAccessToken(t *testing.T) {
 	assert.Equal(t, 700, got.Quota)
 	assert.Equal(t, 320, got.UsedQuota)
 	assert.Equal(t, 4, got.RequestCount)
+	assert.Equal(t, 300, got.AffQuota)
+	assert.Equal(t, 1200, got.AffHistoryQuota)
+	assert.Equal(t, "concurrent-update", got.DisplayName)
 }
 
 func TestEnsureEmailAvailableRejectsExistingEmailCaseInsensitive(t *testing.T) {
