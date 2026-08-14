@@ -141,6 +141,7 @@ payment.webhook_not_configured: "Webhook is not configured"
 payment.price_id_not_configured: "StripePriceId is not configured for this plan"
 payment.creem_not_configured: "CreemProductId is not configured for this plan"
 payment.compliance_required: "Payment, redemption, subscription, and invitation reward features are disabled. The administrator must confirm compliance terms before enabling them."
+payment.inviter_rebate_percent_range: "Inviter top-up rebate percent must be between 0 and 100"
 
 # Topup messages
 topup.not_provided: "Payment order number not provided"

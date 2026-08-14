@@ -150,7 +150,7 @@ func UpdateOption(c *gin.Context) {
 		if option.Key == "InviterTopupRebatePercent" {
 			percent, perr := strconv.ParseFloat(strings.TrimSpace(option.Value.(string)), 64)
 			if perr != nil || percent < 0 || percent > 100 {
-				common.ApiErrorMsg(c, "邀请充值返利比例必须在 0-100 之间")
+				common.ApiErrorI18n(c, i18n.MsgInviterRebatePercentRange)
 				return
 			}
 		}

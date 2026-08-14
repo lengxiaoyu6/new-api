@@ -116,13 +116,9 @@ func TestGrantTopupInviterRebate(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			setupTopupRebateTestState(t, tt.percent, tt.compliance)
 			inviter := newTopupRebateTestUser(t, "rebate_inv_"+t.Name(), 0)
-			inviteeIdForUser := tt.inviterIdForUser(inviter)
-			if inviteeIdForUser == -1 {
-				inviteeIdForUser = 0
-			}
-			invitee := newTopupRebateTestUser(t, "rebate_invtee_"+t.Name(), inviteeIdForUser)
+			invitee := newTopupRebateTestUser(t, "rebate_invtee_"+t.Name(), tt.inviterIdForUser(inviter))
 			if tt.inviterIdForUser(inviter) == -1 {
-				invitee.Id = inviter.Id
+				require.NoError(t, DB.Model(&User{}).Where("id = ?", invitee.Id).Update("inviter_id", invitee.Id).Error)
 			}
 
 			var gotInviterId, gotRebate int
