@@ -12,8 +12,8 @@ jobs:
           name: Build and push
           command: |
             echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
-            docker build -t lengxiaoyu666/new-api:latest .
-            docker push lengxiaoyu666/new-api:latest
+            docker build -t lengxiaoyu/new-api:latest .
+            docker push lengxiaoyu/new-api:latest
 
 workflows:
   build:
