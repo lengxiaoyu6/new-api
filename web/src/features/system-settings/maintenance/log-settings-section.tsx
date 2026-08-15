@@ -257,7 +257,10 @@ export function LogSettingsSection({
   }, [logCleanupActive, logCleanupTaskId, t])
 
   const onSubmit = async (values: LogSettingsFormValues) => {
-    if (values.LogConsumeEnabled === defaultEnabled) return
+    if (values.LogConsumeEnabled === defaultEnabled) {
+      toast.info(t('No changes to save'))
+      return
+    }
     await updateOption.mutateAsync({
       key: 'LogConsumeEnabled',
       value: values.LogConsumeEnabled,
