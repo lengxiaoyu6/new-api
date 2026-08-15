@@ -263,13 +263,22 @@ func RecordAffiliateLog(userId int, kind string, quota int, detail map[string]in
 	for k, v := range detail {
 		other[k] = v
 	}
+	content := "邀请收益变动"
+	switch kind {
+	case "register":
+		content = "邀请收益：注册奖励"
+	case "topup":
+		content = "邀请收益：充值返利"
+	case "transfer":
+		content = "邀请收益：划转到余额"
+	}
 	log := &Log{
 		UserId:    userId,
 		Username:  username,
 		CreatedAt: common.GetTimestamp(),
 		Type:      LogTypeAff,
 		Quota:     quota,
-		Content:   fmt.Sprintf("邀请收益变动 kind=%s quota=%d", kind, quota),
+		Content:   fmt.Sprintf("%s %s", content, logger.LogQuota(quota)),
 		Other:     common.MapToJsonStr(other),
 	}
 	if err := createLog(log); err != nil {
