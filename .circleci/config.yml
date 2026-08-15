@@ -1,0 +1,24 @@
+version: 2.1
+
+jobs:
+  build-and-push:
+    docker:
+      - image: cimg/base:stable
+    steps:
+      - checkout
+      - setup_remote_docker:
+          docker_layer_caching: true
+      - run:
+          name: Build and push
+          command: |
+            echo $DOCKER_PASS | docker login -u $DOCKER_USER --password-stdin
+            docker build -t lengxiaoyu666/new-api:latest .
+            docker push lengxiaoyu666/new-api:latest
+
+workflows:
+  build:
+    jobs:
+      - build-and-push:
+          filters:
+            branches:
+              only: main
