@@ -28,6 +28,7 @@ func newTopupRebateTestUser(t *testing.T, username string, inviterId int) *User 
 
 func setupTopupRebateTestState(t *testing.T, percent float64, complianceConfirmed bool) {
 	t.Helper()
+	require.NoError(t, LOG_DB.Unscoped().Where("type = ?", LogTypeAff).Delete(&Log{}).Error)
 	setting := operation_setting.GetPaymentSetting()
 	originConfirmed := setting.ComplianceConfirmed
 	originVersion := setting.ComplianceTermsVersion
@@ -172,6 +173,11 @@ func TestRechargeEpayGrantsInviterRebateOnce(t *testing.T) {
 	require.NoError(t, DB.First(&reloaded, "id = ?", inviter.Id).Error)
 	assert.Equal(t, 50000, reloaded.AffQuota, "inviter should receive 10% of 500000 credited quota")
 	assert.Equal(t, 50000, reloaded.AffHistoryQuota)
+
+	var rebateLog Log
+	require.NoError(t, LOG_DB.Where("user_id = ? AND type = ?", inviter.Id, LogTypeAff).First(&rebateLog).Error)
+	assert.Equal(t, 50000, rebateLog.Quota)
+	assert.Contains(t, rebateLog.Other, "\"kind\":\"topup\"")
 
 	alreadyDone, err = RechargeEpay(topUp.TradeNo, "", "")
 	require.NoError(t, err)

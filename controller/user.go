@@ -478,6 +478,59 @@ func GetAffCode(c *gin.Context) {
 	return
 }
 
+// GetAffSummary 返回推介计划页所需的汇总信息：邀请码、邀请收益与当前生效的奖励规则。
+func GetAffSummary(c *gin.Context) {
+	id := c.GetInt("id")
+	user, err := model.GetUserById(id, true)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if user.AffCode == "" {
+		user.AffCode = common.GetRandomString(4)
+		if err := user.Update(false); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	common.ApiSuccess(c, gin.H{
+		"aff_code":             user.AffCode,
+		"aff_quota":            user.AffQuota,
+		"aff_history_quota":    user.AffHistoryQuota,
+		"aff_count":            user.AffCount,
+		"inviter_reward":       common.QuotaForInviter,
+		"invitee_reward":       common.QuotaForInvitee,
+		"topup_rebate_percent": common.InviterTopupRebatePercent,
+		"compliance_confirmed": operation_setting.IsPaymentComplianceConfirmed(),
+	})
+}
+
+// GetInvitedUsers 分页返回当前用户邀请的用户列表（用户名脱敏）。
+func GetInvitedUsers(c *gin.Context) {
+	id := c.GetInt("id")
+	pageInfo := common.GetPageQuery(c)
+	invited, _, err := model.GetInvitedUsersByInviterId(id, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetItems(invited)
+	common.ApiSuccess(c, pageInfo)
+}
+
+// GetAffLogs 分页返回当前用户的邀请收益明细。
+func GetAffLogs(c *gin.Context) {
+	id := c.GetInt("id")
+	pageInfo := common.GetPageQuery(c)
+	logs, _, err := model.GetAffiliateLogsByUserId(id, pageInfo)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	pageInfo.SetItems(logs)
+	common.ApiSuccess(c, pageInfo)
+}
+
 func GetSelf(c *gin.Context) {
 	id := c.GetInt("id")
 	userRole := c.GetInt("role")

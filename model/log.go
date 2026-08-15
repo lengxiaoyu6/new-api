@@ -90,6 +90,7 @@ const (
 	LogTypeError   = 5
 	LogTypeRefund  = 6
 	LogTypeLogin   = 7
+	LogTypeAff     = 8
 )
 
 func ensureLogRequestId(log *Log) {
@@ -249,6 +250,48 @@ func RecordOperationAuditLog(logUserId int, content string, ip string, action st
 	if err := createLog(log); err != nil {
 		common.SysLog("failed to record operation audit log: " + err.Error())
 	}
+}
+
+// RecordAffiliateLog 记录邀请收益变动明细（type=LogTypeAff），供推介计划页展示。
+// kind 标识变动类型（register/topup/transfer），quota 为变动额度（划转为负数），
+// detail 存入 Other.aff 供前端本地化渲染。
+func RecordAffiliateLog(userId int, kind string, quota int, detail map[string]interface{}) {
+	username, _ := GetUsernameById(userId, false)
+	other := map[string]interface{}{
+		"kind": kind,
+	}
+	for k, v := range detail {
+		other[k] = v
+	}
+	log := &Log{
+		UserId:    userId,
+		Username:  username,
+		CreatedAt: common.GetTimestamp(),
+		Type:      LogTypeAff,
+		Quota:     quota,
+		Content:   fmt.Sprintf("邀请收益变动 kind=%s quota=%d", kind, quota),
+		Other:     common.MapToJsonStr(other),
+	}
+	if err := createLog(log); err != nil {
+		common.SysLog("failed to record affiliate log: " + err.Error())
+	}
+}
+
+// GetAffiliateLogsByUserId 分页返回用户的邀请收益明细，按时间倒序。
+func GetAffiliateLogsByUserId(userId int, pageInfo *common.PageInfo) (logs []*Log, total int64, err error) {
+	if err = LOG_DB.Model(&Log{}).Where("user_id = ? AND type = ?", userId, LogTypeAff).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	if err = LOG_DB.Select("id", "user_id", "created_at", "type", "quota", "other").
+		Where("user_id = ? AND type = ?", userId, LogTypeAff).
+		Order("id desc").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&logs).Error; err != nil {
+		return nil, 0, err
+	}
+	pageInfo.SetTotal(int(total))
+	return logs, total, nil
 }
 
 func RecordTopupLog(userId int, content string, callerIp string, paymentMethod string, callbackPaymentMethod string) {

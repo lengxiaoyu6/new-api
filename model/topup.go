@@ -742,5 +742,9 @@ func recordTopupInviterRebateLog(inviterId int, inviteeId int, rebate int, credi
 	if inviterId == 0 || rebate <= 0 {
 		return
 	}
-	RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户充值返利：获得 %v（用户 %d 充值 %v，订单号 %s）", logger.LogQuota(rebate), inviteeId, logger.LogQuota(creditedQuota), tradeNo))
+	RecordAffiliateLog(inviterId, "topup", rebate, map[string]interface{}{
+		"invitee_id": inviteeId,
+		"base_quota": creditedQuota,
+		"trade_no":   tradeNo,
+	})
 }

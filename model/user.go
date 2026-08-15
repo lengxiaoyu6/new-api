@@ -513,6 +513,49 @@ func GetUserIdByAffCode(affCode string) (int, error) {
 	return user.Id, err
 }
 
+// InvitedUser 是邀请人视角下被邀请用户的脱敏信息。
+type InvitedUser struct {
+	Id        int    `json:"id"`
+	Username  string `json:"username"`
+	Status    int    `json:"status"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+// GetInvitedUsersByInviterId 分页返回某邀请人名下的被邀请用户（用户名脱敏）。
+func GetInvitedUsersByInviterId(inviterId int, pageInfo *common.PageInfo) ([]InvitedUser, int64, error) {
+	var total int64
+	if err := DB.Model(&User{}).Where("inviter_id = ?", inviterId).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	var users []User
+	if err := DB.Select("id", "username", "status", "created_at").
+		Where("inviter_id = ?", inviterId).
+		Order("id desc").
+		Limit(pageInfo.GetPageSize()).
+		Offset(pageInfo.GetStartIdx()).
+		Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	invited := make([]InvitedUser, 0, len(users))
+	for _, u := range users {
+		masked := u.Username
+		runes := []rune(u.Username)
+		if len(runes) > 2 {
+			masked = string(runes[:2]) + "***"
+		} else if len(runes) > 0 {
+			masked = string(runes[:1]) + "***"
+		}
+		invited = append(invited, InvitedUser{
+			Id:        u.Id,
+			Username:  masked,
+			Status:    u.Status,
+			CreatedAt: u.CreatedAt,
+		})
+	}
+	pageInfo.SetTotal(int(total))
+	return invited, total, nil
+}
+
 func DeleteUserById(id int) (err error) {
 	if id == 0 {
 		return errors.New("id 为空！")
@@ -541,13 +584,16 @@ func inviteUser(inviterId int) error {
 	if result.RowsAffected == 0 {
 		return gorm.ErrRecordNotFound
 	}
+	if common.QuotaForInviter > 0 {
+		RecordAffiliateLog(inviterId, "register", common.QuotaForInviter, nil)
+	}
 	return nil
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
-	// 检查quota是否小于最小额度
-	if float64(quota) < common.QuotaPerUnit {
-		return fmt.Errorf("转移额度最小为%s！", logger.LogQuota(common.QuotaFromFloat(common.QuotaPerUnit)))
+	// 检查quota是否为正数
+	if quota <= 0 {
+		return fmt.Errorf("转移额度必须大于0！")
 	}
 
 	// 开始数据库事务
@@ -578,7 +624,12 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 	}
 
 	// 提交事务
-	return tx.Commit().Error
+	if err := tx.Commit().Error; err != nil {
+		return err
+	}
+
+	RecordAffiliateLog(user.Id, "transfer", -quota, nil)
+	return nil
 }
 
 func (user *User) prepareForInsert(tx *gorm.DB) error {

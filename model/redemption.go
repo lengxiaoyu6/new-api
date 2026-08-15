@@ -148,6 +148,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		keyCol = `"key"`
 	}
 	common.RandomSleep()
+	var rebateInviterId, rebateQuota int
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
@@ -175,7 +176,11 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("该兑换码已被使用")
 		}
-		return tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error
+		if err := tx.Model(&User{}).Where("id = ?", userId).Update("quota", gorm.Expr("quota + ?", redemption.Quota)).Error; err != nil {
+			return err
+		}
+		rebateInviterId, rebateQuota, err = grantTopupInviterRebate(tx, userId, redemption.Quota)
+		return err
 	})
 	if err != nil {
 		common.SysError("redemption failed: " + err.Error())
@@ -183,6 +188,13 @@ func Redeem(key string, userId int) (quota int, err error) {
 	}
 	syncCreditUserQuotaCache(userId, redemption.Quota, "redemption")
 	RecordLog(userId, LogTypeTopup, fmt.Sprintf("通过兑换码充值 %s，兑换码ID %d", logger.LogQuota(redemption.Quota), redemption.Id))
+	if rebateInviterId != 0 && rebateQuota > 0 {
+		RecordAffiliateLog(rebateInviterId, "topup", rebateQuota, map[string]interface{}{
+			"invitee_id":    userId,
+			"base_quota":    redemption.Quota,
+			"redemption_id": redemption.Id,
+		})
+	}
 	return redemption.Quota, nil
 }
 

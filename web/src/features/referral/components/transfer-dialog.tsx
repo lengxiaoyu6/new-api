@@ -29,10 +29,6 @@ import {
   parseQuotaFromDollars,
   quotaUnitsToDollars,
 } from '@/lib/format'
-import {
-  DEFAULT_CURRENCY_CONFIG,
-  useSystemConfigStore,
-} from '@/stores/system-config-store'
 
 interface TransferDialogProps {
   open: boolean
@@ -42,49 +38,36 @@ interface TransferDialogProps {
   transferring: boolean
 }
 
-export function TransferDialog({
-  open,
-  onOpenChange,
-  onConfirm,
-  availableQuota,
-  transferring,
-}: TransferDialogProps) {
+export function TransferDialog(props: TransferDialogProps) {
   const { t } = useTranslation()
-  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
-  const minimumQuota = Math.ceil(
-    currencyConfig.quotaPerUnit > 0
-      ? currencyConfig.quotaPerUnit
-      : DEFAULT_CURRENCY_CONFIG.quotaPerUnit
-  )
-  const minimumAmount = quotaUnitsToDollars(minimumQuota)
-  const maximumAmount = quotaUnitsToDollars(availableQuota)
-  const [amount, setAmount] = useState(minimumAmount)
+  const maximumAmount = quotaUnitsToDollars(props.availableQuota)
+  const [amount, setAmount] = useState(maximumAmount)
   const transferQuota = parseQuotaFromDollars(amount)
   const canTransfer =
     Number.isFinite(amount) &&
-    transferQuota >= minimumQuota &&
-    transferQuota <= availableQuota
+    transferQuota > 0 &&
+    transferQuota <= props.availableQuota
 
   useEffect(() => {
-    if (open) {
+    if (props.open) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAmount(minimumAmount)
+      setAmount(maximumAmount)
     }
-  }, [minimumAmount, open])
+  }, [maximumAmount, props.open])
 
   const handleConfirm = async () => {
     if (!canTransfer) return
 
-    const success = await onConfirm(transferQuota)
+    const success = await props.onConfirm(transferQuota)
     if (success) {
-      onOpenChange(false)
+      props.onOpenChange(false)
     }
   }
 
   return (
     <Dialog
-      open={open}
-      onOpenChange={onOpenChange}
+      open={props.open}
+      onOpenChange={props.onOpenChange}
       title={t('Transfer Rewards')}
       description={t('Move affiliate rewards to your main balance')}
       contentClassName='max-sm:w-[calc(100vw-1.5rem)] sm:max-w-md'
@@ -96,16 +79,16 @@ export function TransferDialog({
         <>
           <Button
             variant='outline'
-            onClick={() => onOpenChange(false)}
-            disabled={transferring}
+            onClick={() => props.onOpenChange(false)}
+            disabled={props.transferring}
           >
             {t('Cancel')}
           </Button>
           <Button
             onClick={handleConfirm}
-            disabled={transferring || !canTransfer}
+            disabled={props.transferring || !canTransfer}
           >
-            {transferring && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
+            {props.transferring && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
             {t('Transfer')}
           </Button>
         </>
@@ -117,7 +100,7 @@ export function TransferDialog({
             {t('Available Rewards')}
           </Label>
           <div className='text-2xl font-semibold'>
-            {formatQuota(availableQuota)}
+            {formatQuota(props.availableQuota)}
           </div>
         </div>
 
@@ -133,14 +116,10 @@ export function TransferDialog({
             type='number'
             value={amount}
             onChange={(e) => setAmount(Number(e.target.value))}
-            min={minimumAmount}
+            min={0}
             max={maximumAmount}
-            step={minimumAmount}
             className='font-mono text-lg'
           />
-          <p className='text-muted-foreground text-xs'>
-            {t('Minimum:')} {formatQuota(minimumQuota)}
-          </p>
         </div>
       </div>
     </Dialog>
