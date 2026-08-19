@@ -66,6 +66,7 @@ const { createRoot } = await import('react-dom/client')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { ModelStatusContent } = await import('../index')
+const { normalizeModelStatusItem } = await import('../lib/status')
 
 const i18n = createInstance()
 await i18n.use(initReactI18next).init({
@@ -156,7 +157,7 @@ const statusItems: ModelStatusItem[] = [
 
 async function renderModelStatus(
   items: ModelStatusItem[] = statusItems,
-  props: { lastUpdated?: string | number } = {}
+  props: { lastUpdated?: string | number; trendEnd?: number } = {}
 ) {
   const container = document.createElement('div')
   document.body.append(container)
@@ -529,39 +530,73 @@ describe('model status (public page)', () => {
       assert.ok(pageText.includes('This model has no data yet'))
       assert.ok(pageText.includes('No data available'))
       assert.equal(pageText.includes('All systems operational'), false)
-      assert.ok(pageText.includes('24h trend'))
+      assert.ok(pageText.includes('5h trend'))
       assert.equal(container.querySelectorAll('[role="img"]').length, 1)
     } finally {
       await cleanupRendered(root, container)
     }
   })
 
-  test('shows the 24h trend column when trend data is present', async () => {
+  test('shows the 5h trend column when trend data is present', async () => {
     const { container, root } = await renderModelStatus()
 
     try {
       const pageText = container.textContent ?? ''
-      assert.ok(pageText.includes('24h trend'))
+      assert.ok(pageText.includes('5h trend'))
       assert.ok(container.querySelectorAll('[role="img"]').length >= 4)
     } finally {
       await cleanupRendered(root, container)
     }
   })
 
-  test('renders one accessible 24h trend per model with the current rate', async () => {
+  test('renders one accessible 5h trend with ten intervals per model', async () => {
     const { container, root } = await renderModelStatus()
 
     try {
       const trends = container.querySelectorAll('[role="img"]')
       assert.equal(trends.length, 4)
+      for (const trend of trends) {
+        assert.equal(trend.querySelectorAll('[data-trend-bar]').length, 10)
+      }
       const alphaFastRow = [...container.querySelectorAll('article')].find(
         (article) => article.textContent?.includes('alpha-fast')
       )
       assert.ok(alphaFastRow)
       assert.equal(
         alphaFastRow.querySelector('[role="img"]')?.getAttribute('aria-label'),
-        '24h trend: 99.5%'
+        '5h trend: 99.5%'
       )
+    } finally {
+      await cleanupRendered(root, container)
+    }
+  })
+
+  test('renders an API interval without requests as a gray block', async () => {
+    const item = normalizeModelStatusItem({
+      model_name: 'alpha-sparse',
+      provider: 'AlphaAI',
+      request_count: 4,
+      health_score: 75,
+      success_rate: 75,
+      recent_success_rates: [100, null, 50],
+    })
+    const { container, root } = await renderModelStatus([item], {
+      trendEnd: 1_704_067_200,
+    })
+
+    try {
+      const trend = container.querySelector('[role="img"]')
+      assert.ok(trend)
+      const bars = trend.querySelectorAll<HTMLElement>('[data-trend-bar]')
+      assert.equal(bars.length, 10)
+      assert.equal(bars[7].dataset.hasRequests, 'true')
+      assert.equal(bars[8].dataset.hasRequests, 'false')
+      assert.ok(bars[8].classList.contains('bg-muted-foreground/25'))
+      assert.equal(bars[9].dataset.hasRequests, 'true')
+      assert.ok(bars[7].title.includes('/'))
+      assert.ok(bars[7].title.includes('-'))
+      assert.ok(bars[7].title.includes('100.0%'))
+      assert.ok(bars[8].title.includes('No data yet'))
     } finally {
       await cleanupRendered(root, container)
     }

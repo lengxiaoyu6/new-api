@@ -76,6 +76,14 @@ function normalizeStatusMetric(
   return value ?? Number.NaN
 }
 
+function normalizeTrendRates(values: (number | null)[] | undefined): number[] {
+  return (
+    values?.map((value) =>
+      value !== null && Number.isFinite(value) ? value : Number.NaN
+    ) ?? []
+  )
+}
+
 function normalizeModelStatusGroup(
   group: ModelStatusApiGroup
 ): ModelStatusGroupMetric {
@@ -92,8 +100,7 @@ function normalizeModelStatusGroup(
     requestCount,
     ttftSampleCount: group.ttft_sample_count,
     lastUpdated: group.last_updated,
-    recentSuccessRates:
-      group.recent_success_rates?.filter(Number.isFinite) ?? [],
+    recentSuccessRates: normalizeTrendRates(group.recent_success_rates),
     status:
       group.status ??
       group.health ??
@@ -133,8 +140,7 @@ export function normalizeModelStatusItem(
     requestCount,
     ttftSampleCount: item.ttft_sample_count,
     lastUpdated: item.last_updated,
-    recentSuccessRates:
-      item.recent_success_rates?.filter(Number.isFinite) ?? [],
+    recentSuccessRates: normalizeTrendRates(item.recent_success_rates),
     groups:
       item.groups
         ?.filter((group) => group.group !== '')

@@ -63,7 +63,7 @@ export type ModelStatusApiGroup = {
   request_count?: number
   ttft_sample_count?: number
   last_updated?: string | number
-  recent_success_rates?: number[]
+  recent_success_rates?: (number | null)[]
 }
 
 export type ModelStatusApiItem = {
@@ -82,7 +82,7 @@ export type ModelStatusApiItem = {
   ttft_sample_count?: number
   owner_by?: string
   last_updated?: string | number
-  recent_success_rates?: number[]
+  recent_success_rates?: (number | null)[]
   groups?: ModelStatusApiGroup[]
   status?: ModelHealthStatus
 }

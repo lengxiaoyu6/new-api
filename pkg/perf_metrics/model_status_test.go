@@ -180,16 +180,19 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	assert.InDelta(t, openAIModel.SuccessRate, openAIModel.HealthScore, 0.001)
 	assert.Equal(t, "degraded", openAIModel.Status)
 	assert.Equal(t, formatStatusTime(previousBucket), openAIModel.LastUpdated)
-	assert.Equal(t, []float64{90}, openAIModel.RecentSuccessRates)
+	require.Len(t, openAIModel.RecentSuccessRates, modelStatusTrendPoints)
+	assert.Equal(t, []float64{90}, nonEmptyStatusTrendRates(openAIModel.RecentSuccessRates))
 	require.Len(t, openAIModel.Groups, 2)
 	defaultGroup := requireModelStatusGroup(t, openAIModel.Groups, "default")
 	assert.Equal(t, int64(6), defaultGroup.RequestCount)
 	assert.Equal(t, "healthy", defaultGroup.Status)
-	assert.Equal(t, []float64{100}, defaultGroup.RecentSuccessRates)
+	require.Len(t, defaultGroup.RecentSuccessRates, modelStatusTrendPoints)
+	assert.Equal(t, []float64{100}, nonEmptyStatusTrendRates(defaultGroup.RecentSuccessRates))
 	vipGroup := requireModelStatusGroup(t, openAIModel.Groups, "vip")
 	assert.Equal(t, int64(4), vipGroup.RequestCount)
 	assert.Equal(t, "down", vipGroup.Status)
-	assert.Equal(t, []float64{75}, vipGroup.RecentSuccessRates)
+	require.Len(t, vipGroup.RecentSuccessRates, modelStatusTrendPoints)
+	assert.Equal(t, []float64{75}, nonEmptyStatusTrendRates(vipGroup.RecentSuccessRates))
 
 	claudeModel := requireModelStatusItem(t, result.Models, "claude-test")
 	assert.Equal(t, "CatalogClaude", claudeModel.Provider)
@@ -199,7 +202,8 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	assert.Equal(t, int64(2), claudeModel.RequestCount)
 	assert.Equal(t, "healthy", claudeModel.Status)
 	assert.Equal(t, formatStatusTime(currentBucket), claudeModel.LastUpdated)
-	assert.Equal(t, []float64{100}, claudeModel.RecentSuccessRates)
+	require.Len(t, claudeModel.RecentSuccessRates, modelStatusTrendPoints)
+	assert.Equal(t, []float64{100}, nonEmptyStatusTrendRates(claudeModel.RecentSuccessRates))
 
 	idleModel := requireModelStatusItem(t, result.Models, "idle-test")
 	assert.Equal(t, "CatalogIdle", idleModel.Provider)
@@ -208,12 +212,13 @@ func TestQueryModelStatusUsesCatalogVendorsAndMergesGroups(t *testing.T) {
 	assert.Equal(t, int64(0), idleModel.FastestTtftMs)
 	assert.Equal(t, int64(0), idleModel.SlowestTtftMs)
 	assert.Equal(t, "unknown", idleModel.Status)
-	assert.Empty(t, idleModel.RecentSuccessRates)
+	require.Len(t, idleModel.RecentSuccessRates, modelStatusTrendPoints)
+	assert.Empty(t, nonEmptyStatusTrendRates(idleModel.RecentSuccessRates))
 	require.Len(t, idleModel.Groups, 2)
 	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "default").Status)
 	assert.Equal(t, "unknown", requireModelStatusGroup(t, idleModel.Groups, "vip").Status)
-	assert.Empty(t, requireModelStatusGroup(t, idleModel.Groups, "default").RecentSuccessRates)
-	assert.Empty(t, requireModelStatusGroup(t, idleModel.Groups, "vip").RecentSuccessRates)
+	assert.Empty(t, nonEmptyStatusTrendRates(requireModelStatusGroup(t, idleModel.Groups, "default").RecentSuccessRates))
+	assert.Empty(t, nonEmptyStatusTrendRates(requireModelStatusGroup(t, idleModel.Groups, "vip").RecentSuccessRates))
 
 	openAIProvider := requireModelStatusProvider(t, result.Providers, fixture.OpenAIProvider)
 	assert.Equal(t, "CatalogOpenAI", openAIProvider.Provider)
@@ -276,27 +281,45 @@ func TestQueryModelStatusReturnsEmptyCollectionsWithoutCatalogModels(t *testing.
 	assert.NotEmpty(t, result.LastUpdated)
 }
 
-func TestStatusTrendRatesOrdersByTimeAndDownsamplesEvenly(t *testing.T) {
-	buckets := make(map[int64]counters)
-	for i := int64(0); i < 10; i++ {
-		// requestCount 10, successCount increments → rates 10, 20, ... 100.
-		buckets[1000+i*600] = counters{requestCount: 10, successCount: i + 1}
+func TestStatusTrendRatesAggregatesTenThirtyMinuteIntervalsAndPreservesGaps(t *testing.T) {
+	endTs := int64(20*1800 + 900)
+	firstInterval := int64(11 * 1800)
+	buckets := map[int64]counters{
+		firstInterval + 600:    {requestCount: 10, successCount: 10},
+		firstInterval + 1200:   {requestCount: 10, successCount: 8},
+		firstInterval + 2*1800: {requestCount: 4, successCount: 2},
+		firstInterval + 9*1800: {requestCount: 2, successCount: 2},
+		firstInterval - 600:    {requestCount: 10, successCount: 0},
+		endTs + 60:             {requestCount: 10, successCount: 0},
 	}
 
-	all := statusTrendRates(buckets, 0)
-	assert.Nil(t, all)
+	rates := statusTrendRates(buckets, endTs)
 
-	full := statusTrendRates(buckets, 20)
-	require.Len(t, full, 10)
-	assert.Equal(t, 10.0, full[0])
-	assert.Equal(t, 100.0, full[9])
+	require.Len(t, rates, modelStatusTrendPoints)
+	require.NotNil(t, rates[0])
+	assert.Equal(t, 90.0, *rates[0])
+	assert.Nil(t, rates[1])
+	require.NotNil(t, rates[2])
+	assert.Equal(t, 50.0, *rates[2])
+	for _, rate := range rates[3:9] {
+		assert.Nil(t, rate)
+	}
+	require.NotNil(t, rates[9])
+	assert.Equal(t, 100.0, *rates[9])
 
-	downsampled := statusTrendRates(buckets, 4)
-	require.Len(t, downsampled, 4)
-	assert.Equal(t, 10.0, downsampled[0])
-	assert.Equal(t, 100.0, downsampled[3])
+	emptyRates := statusTrendRates(nil, endTs)
+	require.Len(t, emptyRates, modelStatusTrendPoints)
+	assert.Empty(t, nonEmptyStatusTrendRates(emptyRates))
+}
 
-	assert.Nil(t, statusTrendRates(nil, 4))
+func nonEmptyStatusTrendRates(rates []*float64) []float64 {
+	values := make([]float64, 0, len(rates))
+	for _, rate := range rates {
+		if rate != nil {
+			values = append(values, *rate)
+		}
+	}
+	return values
 }
 
 func requireModelStatusItem(t *testing.T, items []ModelStatusItem, modelName string) ModelStatusItem {

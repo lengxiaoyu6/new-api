@@ -16,65 +16,123 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { useTranslation } from 'react-i18next'
+
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import { toIntlLocale } from '@/i18n/languages'
 import { cn } from '@/lib/utils'
 
-const MAX_TREND_BARS = 96
+const TREND_BAR_COUNT = 10
+const TREND_INTERVAL_SECONDS = 30 * 60
+
+type TrendInterval = {
+  start: number
+  end: number
+}
+
+type TrendBar = {
+  key: string
+  value: number
+  interval?: TrendInterval
+}
 
 export function TrendTimeline(props: {
   values: number[]
   currentValue: number
   label: string
   emptyLabel: string
+  trendEnd?: number
   compact?: boolean
 }) {
-  const values = props.values.slice(-MAX_TREND_BARS)
-  const hasData = values.some(Number.isFinite)
+  const { i18n, t } = useTranslation()
+  const values = props.values.slice(-TREND_BAR_COUNT)
+  const timelineValues = [
+    ...Array.from(
+      { length: TREND_BAR_COUNT - values.length },
+      () => Number.NaN
+    ),
+    ...values,
+  ]
+  const hasData = timelineValues.some(Number.isFinite)
   const currentValue = Number.isFinite(props.currentValue)
     ? props.currentValue
-    : values.findLast(Number.isFinite)
-  const timelineValues = hasData
-    ? values
-    : Array.from({ length: MAX_TREND_BARS }, () => Number.NaN)
-  const bars = buildTrendBars(timelineValues)
-  const timelineWidth = Math.min(bars.length * (props.compact ? 4 : 5), 480)
+    : timelineValues.findLast(Number.isFinite)
+  const bars = buildTrendBars(
+    timelineValues,
+    buildTrendIntervals(props.trendEnd)
+  )
 
   return (
     <div
       className={cn(
-        'flex min-w-0 items-center',
+        'flex w-full min-w-0 items-center',
         props.compact ? 'gap-2' : 'gap-3'
       )}
     >
-      <div
-        role='img'
-        aria-label={
-          hasData
-            ? `${props.label}: ${formatTrendRate(currentValue)}`
-            : `${props.label}: ${props.emptyLabel}`
-        }
-        className={cn(
-          'flex max-w-full min-w-0 shrink items-center gap-px overflow-hidden',
-          props.compact ? 'h-6' : 'h-8'
-        )}
-        style={{ width: `${timelineWidth}px` }}
-      >
-        {bars.map((bar) => (
-          <span
-            key={bar.key}
-            title={
-              Number.isFinite(bar.value)
-                ? formatTrendRate(bar.value)
-                : props.emptyLabel
-            }
-            aria-hidden
-            className={cn(
-              'min-w-[1px] flex-1 rounded-[1px] transition-opacity hover:opacity-70',
-              props.compact ? 'h-4 max-w-[3px]' : 'h-6 max-w-1',
-              trendBarClass(bar.value)
-            )}
-          />
-        ))}
-      </div>
+      <TooltipProvider delay={100}>
+        <div
+          role='img'
+          aria-label={
+            hasData
+              ? `${props.label}: ${formatTrendRate(currentValue)}`
+              : `${props.label}: ${props.emptyLabel}`
+          }
+          className={cn(
+            'grid w-full max-w-[480px] min-w-0 flex-1 grid-cols-10 items-center overflow-hidden',
+            props.compact ? 'gap-0.5' : 'gap-1',
+            props.compact ? 'h-6' : 'h-8'
+          )}
+        >
+          {bars.map((bar) => {
+            const intervalLabel = formatTrendInterval(
+              bar.interval,
+              i18n.language
+            )
+            const rateLabel = Number.isFinite(bar.value)
+              ? formatTrendRate(bar.value)
+              : props.emptyLabel
+            const tooltipLabel = [
+              intervalLabel,
+              `${t('Success rate')}: ${rateLabel}`,
+            ]
+              .filter(Boolean)
+              .join('\n')
+
+            return (
+              <Tooltip key={bar.key}>
+                <TooltipTrigger
+                  render={
+                    <span
+                      data-trend-bar
+                      data-has-requests={Number.isFinite(bar.value)}
+                      title={tooltipLabel}
+                      aria-hidden
+                      className={cn(
+                        'min-w-0 rounded-[2px] transition-opacity hover:opacity-70',
+                        props.compact ? 'h-4' : 'h-6',
+                        trendBarClass(bar.value)
+                      )}
+                    />
+                  }
+                />
+                <TooltipContent side='top' className='font-mono text-xs'>
+                  {intervalLabel && (
+                    <div className='font-medium'>{intervalLabel}</div>
+                  )}
+                  <div>
+                    {t('Success rate')}: {rateLabel}
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            )
+          })}
+        </div>
+      </TooltipProvider>
       <span
         className={cn(
           'w-14 shrink-0 text-right font-mono font-semibold tabular-nums',
@@ -100,14 +158,67 @@ function trendBarClass(value: number): string {
   return 'bg-destructive'
 }
 
-function buildTrendBars(values: number[]): { key: string; value: number }[] {
+function buildTrendBars(
+  values: number[],
+  intervals: (TrendInterval | undefined)[]
+): TrendBar[] {
   const occurrences = new Map<number, number>()
 
-  return values.map((value) => {
+  return values.map((value, index) => {
     const occurrence = (occurrences.get(value) ?? 0) + 1
     occurrences.set(value, occurrence)
-    return { key: `${value}-${occurrence}`, value }
+    return { key: `${value}-${occurrence}`, value, interval: intervals[index] }
   })
+}
+
+function buildTrendIntervals(trendEnd?: number): (TrendInterval | undefined)[] {
+  if (!Number.isFinite(trendEnd) || trendEnd === undefined || trendEnd <= 0) {
+    return Array.from({ length: TREND_BAR_COUNT }, () => undefined)
+  }
+
+  const endTimestamp = Math.floor(trendEnd)
+  const currentIntervalStart =
+    endTimestamp - (endTimestamp % TREND_INTERVAL_SECONDS)
+  const firstIntervalStart =
+    currentIntervalStart - (TREND_BAR_COUNT - 1) * TREND_INTERVAL_SECONDS
+
+  return Array.from({ length: TREND_BAR_COUNT }, (_, index) => {
+    const start = firstIntervalStart + index * TREND_INTERVAL_SECONDS
+    return { start, end: start + TREND_INTERVAL_SECONDS }
+  })
+}
+
+function formatTrendInterval(
+  interval: TrendInterval | undefined,
+  language: string
+): string | undefined {
+  if (!interval) return undefined
+
+  const locale = toIntlLocale(language)
+  const dateFormatter = new Intl.DateTimeFormat(locale, {
+    month: 'numeric',
+    day: 'numeric',
+  })
+  const timeFormatter = new Intl.DateTimeFormat(locale, {
+    hour: 'numeric',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+  const start = new Date(interval.start * 1000)
+  const end = new Date(interval.end * 1000)
+  const startDate = dateFormatter.format(start)
+  const endDate = dateFormatter.format(end)
+  const startTime = formatTrendClock(timeFormatter.format(start))
+  const endTime = formatTrendClock(timeFormatter.format(end))
+
+  if (startDate === endDate) {
+    return `${startDate} ${startTime}-${endTime}`
+  }
+  return `${startDate} ${startTime}-${endDate} ${endTime}`
+}
+
+function formatTrendClock(value: string): string {
+  return value.replace(/^0(?=\d)/, '')
 }
 
 function trendTextClass(value: number | undefined): string {

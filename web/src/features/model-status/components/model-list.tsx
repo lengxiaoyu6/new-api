@@ -33,7 +33,10 @@ import { TrendTimeline } from './trend-timeline'
 
 const MODEL_STATUS_GRID = 'lg:grid-cols-[minmax(240px,0.7fr)_minmax(0,1.3fr)]'
 
-export function ModelList(props: { items: ModelStatusItem[] }) {
+export function ModelList(props: {
+  items: ModelStatusItem[]
+  trendEnd?: number
+}) {
   const { t } = useTranslation()
 
   if (props.items.length === 0) return null
@@ -67,7 +70,7 @@ export function ModelList(props: { items: ModelStatusItem[] }) {
         )}
       >
         <div>{t('Model')}</div>
-        <div>{t('24h trend')}</div>
+        <div>{t('5h trend')}</div>
       </div>
       <div className='divide-border divide-y'>
         {providerGroups.map((group) => (
@@ -95,6 +98,7 @@ export function ModelList(props: { items: ModelStatusItem[] }) {
                 <ModelRow
                   key={`${item.providerId}-${item.modelName}`}
                   item={item}
+                  trendEnd={props.trendEnd}
                 />
               ))}
             </div>
@@ -105,7 +109,7 @@ export function ModelList(props: { items: ModelStatusItem[] }) {
   )
 }
 
-function ModelRow(props: { item: ModelStatusItem }) {
+function ModelRow(props: { item: ModelStatusItem; trendEnd?: number }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const hasGroups = props.item.groups.length > 0
@@ -162,8 +166,9 @@ function ModelRow(props: { item: ModelStatusItem }) {
           <TrendTimeline
             values={props.item.recentSuccessRates}
             currentValue={props.item.successRate}
-            label={t('24h trend')}
+            label={t('5h trend')}
             emptyLabel={t('No data yet')}
+            trendEnd={props.trendEnd}
           />
           {props.item.status === 'unknown' && (
             <span className='sr-only'>{t('This model has no data yet')}</span>
@@ -177,7 +182,11 @@ function ModelRow(props: { item: ModelStatusItem }) {
         >
           <div className='divide-border divide-y'>
             {props.item.groups.map((group) => (
-              <GroupDetail key={group.group} group={group} />
+              <GroupDetail
+                key={group.group}
+                group={group}
+                trendEnd={props.trendEnd}
+              />
             ))}
           </div>
         </CollapsibleContent>
@@ -186,7 +195,10 @@ function ModelRow(props: { item: ModelStatusItem }) {
   )
 }
 
-function GroupDetail(props: { group: ModelStatusGroupMetric }) {
+function GroupDetail(props: {
+  group: ModelStatusGroupMetric
+  trendEnd?: number
+}) {
   const { t } = useTranslation()
 
   return (
@@ -206,8 +218,9 @@ function GroupDetail(props: { group: ModelStatusGroupMetric }) {
       <TrendTimeline
         values={props.group.recentSuccessRates}
         currentValue={props.group.successRate}
-        label={`${props.group.group}: ${t('24h trend')}`}
+        label={`${props.group.group}: ${t('5h trend')}`}
         emptyLabel={t('No data yet')}
+        trendEnd={props.trendEnd}
         compact
       />
     </div>

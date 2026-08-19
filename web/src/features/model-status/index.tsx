@@ -52,6 +52,7 @@ type ModelStatusContentProps = {
   isError?: boolean
   isFetching?: boolean
   lastUpdated?: string | number
+  trendEnd?: number
   onRefresh?: () => void
 }
 
@@ -80,6 +81,7 @@ export function ModelStatus() {
   const lastUpdated =
     modelStatusQuery.data?.data.last_updated ||
     modelStatusQuery.data?.data.generated_at
+  const trendEnd = modelStatusQuery.data?.data.generated_at
 
   return (
     <PublicLayout showMainContainer={false}>
@@ -89,6 +91,7 @@ export function ModelStatus() {
         isError={modelStatusQuery.isError}
         isFetching={modelStatusQuery.isFetching}
         lastUpdated={lastUpdated}
+        trendEnd={trendEnd}
         onRefresh={() => void modelStatusQuery.refetch()}
       />
     </PublicLayout>
@@ -348,7 +351,7 @@ export function ModelStatusContent(props: ModelStatusContentProps) {
               </Card>
 
               {visibleItems.length > 0 ? (
-                <ModelList items={visibleItems} />
+                <ModelList items={visibleItems} trendEnd={props.trendEnd} />
               ) : (
                 <Card className='rounded-lg border-dashed'>
                   <CardContent className='py-12 text-center'>
