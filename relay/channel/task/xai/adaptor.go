@@ -141,6 +141,38 @@ func (a *TaskAdaptor) DoRequest(c *gin.Context, info *relaycommon.RelayInfo, req
 	return channel.DoTaskApiRequest(a, c, info, requestBody)
 }
 
+// ParseResponse adapts the legacy xAI response to the transport-independent
+// task result consumed by the current relay pipeline.
+func (a *TaskAdaptor) ParseResponse(_ *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*channel.TaskSubmitResponse, *dto.TaskError) {
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, service.TaskErrorWrapper(err, "read_response_body_failed", http.StatusInternalServerError)
+	}
+	var parsed submitResponse
+	if err := common.Unmarshal(responseBody, &parsed); err != nil {
+		return nil, service.TaskErrorWrapper(err, "unmarshal_response_body_failed", http.StatusBadGateway)
+	}
+	if parsed.Error != nil {
+		return nil, service.TaskErrorWrapper(fmt.Errorf("%s", parsed.Error.Message), "task_submit_failed", http.StatusBadGateway)
+	}
+	upstreamTaskID := parsed.RequestID
+	if upstreamTaskID == "" {
+		upstreamTaskID = parsed.ID
+	}
+	if upstreamTaskID == "" {
+		return nil, service.TaskErrorWrapper(fmt.Errorf("request_id/id is empty"), "invalid_response", http.StatusBadGateway)
+	}
+	openAIVideo := videodto.NewOpenAIVideo()
+	openAIVideo.ID = info.PublicTaskID
+	openAIVideo.TaskID = info.PublicTaskID
+	openAIVideo.Model = info.OriginModelName
+	return &channel.TaskSubmitResponse{
+		UpstreamTaskID: upstreamTaskID,
+		TaskData:       responseBody,
+		ClientResponse: openAIVideo,
+	}, nil
+}
+
 func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (taskID string, taskData []byte, taskErr *dto.TaskError) {
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {

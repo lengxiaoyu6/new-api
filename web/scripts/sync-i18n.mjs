@@ -23,6 +23,7 @@ import path from 'node:path'
 const LOCALES_DIR = path.resolve('src/i18n/locales')
 const FALLBACK_COMPARE_LOCALE = 'en' // used for "still English" detection only
 const BRAND_AND_LITERAL_KEYS = new Set([
+  '1M token',
   'AI Proxy',
   'AIGC2D',
   'Alipay',
@@ -40,6 +41,7 @@ const BRAND_AND_LITERAL_KEYS = new Set([
   'Client Secret',
   'Cloudflare',
   'Cohere',
+  'credit',
   'DeepSeek',
   'Discord',
   'DoubaoVideo',
