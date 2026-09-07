@@ -81,7 +81,14 @@ import {
 } from '@/components/ui/form'
 import { IconBadge, type IconBadgeTone } from '@/components/ui/icon-badge'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import {
   Sheet,
@@ -163,6 +170,7 @@ import {
   validateModelMappingJson,
   hasAdvancedSettingsErrors,
 } from '../../lib'
+import { parseChannelBillingProfilesJson } from '../../lib/channel-billing-profiles'
 import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
@@ -170,6 +178,7 @@ import {
 import type { Channel } from '../../types'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
+import { ChannelBillingProfileDialog } from '../dialogs/channel-billing-profile-dialog'
 import { FetchModelsDialog } from '../dialogs/fetch-models-dialog'
 import {
   MissingModelsConfirmationDialog,
@@ -652,6 +661,8 @@ export function ChannelMutateDrawer({
   const [paramOverrideEditorOpen, setParamOverrideEditorOpen] = useState(false)
   const [advancedCustomEditorOpen, setAdvancedCustomEditorOpen] =
     useState(false)
+  const [billingProfileEditorOpen, setBillingProfileEditorOpen] =
+    useState(false)
   const [clipboardConnectionInfo, setClipboardConnectionInfo] =
     useState<ChannelConnectionInfo | null>(null)
 
@@ -718,6 +729,7 @@ export function ChannelMutateDrawer({
     'upstream_model_update_check_enabled'
   )
   const currentSettings = form.watch('settings')
+  const currentBillingProfiles = form.watch('billing_profiles')
   const currentAdvancedCustom = form.watch('advanced_custom')
   const currentPriority = form.watch('priority')
   const currentWeight = form.watch('weight')
@@ -1147,6 +1159,14 @@ export function ChannelMutateDrawer({
       label: model,
     }))
   }, [allModelsList, currentModelsArray])
+
+  const billingProfilesValue = useMemo<Record<string, unknown>>(() => {
+    const parsed = parseChannelBillingProfilesJson(currentBillingProfiles)
+    return parsed || {}
+  }, [currentBillingProfiles])
+  const billingProfilesJsonValid = useMemo(() => {
+    return parseChannelBillingProfilesJson(currentBillingProfiles) !== null
+  }, [currentBillingProfiles])
 
   const modelMappingGuardrail = useMemo<ModelMappingGuardrail>(() => {
     if (!currentModelMapping?.trim()) {
@@ -1987,35 +2007,35 @@ export function ChannelMutateDrawer({
                                 <FormItem>
                                   <FormLabel>{t('Task plugin *')}</FormLabel>
                                   {canBindTaskPlugin ? (
-                                    <FormControl><Combobox
-value={field.value}
-onValueChange={(value) => {
-                                        field.onChange(value)
-                                        const plugin =
-                                          taskPluginOptionsQuery.data?.find(
-                                            (item) => item.key === value
-                                          )
-                                        if (plugin?.models?.length) {
-                                          form.setValue(
-                                            'models',
-                                            formatModelsArray(plugin.models),
-                                            {
-                                              shouldDirty: true,
-                                            }
-                                          )
-                                        }
-                                      }}
-options={(
-                                        taskPluginOptionsQuery.data ?? []
-                                      ).map((plugin) => ({
-                                        value: plugin.key,
-                                        label: `${plugin.name} (${plugin.key})`,
-                                      }))}
-className='w-full'
-placeholder={t(
-                                              'Select task plugin'
-                                            )}
-/></FormControl>
+                                    <FormControl>
+                                      <Combobox
+                                        value={field.value}
+                                        onValueChange={(value) => {
+                                          field.onChange(value)
+                                          const plugin =
+                                            taskPluginOptionsQuery.data?.find(
+                                              (item) => item.key === value
+                                            )
+                                          if (plugin?.models?.length) {
+                                            form.setValue(
+                                              'models',
+                                              formatModelsArray(plugin.models),
+                                              {
+                                                shouldDirty: true,
+                                              }
+                                            )
+                                          }
+                                        }}
+                                        options={(
+                                          taskPluginOptionsQuery.data ?? []
+                                        ).map((plugin) => ({
+                                          value: plugin.key,
+                                          label: `${plugin.name} (${plugin.key})`,
+                                        }))}
+                                        className='w-full'
+                                        placeholder={t('Select task plugin')}
+                                      />
+                                    </FormControl>
                                   ) : (
                                     <FormControl>
                                       <Input
@@ -3643,14 +3663,44 @@ placeholder={t(
                             icon={<Sparkles className='h-4 w-4' />}
                             iconTone='chart-3'
                           />
+                          <div className='bg-muted/20 flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between'>
+                            <div className='min-w-0'>
+                              <p className='text-sm font-medium'>
+                                {t('Visual billing profile editor')}
+                              </p>
+                              <p className='text-muted-foreground text-xs'>
+                                {t(
+                                  'Configure model-specific channel prices with tiers, cache prices, and request rules.'
+                                )}
+                              </p>
+                            </div>
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              disabled={
+                                isSubmitting ||
+                                sensitiveLocked ||
+                                !billingProfilesJsonValid
+                              }
+                              onClick={() => setBillingProfileEditorOpen(true)}
+                            >
+                              <Sparkles className='mr-2 h-4 w-4' />
+                              {t('Open visual editor')}
+                            </Button>
+                          </div>
                           <FormField
                             control={form.control}
                             name='billing_profiles'
                             render={({ field }) => (
                               <FormItem>
-                                <FormLabel>{t('Billing profiles JSON')}</FormLabel>
+                                <FormLabel>
+                                  {t('Billing profiles JSON')}
+                                </FormLabel>
                                 <FormDescription>
-                                  {t('Override tiered expression pricing for exact model names on this channel. Leave empty to inherit model pricing.')}
+                                  {t(
+                                    'Override tiered expression pricing for exact model names on this channel. Leave empty to inherit model pricing.'
+                                  )}
                                 </FormDescription>
                                 <FormControl>
                                   <JsonCodeEditor
@@ -4901,6 +4951,25 @@ placeholder={t(
               shouldDirty: true,
               shouldValidate: true,
             })
+          }}
+        />
+      )}
+
+      {billingProfileEditorOpen && !sensitiveLocked && (
+        <ChannelBillingProfileDialog
+          open={billingProfileEditorOpen}
+          onOpenChange={setBillingProfileEditorOpen}
+          modelOptions={currentModelsArray}
+          value={billingProfilesValue}
+          onSave={(nextValue) => {
+            form.setValue(
+              'billing_profiles',
+              JSON.stringify(nextValue, null, 2),
+              {
+                shouldDirty: true,
+                shouldValidate: true,
+              }
+            )
           }}
         />
       )}
