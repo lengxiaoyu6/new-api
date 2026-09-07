@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -23,6 +24,32 @@ func TestBuildRequestURL(t *testing.T) {
 	url, err := a.BuildRequestURL(&relaycommon.RelayInfo{})
 	require.NoError(t, err)
 	assert.Equal(t, "https://api.x.ai/v1/videos/generations", url)
+}
+
+func TestFetchTaskUsesUpstreamIDAndSupportsLegacyTasks(t *testing.T) {
+	service.InitHttpClient()
+	for _, tc := range []struct {
+		name   string
+		task   model.Task
+		wantID string
+	}{
+		{"upstream_id", model.Task{TaskID: "task_public", PrivateData: model.TaskPrivateData{UpstreamTaskID: "req_upstream"}}, "req_upstream"},
+		{"legacy_id", model.Task{TaskID: "req_legacy"}, "req_legacy"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				assert.Equal(t, http.MethodGet, r.Method)
+				assert.Equal(t, "/v1/videos/"+tc.wantID, r.URL.Path)
+				assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			resp, err := (&TaskAdaptor{}).FetchTask(server.URL, "test-key", &tc.task, "")
+			require.NoError(t, err)
+			require.NoError(t, resp.Body.Close())
+			assert.Equal(t, http.StatusOK, resp.StatusCode)
+		})
+	}
 }
 
 // TestParseTaskResultStatusMapping locks the xAI status vocabulary
@@ -50,7 +77,7 @@ func TestParseTaskResultStatusMapping(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			info, err := a.ParseTaskResult([]byte(tc.body))
+			info, err := a.ParseTaskResult(&model.Task{}, &http.Response{StatusCode: http.StatusOK}, []byte(tc.body))
 			require.NoError(t, err)
 			require.NotNil(t, info)
 			assert.Equal(t, tc.wantStatus, info.Status)

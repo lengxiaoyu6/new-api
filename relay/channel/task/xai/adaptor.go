@@ -210,13 +210,12 @@ func (a *TaskAdaptor) DoResponse(c *gin.Context, resp *http.Response, info *rela
 	return upstreamTaskID, responseBody, nil
 }
 
-func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
-	taskID, ok := body["task_id"].(string)
-	if !ok {
+func (a *TaskAdaptor) FetchTask(baseUrl, key string, task *model.Task, proxy string) (*http.Response, error) {
+	if task == nil || task.GetUpstreamTaskID() == "" {
 		return nil, fmt.Errorf("invalid task_id")
 	}
 
-	uri := fmt.Sprintf("%s/v1/videos/%s", baseUrl, taskID)
+	uri := fmt.Sprintf("%s/v1/videos/%s", baseUrl, task.GetUpstreamTaskID())
 
 	req, err := http.NewRequest(http.MethodGet, uri, nil)
 	if err != nil {
@@ -239,7 +238,7 @@ func (a *TaskAdaptor) GetChannelName() string {
 	return ChannelName
 }
 
-func (a *TaskAdaptor) ParseTaskResult(respBody []byte) (*relaycommon.TaskInfo, error) {
+func (a *TaskAdaptor) ParseTaskResult(_ *model.Task, _ *http.Response, respBody []byte) (*relaycommon.TaskInfo, error) {
 	resTask := fetchResponse{}
 	if err := common.Unmarshal(respBody, &resTask); err != nil {
 		return nil, errors.Wrap(err, "unmarshal task result failed")
