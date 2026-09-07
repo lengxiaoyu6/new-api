@@ -98,3 +98,18 @@ func TestAdvancedCustomChannelRequiresModelListRouteOnlyWhenUpdateChecksEnabled(
 		})
 	}
 }
+
+func TestChannelValidateSettingsRejectsInvalidBillingProfile(t *testing.T) {
+	channel := &Channel{}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{BillingProfiles: map[string]dto.ChannelBillingProfile{
+		"model": {
+			Key:         "bad key",
+			Label:       dto.ChannelBillingProfileLabel{En: "Bad"},
+			BillingMode: "tiered_expr",
+			BillingExpr: `tier("base", p)`,
+		},
+	}})
+	err := channel.ValidateSettings()
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid billing profile key")
+}

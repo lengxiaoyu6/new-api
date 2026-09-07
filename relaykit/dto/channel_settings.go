@@ -90,6 +90,23 @@ type ChannelOtherSettings struct {
 	// rejection. Empty follows the default allow policy. Accepted values:
 	// "", "allow", "safe", "strict".
 	ToolLossPolicy string `json:"tool_loss_policy,omitempty"`
+	// BillingProfiles overrides the model-level tiered expression for an exact
+	// model name on this channel. Profiles are validated by the host module.
+	BillingProfiles map[string]ChannelBillingProfile `json:"billing_profiles,omitempty"`
+}
+
+// ChannelBillingProfile is a channel-scoped override for a tiered billing
+// expression. BillingMode is currently restricted to tiered_expr by the host.
+type ChannelBillingProfile struct {
+	Key         string                     `json:"key"`
+	Label       ChannelBillingProfileLabel `json:"label,omitempty"`
+	BillingMode string                     `json:"billing_mode"`
+	BillingExpr string                     `json:"billing_expr"`
+}
+
+type ChannelBillingProfileLabel struct {
+	Zh string `json:"zh,omitempty"`
+	En string `json:"en,omitempty"`
 }
 
 func (s *ChannelOtherSettings) IsOpenRouterEnterprise() bool {

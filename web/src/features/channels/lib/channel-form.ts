@@ -294,6 +294,10 @@ export const channelFormSchema = z
       .string()
       .optional()
       .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
+    billing_profiles: z
+      .string()
+      .optional()
+      .refine(isOptionalJsonObject, ERROR_MESSAGES.INVALID_JSON),
     advanced_custom: z.string().optional(),
     other: z.string().optional(),
     // Multi-key options (not sent to backend directly)
@@ -481,6 +485,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   param_override: '',
   header_override: '',
   settings: '{}',
+  billing_profiles: '{}',
   other: '',
   multi_key_mode: 'single',
   multi_key_type: 'random',
@@ -579,6 +584,7 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateAutoSyncEnabled = false
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
+  let billingProfiles = '{}'
 
   if (channel.settings) {
     try {
@@ -606,6 +612,9 @@ export function transformChannelToFormDefaults(
         : ''
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
+      }
+      if (parsed.billing_profiles && isJsonObjectValue(parsed.billing_profiles)) {
+        billingProfiles = JSON.stringify(parsed.billing_profiles, null, 2)
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -635,6 +644,7 @@ export function transformChannelToFormDefaults(
     param_override: channel.param_override || '',
     header_override: channel.header_override || '',
     settings: channel.settings || '{}',
+    billing_profiles: billingProfiles,
     other: channel.other || '',
     multi_key_mode: 'single',
     multi_key_type: channel.channel_info.multi_key_mode || 'random',
@@ -716,6 +726,18 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
     settingsObj.vertex_key_type = formData.vertex_key_type || 'json'
   } else if ('vertex_key_type' in settingsObj) {
     delete settingsObj.vertex_key_type
+  }
+
+  try {
+    const profiles = parseOptionalJson(formData.billing_profiles)
+    if (profiles === undefined) {
+      delete settingsObj.billing_profiles
+    } else {
+      settingsObj.billing_profiles = profiles
+    }
+  } catch {
+    // Form validation reports malformed JSON; preserve the existing value here
+    // so unrelated settings are not discarded before submission.
   }
 
   // Add azure_responses_version for Azure channels (type 3)

@@ -166,6 +166,15 @@ func appendBillingInfo(relayInfo *relaycommon.RelayInfo, other *model.LogOther) 
 	if relayInfo == nil || other == nil {
 		return
 	}
+	if snap := relayInfo.TieredBillingSnapshot; snap != nil && snap.ProfileSource != "" {
+		other.SetAdmin("billing_profile", map[string]any{
+			"key":        snap.ProfileKey,
+			"label":      snap.ProfileLabel,
+			"source":     snap.ProfileSource,
+			"channel_id": snap.ChannelID,
+			"expr_hash":  snap.ExprHash,
+		})
+	}
 	// billing_source: "wallet" or "subscription"
 	if relayInfo.BillingSource != "" {
 		other.SetPublic("billing_source", relayInfo.BillingSource)

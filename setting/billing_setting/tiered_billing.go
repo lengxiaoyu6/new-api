@@ -3,7 +3,9 @@ package billing_setting
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
@@ -14,6 +16,103 @@ import (
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/samber/lo"
 )
+
+const (
+	BillingProfileSourceModel   = "model"
+	BillingProfileSourceChannel = "channel"
+)
+
+type BillingDefinition struct {
+	BillingMode   string
+	BillingExpr   string
+	ExprHash      string
+	ProfileKey    string
+	ProfileLabel  map[string]string
+	ProfileSource string
+	ChannelID     int
+}
+
+func (d BillingDefinition) Label(language string) string {
+	if d.ProfileLabel == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(d.ProfileLabel[language]); value != "" {
+		return value
+	}
+	if language == "zh" {
+		return strings.TrimSpace(d.ProfileLabel["en"])
+	}
+	return strings.TrimSpace(d.ProfileLabel["zh"])
+}
+
+func ResolveChannelBillingProfile(settings dto.ChannelOtherSettings, modelName string) (dto.ChannelBillingProfile, bool) {
+	profile, ok := settings.BillingProfiles[strings.TrimSpace(modelName)]
+	return profile, ok
+}
+
+// ResolveBillingDefinition returns the channel override when present and a
+// model-level expression otherwise. Empty channel settings are a normal case.
+func ResolveBillingDefinition(settings dto.ChannelOtherSettings, modelName string, channelID int) (BillingDefinition, error) {
+	if profile, ok := ResolveChannelBillingProfile(settings, modelName); ok && GetBillingMode(modelName) == BillingModeTieredExpr && profile.BillingMode == BillingModeTieredExpr {
+		if profile.BillingExpr == "" {
+			return BillingDefinition{BillingMode: profile.BillingMode, ProfileKey: profile.Key, ProfileSource: BillingProfileSourceChannel, ChannelID: channelID}, fmt.Errorf("billing profile expression is empty for model %q", modelName)
+		}
+		return BillingDefinition{
+			BillingMode:   profile.BillingMode,
+			BillingExpr:   profile.BillingExpr,
+			ExprHash:      billingexpr.ExprHashString(profile.BillingExpr),
+			ProfileKey:    profile.Key,
+			ProfileLabel:  map[string]string{"zh": profile.Label.Zh, "en": profile.Label.En},
+			ProfileSource: BillingProfileSourceChannel,
+			ChannelID:     channelID,
+		}, nil
+	}
+	if profile, ok := ResolveChannelBillingProfile(settings, modelName); ok {
+		return BillingDefinition{BillingMode: profile.BillingMode, BillingExpr: profile.BillingExpr, ProfileKey: profile.Key, ProfileSource: BillingProfileSourceChannel, ChannelID: channelID}, fmt.Errorf("invalid channel billing profile for model %q", modelName)
+	}
+	mode := GetBillingMode(modelName)
+	expr, _ := GetBillingExpr(modelName)
+	definition := BillingDefinition{BillingMode: mode, BillingExpr: expr, ProfileSource: BillingProfileSourceModel, ChannelID: channelID}
+	if expr != "" {
+		definition.ExprHash = billingexpr.ExprHashString(expr)
+	}
+	return definition, nil
+}
+
+var billingProfileKeyPattern = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,64}$`)
+
+func ValidateChannelBillingProfiles(settings dto.ChannelOtherSettings) error {
+	for modelName, profile := range settings.BillingProfiles {
+		if strings.TrimSpace(modelName) == "" || strings.ContainsAny(modelName, "*?") {
+			return fmt.Errorf("billing profile model name must be an exact model name")
+		}
+		if !billingProfileKeyPattern.MatchString(profile.Key) {
+			return fmt.Errorf("invalid billing profile key for model %q", modelName)
+		}
+		if strings.TrimSpace(profile.Label.Zh) == "" && strings.TrimSpace(profile.Label.En) == "" {
+			return fmt.Errorf("billing profile label is required for model %q", modelName)
+		}
+		if profile.BillingMode != BillingModeTieredExpr {
+			return fmt.Errorf("billing profile for model %q must use tiered_expr", modelName)
+		}
+		if GetBillingMode(modelName) != BillingModeTieredExpr {
+			return fmt.Errorf("model %q must use tiered_expr before a channel profile can be configured", modelName)
+		}
+		if strings.TrimSpace(profile.BillingExpr) == "" {
+			return fmt.Errorf("billing profile expression is required for model %q", modelName)
+		}
+		var smokeErr error
+		if plugin, ok := jsplugin.DefaultRegistry.Generation().GetByModel(modelName); ok && plugin != nil && len(plugin.Meta.UsageSchema) > 0 {
+			smokeErr = SmokeTestTaskExpr(profile.BillingExpr, plugin.Meta.UsageSchema)
+		} else {
+			smokeErr = SmokeTestExpr(profile.BillingExpr)
+		}
+		if smokeErr != nil {
+			return fmt.Errorf("invalid billing profile expression for model %q: %w", modelName, smokeErr)
+		}
+	}
+	return nil
+}
 
 const (
 	BillingModeRatio      = "ratio"

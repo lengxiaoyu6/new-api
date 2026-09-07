@@ -25,6 +25,22 @@ func filterPricingByUsableGroups(pricing []model.Pricing, usableGroup map[string
 		}
 		for _, group := range item.EnableGroup {
 			if _, ok := usableGroup[group]; ok {
+				if len(item.ChannelPricing) > 0 {
+					channelPricing := make([]model.ChannelBillingPricing, 0, len(item.ChannelPricing))
+					for _, profile := range item.ChannelPricing {
+						groups := make([]string, 0, len(profile.Groups))
+						for _, profileGroup := range profile.Groups {
+							if _, available := usableGroup[profileGroup]; available || profileGroup == "all" {
+								groups = append(groups, profileGroup)
+							}
+						}
+						if len(groups) > 0 {
+							profile.Groups = groups
+							channelPricing = append(channelPricing, profile)
+						}
+					}
+					item.ChannelPricing = channelPricing
+				}
 				filtered = append(filtered, item)
 				break
 			}

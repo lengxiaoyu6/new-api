@@ -103,6 +103,42 @@ function SectionTitle(props: { children: React.ReactNode }) {
   )
 }
 
+function ChannelBillingProfilesSummary(props: { model: PricingModel; group: string }) {
+  const { t, i18n } = useTranslation()
+  const profiles = (props.model.channel_pricing ?? []).filter((profile) =>
+    profile.groups.includes(props.group)
+  )
+  if (profiles.length === 0) return null
+  const language = i18n.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
+  return (
+    <div className='mb-3 space-y-2'>
+      {profiles.map((profile) => {
+        const label =
+          profile.label?.[language] ||
+          profile.label?.en ||
+          profile.label?.zh ||
+          (profile.source === 'model' ? t('Inherited model pricing') : profile.profile_key)
+        return (
+          <div key={`${profile.source}-${profile.profile_key}-${profile.expr_hash}`} className='bg-muted/20 flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs'>
+            <div className='min-w-0'>
+              <div className='truncate font-medium'>{label}</div>
+              <div className='text-muted-foreground mt-0.5'>
+                {profile.source === 'model' ? t('Inherited model pricing') : t('Channel billing profile')}
+              </div>
+              <code className='text-muted-foreground mt-1 block max-h-12 overflow-auto text-[10px] break-all'>
+                {profile.billing_expr}
+              </code>
+            </div>
+            <span className='text-muted-foreground shrink-0'>
+              {t('Used by {{count}} channels', { count: profile.channel_count })}
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function DynamicPriceEntryLabel(props: { entry: DynamicPriceEntry }) {
   const { t } = useTranslation()
   if (props.entry.labelKind === 'schema') {
@@ -1073,6 +1109,7 @@ function GroupPricingSection(props: {
                     {ratio}x
                   </span>
                 </div>
+                <ChannelBillingProfilesSummary model={props.model} group={group} />
                 <StaticDataTable
                   className='rounded-none border-0'
                   tableClassName='text-sm'

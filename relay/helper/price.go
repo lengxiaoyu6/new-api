@@ -5,10 +5,12 @@ import (
 	"strings"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaykitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert/reasoning"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/setting/billing_setting"
@@ -83,9 +85,14 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 	groupRatioInfo := HandleGroupRatio(c, info)
 
-	// Check if this model uses tiered_expr billing
-	if billing_setting.GetBillingMode(billingModelName) == billing_setting.BillingModeTieredExpr {
-		return modelPriceHelperTiered(c, info, billingModelName, promptTokens, meta, groupRatioInfo)
+	// Check if this model uses tiered_expr billing. The selected channel profile
+	// has precedence over the model-level definition.
+	definition, definitionErr := billingDefinitionFromContext(c, billingModelName)
+	if definitionErr != nil {
+		return hosttypes.PriceData{}, definitionErr
+	}
+	if definition.BillingMode == billing_setting.BillingModeTieredExpr {
+		return modelPriceHelperTiered(c, info, billingModelName, definition, promptTokens, meta, groupRatioInfo)
 	}
 
 	var preConsumedQuota int
@@ -318,9 +325,19 @@ func resolveBillingModelName(origin string) string {
 	return matched
 }
 
-func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billingModelName string, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo hosttypes.GroupRatioInfo) (hosttypes.PriceData, error) {
-	exprStr, ok := billing_setting.GetBillingExpr(billingModelName)
-	if !ok {
+func billingDefinitionFromContext(c *gin.Context, modelName string) (billing_setting.BillingDefinition, error) {
+	settings := relaykitdto.ChannelOtherSettings{}
+	channelID := 0
+	if c != nil {
+		settings, _ = common.GetContextKeyType[relaykitdto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+		channelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	}
+	return billing_setting.ResolveBillingDefinition(settings, modelName, channelID)
+}
+
+func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billingModelName string, definition billing_setting.BillingDefinition, promptTokens int, meta *types.TokenCountMeta, groupRatioInfo hosttypes.GroupRatioInfo) (hosttypes.PriceData, error) {
+	exprStr := definition.BillingExpr
+	if strings.TrimSpace(exprStr) == "" {
 		return hosttypes.PriceData{}, fmt.Errorf("model %s is configured as tiered_expr but has no billing expression", billingModelName)
 	}
 
@@ -372,6 +389,10 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 		EstimatedTier:             trace.MatchedTier,
 		QuotaPerUnit:              common.QuotaPerUnit,
 		ExprVersion:               billingexpr.ExprVersion(exprStr),
+		ProfileKey:                definition.ProfileKey,
+		ProfileLabel:              definition.ProfileLabel,
+		ProfileSource:             definition.ProfileSource,
+		ChannelID:                 definition.ChannelID,
 	}
 	info.TieredBillingSnapshot = snapshot
 	info.BillingRequestInput = &requestInput

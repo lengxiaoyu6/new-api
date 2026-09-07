@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -102,4 +102,43 @@ func TestSmokeTestExprRejectsTaskUsageWithoutSchema(t *testing.T) {
 	assert.ErrorContains(t, err, "no task plugin usage schema")
 
 	require.NoError(t, SmokeTestExpr(`tier("base", p * 2 + c * 8)`))
+}
+
+func TestChannelBillingProfileResolutionAndValidation(t *testing.T) {
+	original := billingSetting
+	t.Cleanup(func() { billingSetting = original })
+	billingSetting = BillingSetting{
+		BillingMode: map[string]string{"profile-model": BillingModeTieredExpr},
+		BillingExpr: map[string]string{"profile-model": `tier("base", p * 1 + c * 2)`},
+	}
+	settings := dto.ChannelOtherSettings{BillingProfiles: map[string]dto.ChannelBillingProfile{
+		"profile-model": {
+			Key:         "long-context",
+			Label:       dto.ChannelBillingProfileLabel{Zh: "长上下文", En: "Long context"},
+			BillingMode: BillingModeTieredExpr,
+			BillingExpr: `len > 100 ? tier("long", p * 2 + c * 4) : tier("base", p + c * 2)`,
+		},
+	}}
+	require.NoError(t, ValidateChannelBillingProfiles(settings))
+	definition, err := ResolveBillingDefinition(settings, "profile-model", 42)
+	require.NoError(t, err)
+	assert.Equal(t, BillingProfileSourceChannel, definition.ProfileSource)
+	assert.Equal(t, "long-context", definition.ProfileKey)
+	assert.Equal(t, 42, definition.ChannelID)
+
+	fallback, err := ResolveBillingDefinition(dto.ChannelOtherSettings{}, "profile-model", 42)
+	require.NoError(t, err)
+	assert.Equal(t, BillingProfileSourceModel, fallback.ProfileSource)
+	assert.Equal(t, billingSetting.BillingExpr["profile-model"], fallback.BillingExpr)
+
+	invalid := settings
+	invalid.BillingProfiles = map[string]dto.ChannelBillingProfile{
+		"profile-model": {
+			Key:         "bad key",
+			Label:       dto.ChannelBillingProfileLabel{En: "Bad"},
+			BillingMode: BillingModeTieredExpr,
+			BillingExpr: `tier("base", p)`,
+		},
+	}
+	require.ErrorContains(t, ValidateChannelBillingProfiles(invalid), "invalid billing profile key")
 }

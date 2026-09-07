@@ -76,6 +76,7 @@ export type PricingModel = {
   billing_usage_examples?: BillingUsageExample[]
   /** Pricing version returned by backend, useful for cache busting */
   pricing_version?: string
+  channel_pricing?: ChannelBillingPricing[]
   /**
    * Optional model metadata fields reserved for backend-provided catalog data.
    * Keep them data-driven; do not synthesize display values on the client.
@@ -88,6 +89,17 @@ export type PricingModel = {
   input_modalities?: Modality[]
   output_modalities?: Modality[]
   capabilities?: ModelCapability[]
+}
+
+export type ChannelBillingPricing = {
+  profile_key: string
+  label?: Record<string, string>
+  source: 'model' | 'channel' | string
+  channel_count: number
+  groups: string[]
+  billing_mode: string
+  billing_expr: string
+  expr_hash: string
 }
 
 /** Input/output modalities supported by a model. */

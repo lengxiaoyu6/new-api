@@ -1,12 +1,16 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/billing_setting"
 	"github.com/gin-gonic/gin"
 )
 
@@ -94,17 +98,77 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 }
 
-func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.BillingSnapshot, error) {
+func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo) (*billingexpr.BillingSnapshot, error) {
 	if relayInfo == nil {
 		return nil, nil
 	}
 	snap := relayInfo.TieredBillingSnapshot
-	if snap == nil || snap.BillingMode != "tiered_expr" {
+	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
+	settings := dto.ChannelOtherSettings{}
+	channelID := 0
+	if c != nil {
+		settings, _ = common.GetContextKeyType[dto.ChannelOtherSettings](c, constant.ContextKeyChannelOtherSetting)
+		channelID = common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	}
+	if snap == nil {
+		modelName := relayInfo.GetBillingModelName()
+		if c == nil || modelName == "" {
+			return nil, nil
+		}
+		definition, err := billing_setting.ResolveBillingDefinition(settings, modelName, channelID)
+		if err != nil || definition.BillingMode != billing_setting.BillingModeTieredExpr || definition.BillingExpr == "" {
+			return nil, err
+		}
+		input := billingexpr.RequestInput{}
+		if relayInfo.BillingRequestInput != nil {
+			input = *relayInfo.BillingRequestInput
+		}
+		estimatedCompletionTokens := 8192
+		cost, trace, runErr := billingexpr.RunExprWithRequest(definition.BillingExpr, billingexpr.TokenParams{P: float64(relayInfo.GetEstimatePromptTokens()), C: float64(estimatedCompletionTokens), Len: float64(relayInfo.GetEstimatePromptTokens())}, input)
+		if runErr != nil {
+			return nil, runErr
+		}
+		snap = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: definition.BillingExpr, ExprHash: definition.ExprHash, GroupRatio: groupRatio, EstimatedPromptTokens: relayInfo.GetEstimatePromptTokens(), EstimatedCompletionTokens: estimatedCompletionTokens, EstimatedQuotaBeforeGroup: cost / 1_000_000 * common.QuotaPerUnit, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(definition.BillingExpr), ProfileKey: definition.ProfileKey, ProfileLabel: definition.ProfileLabel, ProfileSource: definition.ProfileSource, ChannelID: definition.ChannelID}
+		relayInfo.TieredBillingSnapshot = snap
+	}
+	if snap.BillingMode != "tiered_expr" {
 		return nil, nil
 	}
-
-	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
-	if snap.GroupRatio == groupRatio {
+	definitionChanged := false
+	var definition billing_setting.BillingDefinition
+	if c != nil && snap.ModelName != "" {
+		var err error
+		definition, err = billing_setting.ResolveBillingDefinition(settings, snap.ModelName, channelID)
+		if err != nil {
+			return nil, err
+		}
+		definitionChanged = definition.BillingExpr != snap.ExprString || definition.ProfileKey != snap.ProfileKey || definition.ProfileSource != snap.ProfileSource || definition.ChannelID != snap.ChannelID
+	}
+	if definitionChanged {
+		if definition.BillingMode != billing_setting.BillingModeTieredExpr || definition.BillingExpr == "" {
+			return nil, fmt.Errorf("selected channel has no tiered billing expression for model %s", snap.ModelName)
+		}
+		input := billingexpr.RequestInput{}
+		if relayInfo.BillingRequestInput != nil {
+			input = *relayInfo.BillingRequestInput
+		}
+		cost, trace, runErr := billingexpr.RunExprWithRequest(definition.BillingExpr, billingexpr.TokenParams{
+			P: float64(snap.EstimatedPromptTokens), C: float64(snap.EstimatedCompletionTokens), Len: float64(snap.EstimatedPromptTokens),
+		}, input)
+		if runErr != nil {
+			return nil, runErr
+		}
+		snap.ExprString = definition.BillingExpr
+		snap.ExprHash = billingexpr.ExprHashString(definition.BillingExpr)
+		snap.EstimatedQuotaBeforeGroup = cost / 1_000_000 * common.QuotaPerUnit
+		snap.EstimatedTier = trace.MatchedTier
+		snap.ExprVersion = billingexpr.ExprVersion(definition.BillingExpr)
+		snap.ProfileKey = definition.ProfileKey
+		snap.ProfileLabel = definition.ProfileLabel
+		snap.ProfileSource = definition.ProfileSource
+		snap.ChannelID = definition.ChannelID
+	}
+	if snap.GroupRatio == groupRatio && !definitionChanged {
 		return snap, nil
 	}
 
@@ -123,7 +187,7 @@ func refreshTieredBillingGroup(relayInfo *relaycommon.RelayInfo) (*billingexpr.B
 // estimate before sending. If the initial group was free and skipped
 // pre-consume, switching to a paid group creates the session at that point.
 func PrepareTieredBillingForSelectedGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
-	snap, err := refreshTieredBillingGroup(relayInfo)
+	snap, err := refreshTieredBillingGroup(c, relayInfo)
 	if err != nil {
 		return types.NewErrorWithStatusCode(
 			err,

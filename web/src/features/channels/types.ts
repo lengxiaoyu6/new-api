@@ -110,6 +110,14 @@ export interface ChannelOtherSettings {
   upstream_model_update_last_check_time?: number
   upstream_model_update_last_detected_models?: string[]
   advanced_custom?: AdvancedCustomConfig
+  billing_profiles?: Record<string, ChannelBillingProfile>
+}
+
+export interface ChannelBillingProfile {
+  key: string
+  label?: { zh?: string; en?: string }
+  billing_mode: 'tiered_expr'
+  billing_expr: string
 }
 
 export interface AdvancedCustomConfig {

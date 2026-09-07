@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"maps"
+	"sort"
 	"strings"
 
 	"sync"
@@ -40,6 +41,18 @@ type Pricing struct {
 	BillingUsageSchema     map[string]jsplugin.UsageFieldSchema `json:"billing_usage_schema,omitempty"`
 	BillingUsageExamples   []jsplugin.UsageExample              `json:"billing_usage_examples,omitempty"`
 	PricingVersion         string                               `json:"pricing_version,omitempty"`
+	ChannelPricing         []ChannelBillingPricing              `json:"channel_pricing,omitempty"`
+}
+
+type ChannelBillingPricing struct {
+	ProfileKey   string            `json:"profile_key"`
+	Label        map[string]string `json:"label,omitempty"`
+	Source       string            `json:"source"`
+	ChannelCount int               `json:"channel_count"`
+	Groups       []string          `json:"groups"`
+	BillingMode  string            `json:"billing_mode"`
+	BillingExpr  string            `json:"billing_expr"`
+	ExprHash     string            `json:"expr_hash"`
 }
 
 type PricingVendor struct {
@@ -174,6 +187,68 @@ func loadPricingAdvancedCustomConfigs(enableAbilities []AbilityWithChannel) map[
 	return configs
 }
 
+func loadPricingChannelOtherSettings(enableAbilities []AbilityWithChannel) map[int]dto.ChannelOtherSettings {
+	ids := make(map[int]struct{})
+	for _, ability := range enableAbilities {
+		ids[ability.ChannelId] = struct{}{}
+	}
+	settings := make(map[int]dto.ChannelOtherSettings, len(ids))
+	for id := range ids {
+		channel, err := CacheGetChannel(id)
+		if err != nil || channel == nil {
+			channel, err = GetChannelById(id, true)
+			if err != nil || channel == nil {
+				continue
+			}
+		}
+		settings[id] = channel.GetOtherSettings()
+	}
+	return settings
+}
+
+func buildChannelBillingPricing(abilities []AbilityWithChannel, settings map[int]dto.ChannelOtherSettings) map[string][]ChannelBillingPricing {
+	type aggregate struct {
+		entry    ChannelBillingPricing
+		groups   map[string]struct{}
+		channels map[int]struct{}
+	}
+	byModel := make(map[string]map[string]*aggregate)
+	for _, ability := range abilities {
+		definition, err := billing_setting.ResolveBillingDefinition(settings[ability.ChannelId], ability.Model, ability.ChannelId)
+		if err != nil || definition.BillingMode != billing_setting.BillingModeTieredExpr || strings.TrimSpace(definition.BillingExpr) == "" {
+			continue
+		}
+		key := definition.ProfileSource + ":" + definition.ProfileKey + ":" + definition.ExprHash
+		modelEntries := byModel[ability.Model]
+		if modelEntries == nil {
+			modelEntries = make(map[string]*aggregate)
+			byModel[ability.Model] = modelEntries
+		}
+		item := modelEntries[key]
+		if item == nil {
+			item = &aggregate{entry: ChannelBillingPricing{ProfileKey: definition.ProfileKey, Label: definition.ProfileLabel, Source: definition.ProfileSource, BillingMode: definition.BillingMode, BillingExpr: definition.BillingExpr, ExprHash: definition.ExprHash}, groups: make(map[string]struct{}), channels: make(map[int]struct{})}
+			modelEntries[key] = item
+		}
+		item.groups[ability.Group] = struct{}{}
+		item.channels[ability.ChannelId] = struct{}{}
+	}
+	result := make(map[string][]ChannelBillingPricing, len(byModel))
+	for modelName, entries := range byModel {
+		for _, item := range entries {
+			groups := make([]string, 0, len(item.groups))
+			for group := range item.groups {
+				groups = append(groups, group)
+			}
+			sort.Strings(groups)
+			item.entry.Groups = groups
+			item.entry.ChannelCount = len(item.channels)
+			result[modelName] = append(result[modelName], item.entry)
+		}
+		sort.Slice(result[modelName], func(i, j int) bool { return result[modelName][i].ProfileKey < result[modelName][j].ProfileKey })
+	}
+	return result
+}
+
 func appendPricingEndpoint(endpoints []string, endpoint string) []string {
 	if endpoint == "" || common.StringsContains(endpoints, endpoint) {
 		return endpoints
@@ -263,6 +338,8 @@ func updatePricing() {
 	}
 
 	modelGroupsMap := make(map[string]*types.Set[string])
+	channelSettings := loadPricingChannelOtherSettings(enableAbilities)
+	channelBillingPricing := buildChannelBillingPricing(enableAbilities, channelSettings)
 
 	for _, ability := range enableAbilities {
 		groups, ok := modelGroupsMap[ability.Model]
@@ -365,6 +442,7 @@ func updatePricing() {
 			ModelName:              model,
 			EnableGroup:            groups.Items(),
 			SupportedEndpointTypes: modelSupportEndpointTypes[model],
+			ChannelPricing:         channelBillingPricing[model],
 		}
 
 		// 补充模型元数据（描述、标签、供应商、状态）

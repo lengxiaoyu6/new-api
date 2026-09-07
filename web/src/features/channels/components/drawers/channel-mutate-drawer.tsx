@@ -271,6 +271,7 @@ const SENSITIVE_FORM_FIELDS = [
   'param_override',
   'header_override',
   'settings',
+  'billing_profiles',
   'setting',
   'advanced_custom',
   'is_enterprise_account',
@@ -326,6 +327,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     hasConfiguredOverrideValue(values.param_override) ||
     hasConfiguredOverrideValue(values.header_override) ||
     values.advanced_custom?.trim() ||
+    hasConfiguredOverrideValue(values.billing_profiles) ||
     hasConfiguredOverrideValue(values.status_code_mapping) ||
     hasConfiguredOverrideValue(values.status_code_response_mapping) ||
     values.tag?.trim() ||
@@ -3635,6 +3637,37 @@ placeholder={t(
                         summary={advancedSummary}
                       >
                         {/* ── Routing & Overrides ── */}
+                        <div className={sideDrawerSectionClassName()}>
+                          <CardHeading
+                            title={t('Channel Billing Profiles')}
+                            icon={<Sparkles className='h-4 w-4' />}
+                            iconTone='chart-3'
+                          />
+                          <FormField
+                            control={form.control}
+                            name='billing_profiles'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Billing profiles JSON')}</FormLabel>
+                                <FormDescription>
+                                  {t('Override tiered expression pricing for exact model names on this channel. Leave empty to inherit model pricing.')}
+                                </FormDescription>
+                                <FormControl>
+                                  <JsonCodeEditor
+                                    value={field.value || '{}'}
+                                    onChange={field.onChange}
+                                    disabled={isSubmitting || sensitiveLocked}
+                                    heightClassName='h-64 min-h-64 max-h-64'
+                                    ariaLabel={t('Billing profiles JSON')}
+                                    placeholder='{ "model-name": { "key": "profile-key", "label": { "zh": "中文名称", "en": "English label" }, "billing_mode": "tiered_expr", "billing_expr": "..." } }'
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
                         <div className={sideDrawerSectionClassName()}>
                           <CardHeading
                             title={t('Routing & Overrides')}

@@ -106,6 +106,10 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
 		common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, ch.GetStatusCodeMapping())
 		common.SetContextKey(c, constant.ContextKeyChannelStatusCodeResponseMapping, ch.GetStatusCodeResponseMapping())
+		common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, ch.GetOtherSettings())
+		common.SetContextKey(c, constant.ContextKeyChannelSetting, ch.GetSetting())
+		common.SetContextKey(c, constant.ContextKeyChannelName, ch.Name)
+		common.SetContextKey(c, constant.ContextKeyChannelCreateTime, ch.CreatedTime)
 
 		info.ChannelBaseUrl = ch.GetBaseURL()
 		info.ChannelId = originTask.ChannelId
@@ -250,11 +254,16 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	info.OriginModelName = modelName
 	var priceData types.PriceData
 	var err error
-	useTiered := billing_setting.GetBillingMode(modelName) == billing_setting.BillingModeTieredExpr
+	channelSettings := info.ChannelOtherSettings
+	definition, definitionErr := billing_setting.ResolveBillingDefinition(channelSettings, modelName, info.ChannelId)
+	if definitionErr != nil {
+		return nil, service.TaskErrorWrapper(definitionErr, "model_price_error", http.StatusBadRequest)
+	}
+	useTiered := definition.BillingMode == billing_setting.BillingModeTieredExpr
 	var exprStr string
 	var exists bool
 	if useTiered {
-		exprStr, exists = billing_setting.GetBillingExpr(modelName)
+		exprStr, exists = definition.BillingExpr, definition.BillingExpr != ""
 	} else if info.IsModelMapped {
 		if billing_setting.GetBillingMode(info.UpstreamModelName) == billing_setting.BillingModeTieredExpr {
 			if tailExpr, tailOK := billing_setting.GetBillingExpr(info.UpstreamModelName); tailOK && strings.TrimSpace(tailExpr) != "" {
@@ -289,7 +298,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		quota, clamp := common.QuotaRoundChecked(cost * common.QuotaPerUnit * groupRatioInfo.GroupRatio)
 		noteTaskQuotaClamp(info, clamp)
 		priceData = types.PriceData{Quota: quota, QuotaToPreConsume: quota, GroupRatioInfo: groupRatioInfo}
-		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * common.QuotaPerUnit, EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts}
+		info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: exprStr, ExprHash: billingexpr.ExprHashString(exprStr), GroupRatio: groupRatioInfo.GroupRatio, EstimatedQuotaBeforeGroup: cost * common.QuotaPerUnit, EstimatedQuotaAfterGroup: quota, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(exprStr), TaskUsageBilling: true, UsageFacts: facts, ProfileKey: definition.ProfileKey, ProfileLabel: definition.ProfileLabel, ProfileSource: definition.ProfileSource, ChannelID: definition.ChannelID}
 	} else {
 		priceData, err = helper.ModelPriceHelperPerCall(c, info)
 		if err != nil {
