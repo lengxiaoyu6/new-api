@@ -131,6 +131,21 @@ func TestChannelBillingProfileResolutionAndValidation(t *testing.T) {
 	assert.Equal(t, BillingProfileSourceModel, fallback.ProfileSource)
 	assert.Equal(t, billingSetting.BillingExpr["profile-model"], fallback.BillingExpr)
 
+	legacySettings := dto.ChannelOtherSettings{BillingProfiles: map[string]dto.ChannelBillingProfile{
+		"legacy-model": {
+			Key:         "channel-tier",
+			Label:       dto.ChannelBillingProfileLabel{En: "Channel tier"},
+			BillingMode: BillingModeTieredExpr,
+			BillingExpr: `tier("base", p * 3 + c * 9)`,
+		},
+	}}
+	require.NoError(t, ValidateChannelBillingProfiles(legacySettings))
+	legacyDefinition, err := ResolveBillingDefinition(legacySettings, "legacy-model", 43)
+	require.NoError(t, err)
+	assert.Equal(t, BillingProfileSourceChannel, legacyDefinition.ProfileSource)
+	assert.Equal(t, "tier(\"base\", p * 3 + c * 9)", legacyDefinition.BillingExpr)
+	assert.Equal(t, 43, legacyDefinition.ChannelID)
+
 	invalid := settings
 	invalid.BillingProfiles = map[string]dto.ChannelBillingProfile{
 		"profile-model": {

@@ -60,6 +60,12 @@ function parseProfileJson(
   return normalizeChannelBillingProfilesObject(profileObject)
 }
 
+function parseProfileJsonObject(value: string): Record<string, unknown> {
+  const parsed = parseChannelBillingProfilesJson(value)
+  if (!parsed) throw new Error('invalid')
+  return parsed
+}
+
 function getProfileJsonError(error: unknown, fallback: string): string {
   if (
     error instanceof Error &&
@@ -156,12 +162,17 @@ export function ChannelBillingProfileDialog(
       setRawJson(JSON.stringify(nextValue, null, 2))
     } else {
       try {
-        const parsed = parseProfileJson(rawJson)
+        const parsed = parseProfileJsonObject(rawJson)
         setEntries(parseChannelBillingProfiles(parsed))
         setSelectedIndex(0)
-      } catch {
+      } catch (error) {
         toast.error(
-          t('Please fix JSON errors before switching to visual mode.')
+          t(
+            getProfileJsonError(
+              error,
+              'Please fix JSON errors before switching to visual mode.'
+            )
+          )
         )
         return
       }
@@ -327,7 +338,7 @@ export function ChannelBillingProfileDialog(
                   />
                   <FieldDescription>
                     {t(
-                      'The model must already use tiered expression pricing at the model level.'
+                      'Each profile overrides one exact model name on this channel.'
                     )}
                   </FieldDescription>
                 </Field>

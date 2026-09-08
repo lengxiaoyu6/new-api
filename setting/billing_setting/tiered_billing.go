@@ -51,9 +51,11 @@ func ResolveChannelBillingProfile(settings dto.ChannelOtherSettings, modelName s
 }
 
 // ResolveBillingDefinition returns the channel override when present and a
-// model-level expression otherwise. Empty channel settings are a normal case.
+// model-level definition otherwise. A channel profile is a complete tiered
+// billing definition, so it can override a model's legacy ratio or fixed-price
+// definition as well.
 func ResolveBillingDefinition(settings dto.ChannelOtherSettings, modelName string, channelID int) (BillingDefinition, error) {
-	if profile, ok := ResolveChannelBillingProfile(settings, modelName); ok && GetBillingMode(modelName) == BillingModeTieredExpr && profile.BillingMode == BillingModeTieredExpr {
+	if profile, ok := ResolveChannelBillingProfile(settings, modelName); ok && profile.BillingMode == BillingModeTieredExpr {
 		if profile.BillingExpr == "" {
 			return BillingDefinition{BillingMode: profile.BillingMode, ProfileKey: profile.Key, ProfileSource: BillingProfileSourceChannel, ChannelID: channelID}, fmt.Errorf("billing profile expression is empty for model %q", modelName)
 		}
@@ -94,9 +96,6 @@ func ValidateChannelBillingProfiles(settings dto.ChannelOtherSettings) error {
 		}
 		if profile.BillingMode != BillingModeTieredExpr {
 			return fmt.Errorf("billing profile for model %q must use tiered_expr", modelName)
-		}
-		if GetBillingMode(modelName) != BillingModeTieredExpr {
-			return fmt.Errorf("model %q must use tiered_expr before a channel profile can be configured", modelName)
 		}
 		if strings.TrimSpace(profile.BillingExpr) == "" {
 			return fmt.Errorf("billing profile expression is required for model %q", modelName)

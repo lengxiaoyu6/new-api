@@ -81,4 +81,39 @@ describe('channel billing profile dialog', () => {
     )
     expect(screen.getByDisplayValue('claude-test-profile')).toBeVisible()
   })
+
+  test('switches to visual mode for valid JSON before profile metadata is complete', () => {
+    render(
+      <ChannelBillingProfileDialog
+        open
+        onOpenChange={vi.fn()}
+        modelOptions={['gpt-test']}
+        value={existingProfile}
+        onSave={vi.fn()}
+      />
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'JSON editor' }))
+    fireEvent.change(
+      screen.getByRole('textbox', { name: 'Billing profiles JSON' }),
+      {
+        target: {
+          value: JSON.stringify({
+            'gpt-test': {
+              key: 'gpt-6-profile',
+              billing_mode: 'tiered_expr',
+              billing_expr: 'tier("base", p * 0 + c * 0)',
+            },
+          }),
+        },
+      }
+    )
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Visual editor' }))
+
+    expect(screen.getByTestId('tiered-pricing-editor')).toHaveTextContent(
+      'gpt-test'
+    )
+    expect(screen.getByLabelText('Chinese label')).toHaveValue('')
+  })
 })
