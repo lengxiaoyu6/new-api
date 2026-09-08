@@ -16,11 +16,20 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 
-import { ChannelBillingProfilesSummary } from '../components/model-details'
+import { ModelDetailsContent } from '../components/model-details'
 import type { PricingModel } from '../types'
+
+vi.mock('@/features/performance-metrics/api', () => ({
+  getPerfMetrics: vi.fn().mockResolvedValue({ data: { groups: [] } }),
+}))
+
+vi.mock('@/hooks/use-status', () => ({
+  useStatus: () => ({ status: null, loading: false, error: null }),
+}))
 
 vi.mock('../components/model-details-performance', () => ({
   ModelDetailsPerformance: () => null,
@@ -33,56 +42,122 @@ function pricingModel(overrides: Partial<PricingModel> = {}): PricingModel {
     quota_type: 0,
     model_ratio: 1,
     completion_ratio: 2,
-    enable_groups: ['default'],
+    enable_groups: ['default', 'premium'],
     ...overrides,
   }
 }
 
-describe('channel billing profile summary', () => {
-  it('shows channel tiers while hiding inherited profiles and raw expressions', () => {
-    const inheritedExpression = 'tier("inherited", p * 9 + c * 9)'
-    const channelExpression =
-      'len > 100000 ? tier("long", p * 2 + c * 4) : tier("base", p + c * 2)'
+function renderModelDetails(model: PricingModel) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  })
 
-    render(
-      <ChannelBillingProfilesSummary
-        model={pricingModel({
-          channel_pricing: [
-            {
-              profile_key: '',
-              source: 'model',
-              channel_count: 2,
-              groups: ['default'],
-              billing_mode: 'tiered_expr',
-              billing_expr: inheritedExpression,
-              expr_hash: 'inherited',
-            },
-            {
-              profile_key: 'long-context',
-              label: { en: 'Long-context pricing' },
-              source: 'channel',
-              channel_count: 1,
-              groups: ['default'],
-              billing_mode: 'tiered_expr',
-              billing_expr: channelExpression,
-              expr_hash: 'channel',
-            },
-          ],
-        })}
-        group='default'
-        groupRatio={1}
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ModelDetailsContent
+        model={model}
+        groupRatio={{ default: 1, premium: 2 }}
+        usableGroup={{
+          default: { desc: 'Default', ratio: 1 },
+          premium: { desc: 'Premium', ratio: 2 },
+        }}
+        endpointMap={{}}
+        autoGroups={[]}
+        priceRate={1}
+        usdExchangeRate={1}
+        tokenUnit='M'
       />
+    </QueryClientProvider>
+  )
+}
+
+function getGroupPricingSection() {
+  return screen.getByText('Pricing by Group').closest('section') as HTMLElement
+}
+
+describe('model details channel billing display', () => {
+  it('uses channel tiers for overridden groups and model tiers for fallback groups', () => {
+    renderModelDetails(
+      pricingModel({
+        billing_mode: 'tiered_expr',
+        billing_expr:
+          'len > 100000 ? tier("model-long", p * 2 + c * 4) : tier("model-base", p + c * 2)',
+        channel_pricing: [
+          {
+            profile_key: 'long-context',
+            label: { en: 'Channel override' },
+            source: 'channel',
+            channel_count: 1,
+            groups: ['default'],
+            billing_mode: 'tiered_expr',
+            billing_expr:
+              'len > 100000 ? tier("channel-long", p * 3 + c * 6) : tier("channel-base", p * 1.5 + c * 3)',
+            expr_hash: 'channel',
+          },
+        ],
+      })
     )
 
-    expect(screen.getByText('Long-context pricing')).toBeVisible()
-    expect(screen.getAllByText('long').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('base').length).toBeGreaterThan(0)
-    expect(screen.queryByText('inherited')).not.toBeInTheDocument()
-    expect(screen.queryByText(inheritedExpression)).not.toBeInTheDocument()
-    expect(screen.queryByText(channelExpression)).not.toBeInTheDocument()
+    const pricingSection = getGroupPricingSection()
+    expect(within(pricingSection).getByText('Channel override')).toBeVisible()
     expect(
-      screen.queryByText('Inherited model pricing')
+      within(pricingSection).getAllByText('channel-long')
+    ).not.toHaveLength(0)
+    expect(
+      within(pricingSection).getAllByText('channel-base')
+    ).not.toHaveLength(0)
+    expect(within(pricingSection).getAllByText('model-long')).not.toHaveLength(
+      0
+    )
+    expect(within(pricingSection).getAllByText('model-base')).not.toHaveLength(
+      0
+    )
+
+    const channelOverride = screen
+      .getByText('Channel override')
+      .closest('.overflow-hidden') as HTMLElement
+    expect(
+      within(channelOverride).queryByText('model-long')
     ).not.toBeInTheDocument()
-    expect(screen.queryByText('Used by 1 channels')).not.toBeInTheDocument()
+    expect(
+      within(channelOverride).queryByText('model-base')
+    ).not.toBeInTheDocument()
+  })
+
+  it('shows a channel long-context tier when the model fallback only has a base tier', () => {
+    renderModelDetails(
+      pricingModel({
+        enable_groups: ['default'],
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("model-base", p + c * 2)',
+        channel_pricing: [
+          {
+            profile_key: 'long-context',
+            label: { en: 'Long-context channel pricing' },
+            source: 'channel',
+            channel_count: 1,
+            groups: ['default'],
+            billing_mode: 'tiered_expr',
+            billing_expr:
+              'len > 100000 ? tier("channel-long", p * 2 + c * 4) : tier("channel-base", p + c * 2)',
+            expr_hash: 'channel-long',
+          },
+        ],
+      })
+    )
+
+    const pricingSection = getGroupPricingSection()
+    expect(
+      within(pricingSection).getByText('Long-context channel pricing')
+    ).toBeVisible()
+    expect(
+      within(pricingSection).getAllByText('channel-long')
+    ).not.toHaveLength(0)
+    expect(
+      within(pricingSection).getAllByText('channel-base')
+    ).not.toHaveLength(0)
+    expect(
+      within(pricingSection).queryByText('model-base')
+    ).not.toBeInTheDocument()
   })
 })
