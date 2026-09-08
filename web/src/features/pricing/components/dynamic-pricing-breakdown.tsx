@@ -73,6 +73,12 @@ type DynamicPricingBreakdownProps = {
    * icon header and uses the dialog's small text sizes. Defaults to false.
    */
   compact?: boolean
+  /** Multiply displayed tier prices by a group or channel-specific ratio. */
+  priceMultiplier?: number
+  /** Omit request-rule details when only the tier table is relevant. */
+  hideRequestRules?: boolean
+  /** Keep unparsable expressions from exposing their raw source text. */
+  hideUnparsedExpression?: boolean
   usageSchema?: BillingUsageSchema
   /**
    * Settlement usage facts from the consume log. Used to highlight the
@@ -168,9 +174,10 @@ function formatBreakdownPrice(
   field: BreakdownPriceField,
   symbol: string,
   rate: number,
-  t: (key: string) => string
+  t: (key: string) => string,
+  priceMultiplier = 1
 ): string {
-  const amount = `${symbol}${(value * rate).toFixed(4)}`
+  const amount = `${symbol}${(value * rate * priceMultiplier).toFixed(4)}`
   if (field.unit === 'second') return `${amount}/${t('s')}`
   if (field.unit === 'count') return `${amount}/${t('unit')}`
   if (field.unit === 'credit') return `${amount}/${t('credit')}`
@@ -242,6 +249,9 @@ export function DynamicPricingBreakdown({
   requestRules,
   hideCacheColumns = false,
   compact = false,
+  priceMultiplier = 1,
+  hideRequestRules = false,
+  hideUnparsedExpression = false,
   usageSchema,
   usageFacts,
 }: DynamicPricingBreakdownProps) {
@@ -292,6 +302,7 @@ export function DynamicPricingBreakdown({
   if (!expr) return null
 
   if (!hasTiers) {
+    if (hideUnparsedExpression) return null
     return (
       <section className={cn('min-w-0', !compact && 'py-4')}>
         {!compact && (
@@ -468,7 +479,8 @@ export function DynamicPricingBreakdown({
                                   field,
                                   symbol,
                                   rate,
-                                  t
+                                  t,
+                                  priceMultiplier
                                 )
                               : '-'}
                           </div>
@@ -561,7 +573,14 @@ export function DynamicPricingBreakdown({
                   const value = field.value(tier)
                   return value > 0 ? (
                     <span className={cn(!compact && 'font-semibold')}>
-                      {formatBreakdownPrice(value, field, symbol, rate, t)}
+                      {formatBreakdownPrice(
+                        value,
+                        field,
+                        symbol,
+                        rate,
+                        t,
+                        priceMultiplier
+                      )}
                     </span>
                   ) : (
                     '-'
@@ -573,7 +592,7 @@ export function DynamicPricingBreakdown({
         </div>
       )}
 
-      {hasRules && (
+      {hasRules && !hideRequestRules && (
         <div>
           <div
             className={
