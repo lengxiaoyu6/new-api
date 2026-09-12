@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { assert, describe, test } from 'vitest'
 
 import type { Channel } from '../../types'
 import { resolveChannelTodayUsage, type TagRow } from '../channel-utils'
@@ -28,18 +27,18 @@ function channel(id: number): Channel {
 
 describe('channel today usage resolution', () => {
   test('returns the quota mapped to the channel id', () => {
-    assert.equal(
+    assert.strictEqual(
       resolveChannelTodayUsage(channel(7), { '7': 123, '8': 456 }),
       123
     )
   })
 
   test('returns zero when the channel has no usage entry', () => {
-    assert.equal(resolveChannelTodayUsage(channel(7), { '8': 456 }), 0)
+    assert.strictEqual(resolveChannelTodayUsage(channel(7), { '8': 456 }), 0)
   })
 
   test('returns zero when the usage map is missing', () => {
-    assert.equal(resolveChannelTodayUsage(channel(7), undefined), 0)
+    assert.strictEqual(resolveChannelTodayUsage(channel(7), undefined), 0)
   })
 
   test('sums the children usage for tag aggregate rows', () => {
@@ -49,7 +48,7 @@ describe('channel today usage resolution', () => {
       children: [channel(11), channel(12), channel(13)],
     } as TagRow
 
-    assert.equal(
+    assert.strictEqual(
       resolveChannelTodayUsage(tagRow, { '11': 10, '12': 25, '13': 5 }),
       40
     )
@@ -62,7 +61,7 @@ describe('channel today usage resolution', () => {
       children: [channel(11), channel(12)],
     } as TagRow
 
-    assert.equal(resolveChannelTodayUsage(tagRow, { '11': 10 }), 10)
+    assert.strictEqual(resolveChannelTodayUsage(tagRow, { '11': 10 }), 10)
   })
 
   test('returns zero for an empty tag row with no usage data', () => {
@@ -72,6 +71,6 @@ describe('channel today usage resolution', () => {
       children: [] as Channel[],
     } as TagRow
 
-    assert.equal(resolveChannelTodayUsage(tagRow, undefined), 0)
+    assert.strictEqual(resolveChannelTodayUsage(tagRow, undefined), 0)
   })
 })

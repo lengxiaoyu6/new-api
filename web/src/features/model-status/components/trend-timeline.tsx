@@ -59,9 +59,15 @@ export function TrendTimeline(props: {
     ...values,
   ]
   const hasData = timelineValues.some(Number.isFinite)
-  const currentValue = Number.isFinite(props.currentValue)
-    ? props.currentValue
-    : timelineValues.findLast(Number.isFinite)
+  let currentValue = props.currentValue
+  if (!Number.isFinite(currentValue)) {
+    for (let index = timelineValues.length - 1; index >= 0; index--) {
+      if (Number.isFinite(timelineValues[index])) {
+        currentValue = timelineValues[index]
+        break
+      }
+    }
+  }
   const bars = buildTrendBars(
     timelineValues,
     buildTrendIntervals(props.trendEnd)

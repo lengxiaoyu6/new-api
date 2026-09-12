@@ -41,7 +41,7 @@ func UpsertPerfMetric(metric *PerfMetric) error {
 			{Name: "channel_type"},
 			{Name: "bucket_ts"},
 		},
-		DoUpdates: clause.Assignments(map[string]interface{}{
+		DoUpdates: clause.Assignments(map[string]any{
 			"request_count":    gorm.Expr("perf_metrics.request_count + ?", metric.RequestCount),
 			"success_count":    gorm.Expr("perf_metrics.success_count + ?", metric.SuccessCount),
 			"total_latency_ms": gorm.Expr("perf_metrics.total_latency_ms + ?", metric.TotalLatencyMs),

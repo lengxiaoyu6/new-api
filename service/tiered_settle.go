@@ -39,6 +39,37 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 
 	img := float64(usage.PromptTokensDetails.ImageTokens)
+	imgCR := float64(0)
+	if usedVars["img_cr"] && !isClaudeUsageSemantic {
+		details := usage.PromptTokensDetails.CachedTokensDetails
+		if details != nil && details.ImageTokens != nil {
+			cachedImage := *details.ImageTokens
+			cached := usage.PromptTokensDetails.CachedTokens
+			image := usage.PromptTokensDetails.ImageTokens
+			valid := cachedImage >= 0 && cached >= cachedImage && image >= cachedImage &&
+				cached <= usage.PromptTokens && image <= usage.PromptTokens-(cached-cachedImage)
+			if valid {
+				remaining := cached - cachedImage
+				for _, count := range []*int{details.TextTokens, details.AudioTokens} {
+					if count == nil {
+						continue
+					}
+					if *count < 0 || *count > remaining {
+						valid = false
+						break
+					}
+					remaining -= *count
+				}
+			}
+			if valid {
+				imgCR = float64(cachedImage)
+				cr -= imgCR
+				img -= imgCR
+			} else {
+				common.SysError("invalid image cache token breakdown; using aggregate cache billing")
+			}
+		}
+	}
 	ai := float64(usage.PromptTokensDetails.AudioTokens)
 	imgO := float64(usage.CompletionTokenDetails.ImageTokens)
 	ao := float64(usage.CompletionTokenDetails.AudioTokens)
@@ -51,7 +82,13 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 		inputLen = p + cr + cc5m + cc1h
 	}
 
-	if !isClaudeUsageSemantic {
+	if isClaudeUsageSemantic {
+		// Anthropic input excludes cache reads. When cr has no separate
+		// price, merge those tokens into the input category instead.
+		if !usedVars["cr"] {
+			p += cr
+		}
+	} else {
 		if usedVars["cr"] {
 			p -= cr
 		}
@@ -63,6 +100,9 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 		}
 		if usedVars["img"] {
 			p -= img
+		}
+		if usedVars["img_cr"] {
+			p -= imgCR
 		}
 		if usedVars["ai"] {
 			p -= ai
@@ -85,16 +125,17 @@ func BuildTieredTokenParams(usage *dto.Usage, isClaudeUsageSemantic bool, usedVa
 	}
 
 	return billingexpr.TokenParams{
-		P:    p,
-		C:    c,
-		Len:  inputLen,
-		CR:   cr,
-		CC:   cc5m,
-		CC1h: cc1h,
-		Img:  img,
-		ImgO: imgO,
-		AI:   ai,
-		AO:   ao,
+		P:     p,
+		C:     c,
+		Len:   inputLen,
+		CR:    cr,
+		CC:    cc5m,
+		CC1h:  cc1h,
+		Img:   img,
+		ImgCR: imgCR,
+		ImgO:  imgO,
+		AI:    ai,
+		AO:    ao,
 	}
 }
 
@@ -103,6 +144,7 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		return nil, nil
 	}
 	snap := relayInfo.TieredBillingSnapshot
+	newSnapshot := snap == nil
 	groupRatio := relayInfo.PriceData.GroupRatioInfo.GroupRatio
 	settings := dto.ChannelOtherSettings{}
 	channelID := 0
@@ -119,6 +161,9 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		if err != nil || definition.BillingMode != billing_setting.BillingModeTieredExpr || definition.BillingExpr == "" {
 			return nil, err
 		}
+		if relayInfo.RelayFormat == types.RelayFormatOpenAIRealtime && billingexpr.UsesFixedPricing(definition.BillingExpr) {
+			return nil, fmt.Errorf("fixed pricing is not supported for Realtime requests")
+		}
 		input := billingexpr.RequestInput{}
 		if relayInfo.BillingRequestInput != nil {
 			input = *relayInfo.BillingRequestInput
@@ -128,7 +173,26 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		if runErr != nil {
 			return nil, runErr
 		}
-		snap = &billingexpr.BillingSnapshot{BillingMode: billing_setting.BillingModeTieredExpr, ModelName: modelName, ExprString: definition.BillingExpr, ExprHash: definition.ExprHash, GroupRatio: groupRatio, EstimatedPromptTokens: relayInfo.GetEstimatePromptTokens(), EstimatedCompletionTokens: estimatedCompletionTokens, EstimatedQuotaBeforeGroup: cost / 1_000_000 * common.QuotaPerUnit, EstimatedTier: trace.MatchedTier, QuotaPerUnit: common.QuotaPerUnit, ExprVersion: billingexpr.ExprVersion(definition.BillingExpr), ProfileKey: definition.ProfileKey, ProfileLabel: definition.ProfileLabel, ProfileSource: definition.ProfileSource, ChannelID: definition.ChannelID}
+		snap = &billingexpr.BillingSnapshot{
+			BillingMode:               billing_setting.BillingModeTieredExpr,
+			ModelName:                 modelName,
+			ExprString:                definition.BillingExpr,
+			ExprHash:                  definition.ExprHash,
+			GroupRatio:                groupRatio,
+			EstimatedPromptTokens:     relayInfo.GetEstimatePromptTokens(),
+			EstimatedCompletionTokens: estimatedCompletionTokens,
+			EstimatedQuotaBeforeGroup: cost / 1_000_000 * common.QuotaPerUnit,
+			EstimatedTier:             trace.MatchedTier,
+			EstimatedImageCount:       trace.ImageCount,
+			EstimatedBillingUnit:      trace.BillingUnit,
+			EstimatedFixedPrice:       trace.FixedPrice,
+			QuotaPerUnit:              common.QuotaPerUnit,
+			ExprVersion:               billingexpr.ExprVersion(definition.BillingExpr),
+			ProfileKey:                definition.ProfileKey,
+			ProfileLabel:              definition.ProfileLabel,
+			ProfileSource:             definition.ProfileSource,
+			ChannelID:                 definition.ChannelID,
+		}
 		relayInfo.TieredBillingSnapshot = snap
 	}
 	if snap.BillingMode != "tiered_expr" {
@@ -148,6 +212,9 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		if definition.BillingMode != billing_setting.BillingModeTieredExpr || definition.BillingExpr == "" {
 			return nil, fmt.Errorf("selected channel has no tiered billing expression for model %s", snap.ModelName)
 		}
+		if relayInfo.RelayFormat == types.RelayFormatOpenAIRealtime && billingexpr.UsesFixedPricing(definition.BillingExpr) {
+			return nil, fmt.Errorf("fixed pricing is not supported for Realtime requests")
+		}
 		input := billingexpr.RequestInput{}
 		if relayInfo.BillingRequestInput != nil {
 			input = *relayInfo.BillingRequestInput
@@ -162,13 +229,16 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		snap.ExprHash = billingexpr.ExprHashString(definition.BillingExpr)
 		snap.EstimatedQuotaBeforeGroup = cost / 1_000_000 * common.QuotaPerUnit
 		snap.EstimatedTier = trace.MatchedTier
+		snap.EstimatedImageCount = trace.ImageCount
+		snap.EstimatedBillingUnit = trace.BillingUnit
+		snap.EstimatedFixedPrice = trace.FixedPrice
 		snap.ExprVersion = billingexpr.ExprVersion(definition.BillingExpr)
 		snap.ProfileKey = definition.ProfileKey
 		snap.ProfileLabel = definition.ProfileLabel
 		snap.ProfileSource = definition.ProfileSource
 		snap.ChannelID = definition.ChannelID
 	}
-	if snap.GroupRatio == groupRatio && !definitionChanged {
+	if snap.GroupRatio == groupRatio && !definitionChanged && !newSnapshot {
 		return snap, nil
 	}
 
@@ -234,6 +304,11 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	if relayInfo.BillingRequestInput != nil {
 		requestInput = *relayInfo.BillingRequestInput
 	}
+	if relayInfo.BillingImageCount != nil {
+		requestInput.ImageCount = relayInfo.BillingImageCount
+	} else if snap.EstimatedImageCount != nil {
+		requestInput.ImageCount = snap.EstimatedImageCount
+	}
 
 	tr, err := billingexpr.ComputeTieredQuotaWithRequest(snap, params, requestInput)
 	if err != nil {
@@ -250,4 +325,14 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	noteQuotaClamp(relayInfo, tr.Clamp)
 
 	return true, tr.ActualQuotaAfterGroup, &tr
+}
+
+// A failed evaluation retains the reservation and its estimated billing unit.
+// Successful evaluations always use the actual branch, including zero prices.
+func isFixedPriceSettlement(info *relaycommon.RelayInfo, result *billingexpr.TieredResult) bool {
+	if result != nil {
+		return result.BillingUnit == billingexpr.BillingUnitRequest
+	}
+	snap := info.TieredBillingSnapshot
+	return snap != nil && snap.BillingMode == "tiered_expr" && snap.EstimatedBillingUnit == billingexpr.BillingUnitRequest
 }

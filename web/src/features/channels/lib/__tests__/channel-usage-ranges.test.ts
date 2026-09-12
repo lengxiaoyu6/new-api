@@ -16,8 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { assert, describe, test } from 'vitest'
 
 import {
   CHANNEL_USAGE_RANGES,
@@ -27,12 +26,12 @@ import {
 describe('channel usage range labels', () => {
   test('maps each configured range to its label', () => {
     for (const range of CHANNEL_USAGE_RANGES) {
-      assert.equal(getChannelUsageRangeLabel(range.days), range.label)
+      assert.strictEqual(getChannelUsageRangeLabel(range.days), range.label)
     }
   })
 
   test('falls back to the today label for unknown ranges', () => {
-    assert.equal(getChannelUsageRangeLabel(2), 'Today Usage')
-    assert.equal(getChannelUsageRangeLabel(-1), 'Today Usage')
+    assert.strictEqual(getChannelUsageRangeLabel(2), 'Today Usage')
+    assert.strictEqual(getChannelUsageRangeLabel(-1), 'Today Usage')
   })
 })

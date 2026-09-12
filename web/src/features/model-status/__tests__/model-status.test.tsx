@@ -16,50 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
-
-import { Window } from 'happy-dom'
 import type { Root } from 'react-dom/client'
+import { assert, describe, test } from 'vitest'
 
 import type { ModelStatusGroupMetric, ModelStatusItem } from '../types'
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'HTMLSelectElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-
-const reducedMotionMediaQuery = domWindow.matchMedia('(prefers-reduced-motion)')
-Object.defineProperty(reducedMotionMediaQuery, 'matches', {
-  configurable: true,
-  value: true,
-})
-Object.defineProperty(domWindow, 'matchMedia', {
-  configurable: true,
-  value: () => reducedMotionMediaQuery,
-})
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -181,25 +141,25 @@ async function cleanupRendered(root: Root, container: HTMLElement) {
 
 function changeInputValue(input: HTMLInputElement, value: string) {
   const valueSetter = Object.getOwnPropertyDescriptor(
-    domWindow.HTMLInputElement.prototype,
+    window.HTMLInputElement.prototype,
     'value'
   )?.set
   assert.ok(valueSetter)
   valueSetter.call(input, value)
   input.dispatchEvent(
-    new domWindow.Event('input', { bubbles: true }) as unknown as Event
+    new window.Event('input', { bubbles: true }) as unknown as Event
   )
 }
 
 function changeSelectValue(select: HTMLSelectElement, value: string) {
   const valueSetter = Object.getOwnPropertyDescriptor(
-    domWindow.HTMLSelectElement.prototype,
+    window.HTMLSelectElement.prototype,
     'value'
   )?.set
   assert.ok(valueSetter)
   valueSetter.call(select, value)
   select.dispatchEvent(
-    new domWindow.Event('change', { bubbles: true }) as unknown as Event
+    new window.Event('change', { bubbles: true }) as unknown as Event
   )
 }
 
@@ -253,10 +213,6 @@ function getVerdictTiles(container: ParentNode): HTMLButtonElement[] {
 }
 
 describe('model status (public page)', () => {
-  after(() => {
-    domWindow.close()
-  })
-
   test('renders the verdict summary and groups model trends by provider', async () => {
     const { container, root } = await renderModelStatus()
 
@@ -270,16 +226,16 @@ describe('model status (public page)', () => {
       assert.ok(pageText.includes('Overall 24h availability is 83.9%'))
 
       const tiles = getVerdictTiles(container)
-      assert.equal(tiles.length, 4)
+      assert.strictEqual(tiles.length, 4)
       assert.ok(tiles[0].textContent?.includes('Healthy'))
       assert.ok(tiles[1].textContent?.includes('Unstable'))
       assert.ok(tiles[2].textContent?.includes('Unavailable'))
       assert.ok(tiles[3].textContent?.includes('No data yet'))
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 4)
+      assert.strictEqual(rowTexts.length, 4)
       const providerGroups = getProviderGroups(container)
-      assert.equal(providerGroups.length, 3)
+      assert.strictEqual(providerGroups.length, 3)
       assert.ok(providerGroups[0].textContent?.includes('AlphaAI'))
       assert.ok(providerGroups[0].textContent?.includes('2 models'))
       assert.ok(providerGroups[1].textContent?.includes('BetaML'))
@@ -293,7 +249,10 @@ describe('model status (public page)', () => {
           .find((rowText) => rowText.includes('beta-offline'))
           ?.includes('48.8%')
       )
-      assert.equal(container.textContent?.includes('models monitored'), false)
+      assert.strictEqual(
+        container.textContent?.includes('models monitored'),
+        false
+      )
     } finally {
       await cleanupRendered(root, container)
     }
@@ -356,20 +315,20 @@ describe('model status (public page)', () => {
         '[data-group-trigger]'
       )
       assert.ok(trigger)
-      assert.equal(trigger.getAttribute('aria-expanded'), 'false')
+      assert.strictEqual(trigger.getAttribute('aria-expanded'), 'false')
       assert.ok(trigger.textContent?.includes('2 groups'))
 
       await act(async () => trigger.click())
 
-      assert.equal(trigger.getAttribute('aria-expanded'), 'true')
+      assert.strictEqual(trigger.getAttribute('aria-expanded'), 'true')
       const details = container.querySelector('[data-group-details]')
       assert.ok(details)
       assert.ok(details.textContent?.includes('default'))
       assert.ok(details.textContent?.includes('vip'))
       assert.ok(details.textContent?.includes('48.0%'))
-      assert.equal(details.textContent?.includes('Requests'), false)
-      assert.equal(details.querySelectorAll('[role="img"]').length, 2)
-      assert.equal(details.querySelectorAll('[data-group-row]').length, 2)
+      assert.strictEqual(details.textContent?.includes('Requests'), false)
+      assert.strictEqual(details.querySelectorAll('[role="img"]').length, 2)
+      assert.strictEqual(details.querySelectorAll('[data-group-row]').length, 2)
     } finally {
       await cleanupRendered(root, container)
     }
@@ -381,19 +340,22 @@ describe('model status (public page)', () => {
     try {
       const allButton = getButton(container, 'All')
       const unstableButton = getButton(container, 'Unstable')
-      assert.equal(allButton.getAttribute('aria-pressed'), 'true')
-      assert.equal(unstableButton.getAttribute('aria-pressed'), 'false')
+      assert.strictEqual(allButton.getAttribute('aria-pressed'), 'true')
+      assert.strictEqual(unstableButton.getAttribute('aria-pressed'), 'false')
 
       await act(async () => unstableButton.click())
 
-      assert.equal(allButton.getAttribute('aria-pressed'), 'false')
-      assert.equal(unstableButton.getAttribute('aria-pressed'), 'true')
+      assert.strictEqual(allButton.getAttribute('aria-pressed'), 'false')
+      assert.strictEqual(unstableButton.getAttribute('aria-pressed'), 'true')
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 2)
+      assert.strictEqual(rowTexts.length, 2)
       assert.ok(rowTexts.some((row) => row.includes('alpha-reasoner')))
       assert.ok(rowTexts.some((row) => row.includes('gamma-lag')))
-      assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
+      assert.strictEqual(
+        (container.textContent ?? '').includes('alpha-fast'),
+        false
+      )
     } finally {
       await cleanupRendered(root, container)
     }
@@ -411,7 +373,7 @@ describe('model status (public page)', () => {
       await act(async () => unavailableTile.click())
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 1)
+      assert.strictEqual(rowTexts.length, 1)
       assert.ok(rowTexts[0].includes('beta-offline'))
     } finally {
       await cleanupRendered(root, container)
@@ -423,7 +385,7 @@ describe('model status (public page)', () => {
 
     try {
       const providerSelect = getProviderSelect(container)
-      assert.equal(providerSelect.value, 'all')
+      assert.strictEqual(providerSelect.value, 'all')
       const optionTexts = [
         ...providerSelect.querySelectorAll<HTMLOptionElement>('option'),
       ].map((option) => option.textContent)
@@ -439,12 +401,15 @@ describe('model status (public page)', () => {
       })
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 1)
+      assert.strictEqual(rowTexts.length, 1)
       assert.ok(rowTexts[0].includes('beta-offline'))
       const providerGroups = getProviderGroups(container)
-      assert.equal(providerGroups.length, 1)
-      assert.equal(providerGroups[0].getAttribute('aria-label'), 'BetaML')
-      assert.equal((container.textContent ?? '').includes('alpha-fast'), false)
+      assert.strictEqual(providerGroups.length, 1)
+      assert.strictEqual(providerGroups[0].getAttribute('aria-label'), 'BetaML')
+      assert.strictEqual(
+        (container.textContent ?? '').includes('alpha-fast'),
+        false
+      )
     } finally {
       await cleanupRendered(root, container)
     }
@@ -455,14 +420,14 @@ describe('model status (public page)', () => {
 
     try {
       const searchInput = getSearchInput(container)
-      assert.equal(searchInput.placeholder, 'Search model name...')
+      assert.strictEqual(searchInput.placeholder, 'Search model name...')
 
       await act(async () => {
         changeInputValue(searchInput, 'reasoner')
       })
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 1)
+      assert.strictEqual(rowTexts.length, 1)
       assert.ok(rowTexts[0].includes('alpha-reasoner'))
 
       await act(async () => {
@@ -471,7 +436,7 @@ describe('model status (public page)', () => {
 
       // Search matches the provider name too.
       const providerRows = getModelRowTexts(container)
-      assert.equal(providerRows.length, 2)
+      assert.strictEqual(providerRows.length, 2)
       assert.ok(providerRows.some((row) => row.includes('alpha-fast')))
       assert.ok(providerRows.some((row) => row.includes('alpha-reasoner')))
 
@@ -479,7 +444,7 @@ describe('model status (public page)', () => {
         changeInputValue(searchInput, 'missing-model')
       })
 
-      assert.equal(getModelRowTexts(container).length, 0)
+      assert.strictEqual(getModelRowTexts(container).length, 0)
     } finally {
       await cleanupRendered(root, container)
     }
@@ -490,14 +455,14 @@ describe('model status (public page)', () => {
 
     try {
       const sortSelect = getSortSelect(container)
-      assert.equal(sortSelect.value, 'status')
+      assert.strictEqual(sortSelect.value, 'status')
 
       await act(async () => {
         changeSelectValue(sortSelect, 'name')
       })
 
       const rowTexts = getModelRowTexts(container)
-      assert.equal(rowTexts.length, 4)
+      assert.strictEqual(rowTexts.length, 4)
       assert.ok(rowTexts[0].includes('alpha-fast'))
       assert.ok(rowTexts[1].includes('alpha-reasoner'))
       assert.ok(rowTexts[2].includes('beta-offline'))
@@ -529,9 +494,9 @@ describe('model status (public page)', () => {
       assert.ok(pageText.includes('No data yet'))
       assert.ok(pageText.includes('This model has no data yet'))
       assert.ok(pageText.includes('No data available'))
-      assert.equal(pageText.includes('All systems operational'), false)
+      assert.strictEqual(pageText.includes('All systems operational'), false)
       assert.ok(pageText.includes('5h trend'))
-      assert.equal(container.querySelectorAll('[role="img"]').length, 1)
+      assert.strictEqual(container.querySelectorAll('[role="img"]').length, 1)
     } finally {
       await cleanupRendered(root, container)
     }
@@ -554,15 +519,18 @@ describe('model status (public page)', () => {
 
     try {
       const trends = container.querySelectorAll('[role="img"]')
-      assert.equal(trends.length, 4)
+      assert.strictEqual(trends.length, 4)
       for (const trend of trends) {
-        assert.equal(trend.querySelectorAll('[data-trend-bar]').length, 10)
+        assert.strictEqual(
+          trend.querySelectorAll('[data-trend-bar]').length,
+          10
+        )
       }
       const alphaFastRow = [...container.querySelectorAll('article')].find(
         (article) => article.textContent?.includes('alpha-fast')
       )
       assert.ok(alphaFastRow)
-      assert.equal(
+      assert.strictEqual(
         alphaFastRow.querySelector('[role="img"]')?.getAttribute('aria-label'),
         '5h trend: 99.5%'
       )
@@ -588,11 +556,11 @@ describe('model status (public page)', () => {
       const trend = container.querySelector('[role="img"]')
       assert.ok(trend)
       const bars = trend.querySelectorAll<HTMLElement>('[data-trend-bar]')
-      assert.equal(bars.length, 10)
-      assert.equal(bars[7].dataset.hasRequests, 'true')
-      assert.equal(bars[8].dataset.hasRequests, 'false')
+      assert.strictEqual(bars.length, 10)
+      assert.strictEqual(bars[7].dataset.hasRequests, 'true')
+      assert.strictEqual(bars[8].dataset.hasRequests, 'false')
       assert.ok(bars[8].classList.contains('bg-muted-foreground/25'))
-      assert.equal(bars[9].dataset.hasRequests, 'true')
+      assert.strictEqual(bars[9].dataset.hasRequests, 'true')
       assert.ok(bars[7].title.includes('/'))
       assert.ok(bars[7].title.includes('-'))
       assert.ok(bars[7].title.includes('100.0%'))
@@ -612,7 +580,7 @@ describe('model status (public page)', () => {
         changeInputValue(searchInput, 'missing-model')
       })
 
-      assert.equal(getModelRowTexts(container).length, 0)
+      assert.strictEqual(getModelRowTexts(container).length, 0)
       const pageText = container.textContent ?? ''
       assert.ok(pageText.includes('No matching models'))
       assert.ok(
@@ -634,18 +602,18 @@ describe('model status (public page)', () => {
         getButton(container, 'Unstable').click()
       })
 
-      assert.equal(getModelRowTexts(container).length, 1)
+      assert.strictEqual(getModelRowTexts(container).length, 1)
 
       await act(async () => getButton(container, 'Clear filters').click())
 
-      assert.equal(getSearchInput(container).value, '')
-      assert.equal(getProviderSelect(container).value, 'all')
-      assert.equal(getSortSelect(container).value, 'status')
-      assert.equal(
+      assert.strictEqual(getSearchInput(container).value, '')
+      assert.strictEqual(getProviderSelect(container).value, 'all')
+      assert.strictEqual(getSortSelect(container).value, 'status')
+      assert.strictEqual(
         getButton(container, 'All').getAttribute('aria-pressed'),
         'true'
       )
-      assert.equal(getModelRowTexts(container).length, 4)
+      assert.strictEqual(getModelRowTexts(container).length, 4)
     } finally {
       await cleanupRendered(root, container)
     }
@@ -673,7 +641,7 @@ describe('model status (public page)', () => {
     })
 
     try {
-      assert.equal(
+      assert.strictEqual(
         (container.textContent ?? '').includes('Last updated:'),
         false
       )

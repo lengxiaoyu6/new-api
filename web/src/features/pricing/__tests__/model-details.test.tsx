@@ -106,9 +106,9 @@ describe('model details channel billing display', () => {
     expect(
       within(pricingSection).getAllByText('channel-base')
     ).not.toHaveLength(0)
-    expect(within(pricingSection).getAllByText('model-long')).not.toHaveLength(
-      0
-    )
+    expect(
+      within(pricingSection).getAllByText(/^model-long(?:$|:)/)
+    ).not.toHaveLength(0)
     expect(within(pricingSection).getAllByText('model-base')).not.toHaveLength(
       0
     )
@@ -117,7 +117,7 @@ describe('model details channel billing display', () => {
       .getByText('Channel override')
       .closest('.overflow-hidden') as HTMLElement
     expect(
-      within(channelOverride).queryByText('model-long')
+      within(channelOverride).queryByText(/^model-long(?:$|:)/)
     ).not.toBeInTheDocument()
     expect(
       within(channelOverride).queryByText('model-base')

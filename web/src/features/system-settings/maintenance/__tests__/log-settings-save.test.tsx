@@ -16,58 +16,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import assert from 'node:assert/strict'
+import { assert, describe, test, vi } from 'vitest'
 
-import { Window } from 'happy-dom'
+const { updateOptionCalls } = vi.hoisted(() => ({
+  updateOptionCalls: [] as Array<{
+    key: string
+    value: string | boolean | number
+  }>,
+}))
 
-// Use Bun's runner at runtime while reusing the Node test types installed here.
-const bunTestModule = 'bun:test'
-const { afterAll, describe, test } = (await import(bunTestModule)) as {
-  afterAll: typeof import('node:test').after
-  describe: typeof import('node:test').describe
-  test: typeof import('node:test').test
-}
-const { mock } = (await import(bunTestModule)) as unknown as {
-  mock: {
-    module: (
-      specifier: string,
-      factory: () => Record<string, unknown>
-    ) => Promise<void> | void
-  }
-}
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLInputElement',
-  'HTMLButtonElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-
-const updateOptionCalls: Array<{
-  key: string
-  value: string | boolean | number
-}> = []
-
-mock.module('@/features/system-settings/api', () => ({
+vi.mock('@/features/system-settings/api', () => ({
   getSystemOptions: async () => ({ success: true, message: '', data: [] }),
   updateSystemOption: async (request: {
     key: string
@@ -86,7 +44,7 @@ mock.module('@/features/system-settings/api', () => ({
   listSystemTasks: async () => ({ success: true, message: '', data: [] }),
 }))
 
-mock.module('@/components/datetime-picker', () => ({
+vi.mock('@/components/datetime-picker', () => ({
   DateTimePicker: () => null,
 }))
 
@@ -180,10 +138,6 @@ async function renderSection(defaultEnabled: boolean) {
 }
 
 describe('log settings save', () => {
-  afterAll(() => {
-    domWindow.close()
-  })
-
   test('clicking save without changes shows feedback and sends no request', async () => {
     updateOptionCalls.length = 0
     const toastSpy = await importToastSpy()
@@ -196,12 +150,12 @@ describe('log settings save', () => {
       saveButton.click()
     })
 
-    assert.equal(
+    assert.strictEqual(
       updateOptionCalls.length,
       0,
       'updateOption should not be called when nothing changed'
     )
-    assert.equal(
+    assert.strictEqual(
       toastSpy.calls.some((c) => c.message === 'No changes to save'),
       true,
       'a no-changes toast should be shown'
@@ -232,7 +186,7 @@ describe('log settings save', () => {
       saveButton.click()
     })
 
-    assert.equal(
+    assert.strictEqual(
       updateOptionCalls.length,
       1,
       'updateOption should be called once after toggling and saving'
