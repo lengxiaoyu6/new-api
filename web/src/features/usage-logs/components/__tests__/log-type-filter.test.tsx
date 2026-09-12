@@ -24,7 +24,6 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { getCoreRowModel, useReactTable } from '@tanstack/react-table'
 import {
   cleanup,
   render,
@@ -36,45 +35,50 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
+import { Route as UsageLogsRoute } from '@/routes/_authenticated/usage-logs/$section'
 
-import { CommonLogsFilterBar } from '../common-logs-filter-bar'
 import { UsageLogsProvider } from '../usage-logs-provider'
+import { UsageLogsTable } from '../usage-logs-table'
+
+const clients: QueryClient[] = []
 
 function FilterFixture() {
-  const table = useReactTable({
-    data: [],
-    columns: [],
-    getCoreRowModel: getCoreRowModel(),
-  })
   return (
     <UsageLogsProvider>
-      <CommonLogsFilterBar table={table} />
+      <UsageLogsTable logCategory='common' />
     </UsageLogsProvider>
   )
 }
 
-async function renderFilter() {
-  vi.spyOn(api, 'get').mockImplementation(async (url) => ({
-    data: {
-      success: true,
-      data: url === '/api/user/self/groups' ? {} : { quota: 0, rpm: 0, tpm: 0 },
-    },
-  }))
+async function renderFilter(initialEntry = '/usage-logs/common') {
+  vi.spyOn(window, 'scrollTo').mockImplementation(() => undefined)
+  vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url.startsWith('/api/log/self?')) {
+      return { data: { success: true, data: { items: [], total: 0 } } }
+    }
+    return {
+      data: {
+        success: true,
+        data: url === '/api/user/self/groups' ? {} : { quota: 0, rpm: 0, tpm: 0 },
+      },
+    }
+  })
   const root = createRootRoute()
   const auth = createRoute({ getParentRoute: () => root, id: '_authenticated' })
   const logs = createRoute({
     getParentRoute: () => auth,
     path: '/usage-logs/$section',
     component: FilterFixture,
-    validateSearch: (search: Record<string, unknown>) => search,
+    validateSearch: UsageLogsRoute.options.validateSearch,
   })
   const router = createRouter({
     routeTree: root.addChildren([auth.addChildren([logs])]),
-    history: createMemoryHistory({ initialEntries: ['/usage-logs/common'] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   })
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
+  clients.push(client)
   render(
     <QueryClientProvider client={client}>
       <RouterProvider router={router} />
@@ -86,6 +90,8 @@ async function renderFilter() {
 
 afterEach(() => {
   cleanup()
+  for (const client of clients) client.clear()
+  clients.length = 0
   vi.restoreAllMocks()
 })
 
@@ -106,6 +112,7 @@ it('marks only retired log types as deprecated while keeping historical filters 
     'System',
     'Error',
     'Refund',
+    'Affiliate',
   ]) {
     expect(
       within(screen.getByRole('option', { name: label })).queryByText(
@@ -126,5 +133,39 @@ it('marks only retired log types as deprecated while keeping historical filters 
   await userEvent.click(screen.getByRole('button', { name: 'Search' }))
   await waitFor(() =>
     expect(router.state.location.search).toMatchObject({ type: ['7'], page: 1 })
+  )
+})
+
+it('keeps Affiliate selected and requests only affiliate logs after Search', async () => {
+  const router = await renderFilter()
+  await userEvent.click(screen.getByRole('combobox', { name: 'Type' }))
+  await userEvent.click(screen.getByRole('option', { name: 'Affiliate' }))
+  await userEvent.click(screen.getByRole('button', { name: 'Search' }))
+
+  await waitFor(() =>
+    expect(router.state.matches.at(-1)?.search).toMatchObject({
+      type: ['8'],
+      page: 1,
+    })
+  )
+  expect(screen.getByRole('combobox', { name: 'Type' })).toHaveTextContent(
+    'Affiliate'
+  )
+  await waitFor(() =>
+    expect(api.get).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/log\/self\?.*\btype=8(?:&|$)/)
+    )
+  )
+})
+
+it('restores the Affiliate filter from a saved log URL', async () => {
+  await renderFilter('/usage-logs/common?type=%5B%228%22%5D')
+  expect(screen.getByRole('combobox', { name: 'Type' })).toHaveTextContent(
+    'Affiliate'
+  )
+  await waitFor(() =>
+    expect(api.get).toHaveBeenCalledWith(
+      expect.stringMatching(/^\/api\/log\/self\?.*\btype=8(?:&|$)/)
+    )
   )
 })

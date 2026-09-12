@@ -20,12 +20,13 @@ import { createFileRoute, redirect } from '@tanstack/react-router'
 import z from 'zod'
 
 import { UsageLogs } from '@/features/usage-logs'
+import { LOG_TYPE_FILTERS } from '@/features/usage-logs/constants'
 import {
   isUsageLogsSectionId,
   USAGE_LOGS_DEFAULT_SECTION,
 } from '@/features/usage-logs/section-registry'
 
-const logTypeValues = ['0', '1', '2', '3', '4', '5', '6', '7'] as const
+const logTypeValues = LOG_TYPE_FILTERS.map((type) => type.value)
 const logTypeSearchSchema = z
   .preprocess((value) => {
     if (value == null || value === '') return undefined
