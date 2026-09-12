@@ -77,41 +77,43 @@ func resolveUserSortOptions(sortOptions []UserSortOptions) UserSortOptions {
 // User if you add sensitive fields, don't forget to clean them in setupLogin function.
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
-	Id                   int                        `json:"id"`
-	Username             string                     `json:"username" gorm:"unique;index" validate:"max=20"`
-	Password             string                     `json:"password" gorm:"not null;" validate:"min=8,max=128"`
-	HasPassword          bool                       `json:"-" gorm:"-:all"`
-	OriginalPassword     string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName          string                     `json:"display_name" gorm:"index" validate:"max=20"`
-	Role                 int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
-	Status               int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
-	Email                string                     `json:"email" gorm:"index" validate:"max=50"`
-	GitHubId             string                     `json:"github_id" gorm:"column:github_id;index"`
-	DiscordId            string                     `json:"discord_id" gorm:"column:discord_id;index"`
-	OidcId               string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
-	WeChatId             string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
-	TelegramId           string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
-	VerificationCode     string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
-	AccessToken          *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
-	AccessTokenCreatedAt *int64                     `json:"-" gorm:"type:bigint;column:access_token_created_at"`
-	Quota                int                        `json:"quota" gorm:"type:int;default:0"`
-	UsedQuota            int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
-	RequestCount         int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
-	Group                string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
-	AffCode              string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
-	AffCount             int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
-	AffQuota             int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
-	AffHistoryQuota      int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
-	InviterId            int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
-	DeletedAt            gorm.DeletedAt             `gorm:"index"`
-	LinuxDOId            string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
-	Setting              string                     `json:"setting" gorm:"type:text;column:setting"`
-	Remark               string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
-	StripeCustomer       string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
-	CreatedAt            int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
-	LastLoginAt          int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
-	AuthVersion          int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
-	AdminPermissions     map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
+	Id                       int                        `json:"id"`
+	Username                 string                     `json:"username" gorm:"unique;index" validate:"max=20"`
+	Password                 string                     `json:"password" gorm:"not null;" validate:"min=8,max=128"`
+	HasPassword              bool                       `json:"-" gorm:"-:all"`
+	OriginalPassword         string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
+	DisplayName              string                     `json:"display_name" gorm:"index" validate:"max=20"`
+	Role                     int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
+	Status                   int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
+	Email                    string                     `json:"email" gorm:"index" validate:"max=50"`
+	GitHubId                 string                     `json:"github_id" gorm:"column:github_id;index"`
+	DiscordId                string                     `json:"discord_id" gorm:"column:discord_id;index"`
+	OidcId                   string                     `json:"oidc_id" gorm:"column:oidc_id;index"`
+	WeChatId                 string                     `json:"wechat_id" gorm:"column:wechat_id;index"`
+	TelegramId               string                     `json:"telegram_id" gorm:"column:telegram_id;index"`
+	VerificationCode         string                     `json:"verification_code" gorm:"-:all"`                         // this field is only for Email verification, don't save it to database!
+	AccessToken              *string                    `json:"-" gorm:"type:char(32);column:access_token;uniqueIndex"` // this token is for system management
+	AccessTokenCreatedAt     *int64                     `json:"-" gorm:"type:bigint;column:access_token_created_at"`
+	Quota                    int                        `json:"quota" gorm:"type:int;default:0"`
+	UsedQuota                int                        `json:"used_quota" gorm:"type:int;default:0;column:used_quota"` // used quota
+	RequestCount             int                        `json:"request_count" gorm:"type:int;default:0;"`               // request number
+	Group                    string                     `json:"group" gorm:"type:varchar(64);default:'default'"`
+	AffCode                  string                     `json:"aff_code" gorm:"type:varchar(32);column:aff_code;uniqueIndex"`
+	AffCount                 int                        `json:"aff_count" gorm:"type:int;default:0;column:aff_count"`
+	AffQuota                 int                        `json:"aff_quota" gorm:"type:int;default:0;column:aff_quota"`           // 邀请剩余额度
+	AffHistoryQuota          int                        `json:"aff_history_quota" gorm:"type:int;default:0;column:aff_history"` // 邀请历史额度
+	AffWithdrawableQuota     int                        `json:"aff_withdrawable_quota" gorm:"type:bigint;not null;default:0"`
+	AffWithdrawalInitialized bool                       `json:"-" gorm:"not null;default:false"`
+	InviterId                int                        `json:"inviter_id" gorm:"type:int;column:inviter_id;index"`
+	DeletedAt                gorm.DeletedAt             `gorm:"index"`
+	LinuxDOId                string                     `json:"linux_do_id" gorm:"column:linux_do_id;index"`
+	Setting                  string                     `json:"setting" gorm:"type:text;column:setting"`
+	Remark                   string                     `json:"remark,omitempty" gorm:"type:varchar(255)" validate:"max=255"`
+	StripeCustomer           string                     `json:"stripe_customer" gorm:"type:varchar(64);column:stripe_customer;index"`
+	CreatedAt                int64                      `json:"created_at" gorm:"autoCreateTime;column:created_at"`
+	LastLoginAt              int64                      `json:"last_login_at" gorm:"default:0;column:last_login_at"`
+	AuthVersion              int64                      `json:"-" gorm:"type:bigint;not null;default:1;column:auth_version"`
+	AdminPermissions         map[string]map[string]bool `json:"admin_permissions,omitempty" gorm:"-:all"`
 }
 
 func (user *User) ToBaseUser() *UserBase {
@@ -623,16 +625,28 @@ func HardDeleteUserById(id int) error {
 }
 
 func inviteUser(inviterId int) error {
-	result := DB.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]any{
-		"aff_count":   gorm.Expr("aff_count + ?", 1),
-		"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
-		"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
-	})
-	if result.Error != nil {
-		return result.Error
+	if common.QuotaForInviter < 0 || common.QuotaForInviter > common.MaxWalletQuota {
+		return ErrWalletQuotaLimitExceeded
 	}
-	if result.RowsAffected == 0 {
-		return gorm.ErrRecordNotFound
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		var inviter User
+		if err := lockForUpdate(tx).First(&inviter, inviterId).Error; err != nil {
+			return err
+		}
+		if err := initializeAffiliateWithdrawal(tx, &inviter); err != nil {
+			return err
+		}
+		if inviter.AffQuota > common.MaxWalletQuota-common.QuotaForInviter || inviter.AffHistoryQuota > common.MaxWalletQuota-common.QuotaForInviter {
+			return ErrWalletQuotaLimitExceeded
+		}
+		return tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]any{
+			"aff_count":   gorm.Expr("aff_count + ?", 1),
+			"aff_quota":   gorm.Expr("aff_quota + ?", common.QuotaForInviter),
+			"aff_history": gorm.Expr("aff_history + ?", common.QuotaForInviter),
+		}).Error
+	})
+	if err != nil {
+		return err
 	}
 	if common.QuotaForInviter > 0 {
 		RecordAffiliateLog(inviterId, "register", common.QuotaForInviter, nil)
@@ -641,44 +655,48 @@ func inviteUser(inviterId int) error {
 }
 
 func (user *User) TransferAffQuotaToQuota(quota int) error {
-	// 检查quota是否为正数
-	if quota <= 0 {
+	if quota <= 0 || quota > common.MaxWalletQuota {
 		return fmt.Errorf("转移额度必须大于0！")
 	}
-
-	// 开始数据库事务
-	tx := DB.Begin()
-	if tx.Error != nil {
-		return tx.Error
-	}
-	defer tx.Rollback() // 确保在函数退出时事务能回滚
-
-	// 加锁查询用户以确保数据一致性
-	err := lockForUpdate(tx).First(user, user.Id).Error
+	withdrawableTransferred := 0
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		if err := lockForUpdate(tx).First(user, user.Id).Error; err != nil {
+			return err
+		}
+		if err := initializeAffiliateWithdrawal(tx, user); err != nil {
+			return err
+		}
+		if user.AffQuota < quota {
+			return errors.New("邀请额度不足！")
+		}
+		if user.Quota > common.MaxWalletQuota-quota || user.Quota < -common.MaxWalletQuota {
+			return ErrWalletQuotaLimitExceeded
+		}
+		// Spend registration rewards first; transferred rebates permanently lose withdrawal eligibility.
+		withdrawableTransferred = max(0, quota-(user.AffQuota-user.AffWithdrawableQuota))
+		result := tx.Model(&User{}).Where("id = ? AND aff_quota = ? AND aff_withdrawable_quota = ? AND quota <= ?", user.Id, user.AffQuota, user.AffWithdrawableQuota, common.MaxWalletQuota-quota).Updates(map[string]any{
+			"aff_quota":              gorm.Expr("aff_quota - ?", quota),
+			"aff_withdrawable_quota": gorm.Expr("aff_withdrawable_quota - ?", withdrawableTransferred),
+			"quota":                  gorm.Expr("quota + ?", quota),
+		})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected != 1 {
+			return ErrAffiliateBalanceChanged
+		}
+		user.AffQuota -= quota
+		user.AffWithdrawableQuota -= withdrawableTransferred
+		user.Quota += quota
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-
-	// 再次检查用户的AffQuota是否足够
-	if user.AffQuota < quota {
-		return errors.New("邀请额度不足！")
+	if err := cacheIncrUserQuota(user.Id, int64(quota)); err != nil {
+		common.SysError(fmt.Sprintf("failed to sync affiliate transfer for user %d: %s", user.Id, err))
 	}
-
-	// 更新用户额度
-	user.AffQuota -= quota
-	user.Quota += quota
-
-	// 保存用户状态
-	if err := tx.Save(user).Error; err != nil {
-		return err
-	}
-
-	// 提交事务
-	if err := tx.Commit().Error; err != nil {
-		return err
-	}
-
-	RecordAffiliateLog(user.Id, "transfer", -quota, nil)
+	RecordAffiliateLog(user.Id, "transfer", -quota, map[string]any{"rebate_quota": withdrawableTransferred})
 	return nil
 }
 
@@ -903,6 +921,8 @@ func (user *User) UpdateWithTx(tx *gorm.DB, updatePassword bool) error {
 		"aff_count",
 		"aff_quota",
 		"aff_history",
+		"aff_withdrawable_quota",
+		"aff_withdrawal_initialized",
 		"auth_version",
 	).Updates(newUser).Error; err != nil {
 		return err

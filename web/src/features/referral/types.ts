@@ -25,6 +25,7 @@ export interface ApiResponse<T = unknown> {
 export interface AffiliateSummary {
   aff_code: string
   aff_quota: number
+  aff_withdrawable_quota: number
   aff_history_quota: number
   aff_count: number
   inviter_reward: number
@@ -68,3 +69,35 @@ export interface AffiliateLogsPage {
 }
 
 export type AffiliateLogsResponse = ApiResponse<AffiliateLogsPage>
+
+export interface WithdrawalRequest {
+  request_id: string
+  quota: number
+  method: string
+  account_name: string
+  account: string
+}
+
+export interface AffiliateWithdrawal extends WithdrawalRequest {
+  id: number
+  user_id: number
+  amount_usd: string
+  status: 'pending' | 'paid' | 'rejected'
+  review_note: string
+  reviewer_id: number
+  created_at: number
+  reviewed_at: number
+}
+
+export interface WithdrawalReview {
+  withdrawal_id: number
+  status: 'paid' | 'rejected'
+  note: string
+}
+
+export type WithdrawalsResponse = ApiResponse<{
+  items: AffiliateWithdrawal[]
+  total: number
+  page: number
+  page_size: number
+}>

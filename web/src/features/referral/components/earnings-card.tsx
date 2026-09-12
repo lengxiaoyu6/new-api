@@ -19,8 +19,9 @@ For commercial licensing, please contact support@quantumnous.com
 import { ChevronLeft, ChevronRight, ReceiptText } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { IconBadge } from '@/components/ui/icon-badge'
 import { Button } from '@/components/ui/button'
+import { IconBadge } from '@/components/ui/icon-badge'
+import { Skeleton } from '@/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -29,7 +30,6 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Skeleton } from '@/components/ui/skeleton'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import type { AffiliateLogsPage, AffiliateLogItem } from '../types'
@@ -44,6 +44,8 @@ interface EarningsCardProps {
 function kindLabelKey(kind: string): string {
   if (kind === 'register') return 'Registration Reward'
   if (kind === 'transfer') return 'Transfer to Balance'
+  if (kind === 'withdrawal') return 'Withdrawal request'
+  if (kind === 'withdrawal_refund') return 'Withdrawal refund'
   return 'Topup Rebate'
 }
 

@@ -19,6 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  // Referral ledger kinds and server validation messages.
+  'Withdrawal request',
+  'Withdrawal refund',
+  'Referral balance changed. Please try again.',
+  'Invalid withdrawal details.',
+  'Insufficient withdrawable top-up rebates.',
+  'This withdrawal has already been processed.',
+  'This withdrawal request ID has already been used.',
+
   'For this channel, map the model name in client requests to the model name sent upstream.',
   // Channel provider labels, descriptions and presentation badges.
   'Zhipu GLM',

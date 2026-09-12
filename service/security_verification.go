@@ -34,6 +34,8 @@ const (
 	VerificationScopePasswordSet         = "account.password.set"
 	VerificationScopePasswordChange      = "account.password.change"
 	VerificationScopeAccountDelete       = "account.delete"
+	VerificationScopeAffiliateWithdraw   = "affiliate.withdraw"
+	VerificationScopeAffiliateReview     = "affiliate.withdraw.review"
 )
 
 var (
@@ -66,6 +68,12 @@ type AccountUnbindingContext struct {
 	ProviderID int `json:"provider_id"`
 }
 
+type AffiliateWithdrawalReviewContext struct {
+	WithdrawalID int    `json:"withdrawal_id"`
+	Status       string `json:"status"`
+	Note         string `json:"note"`
+}
+
 // VerificationBinding contains no original operation parameters. It can safely
 // travel through a signed proof or a server-owned interactive verification flow.
 type VerificationBinding struct {
@@ -82,6 +90,22 @@ func BindVerificationOperation(operation VerificationOperation) (VerificationBin
 	}
 	var normalized any
 	switch operation.Scope {
+	case VerificationScopeAffiliateWithdraw:
+		var context model.AffiliateWithdrawalRequest
+		if len(fields) != 5 || common.Unmarshal(operation.Context, &context) != nil || context.Normalize() != nil {
+			return VerificationBinding{}, ErrVerificationContextInvalid
+		}
+		normalized = context
+	case VerificationScopeAffiliateReview:
+		var context AffiliateWithdrawalReviewContext
+		if len(fields) != 3 || common.Unmarshal(operation.Context, &context) != nil || context.WithdrawalID <= 0 || (context.Status != model.AffiliateWithdrawalPaid && context.Status != model.AffiliateWithdrawalRejected) {
+			return VerificationBinding{}, ErrVerificationContextInvalid
+		}
+		context.Note = strings.TrimSpace(context.Note)
+		if context.Note == "" || len([]rune(context.Note)) > 500 {
+			return VerificationBinding{}, ErrVerificationContextInvalid
+		}
+		normalized = context
 	case VerificationScopeChannelKeyRead:
 		var context ChannelKeyReadContext
 		if len(fields) != 1 || common.Unmarshal(fields["channel_id"], &context.ChannelID) != nil || context.ChannelID <= 0 {
@@ -184,9 +208,13 @@ func securityVerificationPolicy(scope string, state model.UserVerificationState)
 			return nil, model.ErrTwoFANotEnabled
 		}
 	case VerificationScopePasskeyRegister, VerificationScopeTwoFASetup,
+		VerificationScopeAffiliateWithdraw, VerificationScopeAffiliateReview,
 		VerificationScopeAccessTokenGenerate, VerificationScopeAccessTokenRevoke,
 		VerificationScopeAccountBind, VerificationScopeAccountUnbind,
 		VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete:
+		if scope == VerificationScopeAffiliateReview && state.Role < common.RoleAdminUser {
+			return nil, ErrVerificationForbidden
+		}
 		if scope == VerificationScopeAccountDelete && state.Role == common.RoleRootUser {
 			return nil, ErrVerificationForbidden
 		}
@@ -242,7 +270,7 @@ func GetVerificationRequirements(identity AuthIdentity, scope string) (*Verifica
 	for i := range methods {
 		if methods[i].Method == VerificationMethodPassword && !common.PasswordLoginEnabled {
 			switch scope {
-			case VerificationScopeAccountBind, VerificationScopeAccountUnbind, VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete:
+			case VerificationScopeAccountBind, VerificationScopeAccountUnbind, VerificationScopePasswordSet, VerificationScopePasswordChange, VerificationScopeAccountDelete, VerificationScopeAffiliateWithdraw, VerificationScopeAffiliateReview:
 				methods[i].Available, methods[i].Reason = false, "Password authentication is disabled."
 			}
 		}

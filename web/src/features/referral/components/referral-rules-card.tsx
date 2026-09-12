@@ -33,13 +33,18 @@ export function ReferralRulesCard(props: ReferralRulesCardProps) {
   const summary = props.summary
 
   const rules: string[] = [
-    t('Share your referral link with friends. When they register through the link, they become your invitees.'),
+    t(
+      'Share your referral link with friends. When they register through the link, they become your invitees.'
+    ),
   ]
   if (summary && summary.inviter_reward > 0) {
     rules.push(
-      t('You receive {{quota}} for each user who registers via your referral link.', {
-        quota: formatQuota(summary.inviter_reward),
-      })
+      t(
+        'You receive {{quota}} for each user who registers via your referral link.',
+        {
+          quota: formatQuota(summary.inviter_reward),
+        }
+      )
     )
   }
   if (summary && summary.invitee_reward > 0) {
@@ -58,11 +63,19 @@ export function ReferralRulesCard(props: ReferralRulesCardProps) {
     )
   }
   rules.push(
-    t('Affiliate rewards can be transferred to your main balance at any time.')
+    t(
+      'Only top-up rebates can be withdrawn. Registration rewards can only be transferred to balance.'
+    ),
+    t(
+      'Transfers use registration rewards first. Rebates transferred to balance can no longer be withdrawn.'
+    ),
+    t(
+      'Historical rebates are withdrawable when earnings and transfer records reconcile with the referral balance.'
+    )
   )
 
   return (
-    <div className='flex flex-col gap-4 rounded-lg border bg-muted/20 p-4 sm:p-5'>
+    <div className='bg-muted/20 flex flex-col gap-4 rounded-lg border p-4 sm:p-5'>
       <div className='flex items-center gap-2.5'>
         <IconBadge tone='info'>
           <Gift />

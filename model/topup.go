@@ -754,7 +754,7 @@ func RechargeWaffoPancake(tradeNo string) (err error) {
 
 // grantTopupInviterRebate 在充值事务内为邀请人结算充值返利：
 // 返利 = 被邀请人本次到账额度 × InviterTopupRebatePercent%，
-// 计入邀请人的 aff_quota 与 aff_history，可通过“邀请奖励”划转到余额。
+// 计入推荐余额、累计收益及可提现额度。
 // 未开启返利、比例非法、未确认支付合规或用户无邀请人时不发放；
 // 返回邀请人 ID 与返利额度（未发放时均为 0），供事务提交后记录日志。
 func grantTopupInviterRebate(tx *gorm.DB, inviteeId int, creditedQuota int) (int, int, error) {
@@ -777,9 +777,23 @@ func grantTopupInviterRebate(tx *gorm.DB, inviteeId int, creditedQuota int) (int
 	if rebate <= 0 {
 		return 0, 0, nil
 	}
-	result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]interface{}{
-		"aff_quota":   gorm.Expr("aff_quota + ?", rebate),
-		"aff_history": gorm.Expr("aff_history + ?", rebate),
+	var inviter User
+	if err := lockForUpdate(tx).First(&inviter, inviterId).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return 0, 0, nil
+		}
+		return 0, 0, err
+	}
+	if err := initializeAffiliateWithdrawal(tx, &inviter); err != nil {
+		return 0, 0, err
+	}
+	if inviter.AffQuota > common.MaxWalletQuota-rebate || inviter.AffHistoryQuota > common.MaxWalletQuota-rebate || inviter.AffWithdrawableQuota > common.MaxWalletQuota-rebate {
+		return 0, 0, ErrWalletQuotaLimitExceeded
+	}
+	result := tx.Model(&User{}).Where("id = ?", inviterId).Updates(map[string]any{
+		"aff_quota":              gorm.Expr("aff_quota + ?", rebate),
+		"aff_history":            gorm.Expr("aff_history + ?", rebate),
+		"aff_withdrawable_quota": gorm.Expr("aff_withdrawable_quota + ?", rebate),
 	})
 	if result.Error != nil {
 		return 0, 0, result.Error

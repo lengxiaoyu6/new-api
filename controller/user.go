@@ -462,7 +462,7 @@ func GetAffCode(c *gin.Context) {
 // GetAffSummary 返回推介计划页所需的汇总信息：邀请码、邀请收益与当前生效的奖励规则。
 func GetAffSummary(c *gin.Context) {
 	id := c.GetInt("id")
-	user, err := model.GetUserById(id, true)
+	user, err := model.GetAffiliateUser(id)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -475,14 +475,15 @@ func GetAffSummary(c *gin.Context) {
 		}
 	}
 	common.ApiSuccess(c, gin.H{
-		"aff_code":             user.AffCode,
-		"aff_quota":            user.AffQuota,
-		"aff_history_quota":    user.AffHistoryQuota,
-		"aff_count":            user.AffCount,
-		"inviter_reward":       common.QuotaForInviter,
-		"invitee_reward":       common.QuotaForInvitee,
-		"topup_rebate_percent": common.InviterTopupRebatePercent,
-		"compliance_confirmed": operation_setting.IsPaymentComplianceConfirmed(),
+		"aff_code":               user.AffCode,
+		"aff_quota":              user.AffQuota,
+		"aff_withdrawable_quota": user.AffWithdrawableQuota,
+		"aff_history_quota":      user.AffHistoryQuota,
+		"aff_count":              user.AffCount,
+		"inviter_reward":         common.QuotaForInviter,
+		"invitee_reward":         common.QuotaForInvitee,
+		"topup_rebate_percent":   common.InviterTopupRebatePercent,
+		"compliance_confirmed":   operation_setting.IsPaymentComplianceConfirmed(),
 	})
 }
 

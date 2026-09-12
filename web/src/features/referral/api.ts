@@ -17,12 +17,18 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import type {
   AffiliateLogsResponse,
   AffiliateSummaryResponse,
   AffiliateTransferResponse,
   InvitedUsersResponse,
+  ApiResponse,
+  AffiliateWithdrawal,
+  WithdrawalRequest,
+  WithdrawalReview,
+  WithdrawalsResponse,
 } from './types'
 
 export async function getAffiliateSummary(): Promise<AffiliateSummaryResponse> {
@@ -40,7 +46,9 @@ export async function getInvitedUsers(
   return res.data
 }
 
-export async function transferAffiliateQuota(quota: number): Promise<AffiliateTransferResponse> {
+export async function transferAffiliateQuota(
+  quota: number
+): Promise<AffiliateTransferResponse> {
   const res = await api.post('/api/user/aff_transfer', { quota })
   return res.data
 }
@@ -53,4 +61,40 @@ export async function getAffiliateLogs(
     params: { p: page, page_size: pageSize },
   })
   return res.data
+}
+
+export async function getWithdrawals(
+  page: number,
+  pageSize: number,
+  admin: boolean
+): Promise<WithdrawalsResponse> {
+  const res = await api.get<WithdrawalsResponse>(
+    admin ? '/api/user/aff/withdrawals/all' : '/api/user/aff/withdrawals',
+    { params: { p: page, page_size: pageSize } }
+  )
+  return requireServerSuccess(res.data)
+}
+
+export async function createWithdrawal(
+  request: WithdrawalRequest,
+  proof: string
+): Promise<ApiResponse<AffiliateWithdrawal>> {
+  const res = await api.post<ApiResponse<AffiliateWithdrawal>>(
+    '/api/user/aff/withdrawals',
+    request,
+    { headers: { 'X-Security-Proof': proof } }
+  )
+  return requireServerSuccess(res.data)
+}
+
+export async function reviewWithdrawal(
+  request: WithdrawalReview,
+  proof: string
+): Promise<ApiResponse<AffiliateWithdrawal>> {
+  const res = await api.post<ApiResponse<AffiliateWithdrawal>>(
+    '/api/user/aff/withdrawals/review',
+    request,
+    { headers: { 'X-Security-Proof': proof } }
+  )
+  return requireServerSuccess(res.data)
 }

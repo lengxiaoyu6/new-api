@@ -24,6 +24,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/system_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/pquerna/otp/totp"
@@ -844,4 +845,105 @@ func TestSecurityAccountUnbindPreservesUsableLoginMethod(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestAffiliateWithdrawalRequiresBoundSecurityProof(t *testing.T) {
+	for _, scenario := range []string{"missing", "wrong scope", "expired", "consumed", "other session", "amount changed", "recipient changed", "factor added", "valid"} {
+		t.Run(scenario, func(t *testing.T) {
+			user, identity := setupSecurityEnrollmentTest(t)
+			require.NoError(t, model.DB.AutoMigrate(&model.AffiliateWithdrawal{}))
+			require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+			require.NoError(t, model.DB.Model(user).Updates(map[string]any{"aff_quota": 1000, "aff_withdrawable_quota": 1000, "aff_withdrawal_initialized": true}).Error)
+			payment := operation_setting.GetPaymentSetting()
+			previousPayment := *payment
+			previousPasswordEnabled, previousQuotaUnit := common.PasswordLoginEnabled, common.QuotaPerUnit
+			payment.ComplianceConfirmed, payment.ComplianceTermsVersion = true, operation_setting.CurrentComplianceTermsVersion
+			common.PasswordLoginEnabled, common.QuotaPerUnit = true, 500000
+			t.Cleanup(func() {
+				*payment = previousPayment
+				common.PasswordLoginEnabled, common.QuotaPerUnit = previousPasswordEnabled, previousQuotaUnit
+			})
+			request := model.AffiliateWithdrawalRequest{RequestID: "d532a44d-94bf-4271-b9d4-5399a87b488d", Quota: 500, Method: "bank", AccountName: "Test", Account: "123"}
+			context, err := common.Marshal(request)
+			require.NoError(t, err)
+			operation := service.VerificationOperation{Scope: service.VerificationScopeAffiliateWithdraw, Context: context}
+			proof := ""
+			if scenario != "missing" {
+				proof = issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+			}
+			switch scenario {
+			case "wrong scope":
+				proof = issueSecurityEnrollmentProof(t, identity, service.VerificationOperation{Scope: service.VerificationScopePasswordChange}, service.VerificationMethodPassword)
+			case "expired":
+				require.NoError(t, model.DB.Model(&model.AuthFlow{}).Where("purpose = ?", model.AuthFlowPurposeSecurityProof).Update("expires_at", time.Now().Add(-time.Minute)).Error)
+			case "consumed":
+				_, err := service.ConsumeOperationProof(proof, identity, operation)
+				require.NoError(t, err)
+			case "other session":
+				bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "other")
+				require.NoError(t, err)
+				identity, err = service.ParseAccessToken(bundle.AccessToken)
+				require.NoError(t, err)
+			case "amount changed":
+				request.Quota = 600
+			case "recipient changed":
+				request.Account = "456"
+			case "factor added":
+				require.NoError(t, model.DB.Create(&model.TwoFA{UserId: user.Id, Secret: "JBSWY3DPEHPK3PXP", IsEnabled: true}).Error)
+			}
+			body, err := common.Marshal(request)
+			require.NoError(t, err)
+			response := securityEnrollmentRequest("POST", "/api/user/aff/withdrawals", string(body), proof, identity, CreateAffiliateWithdrawal)
+			stored, err := model.GetUserById(user.Id, false)
+			require.NoError(t, err)
+			if scenario == "valid" {
+				assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+				var result struct {
+					Success bool                      `json:"success"`
+					Data    model.AffiliateWithdrawal `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+				require.True(t, result.Success, response.Body.String())
+				assert.Equal(t, 500, stored.AffWithdrawableQuota)
+				assert.Equal(t, model.AffiliateWithdrawalPending, result.Data.Status)
+				repeat := securityEnrollmentRequest("POST", "/api/user/aff/withdrawals", string(body), proof, identity, CreateAffiliateWithdrawal)
+				assert.Equal(t, http.StatusForbidden, repeat.Code, "proof replay must fail")
+			} else {
+				assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+				assert.Equal(t, 1000, stored.AffWithdrawableQuota)
+				assert.Equal(t, 1000, stored.AffQuota)
+			}
+		})
+	}
+}
+
+func TestAffiliateWithdrawalReviewRequiresAdminAndBoundDecision(t *testing.T) {
+	user, identity := setupSecurityEnrollmentTest(t)
+	_, err := service.GetVerificationRequirements(identity, service.VerificationScopeAffiliateReview)
+	assert.ErrorIs(t, err, service.ErrVerificationForbidden)
+	require.NoError(t, model.DB.Model(user).Update("role", common.RoleAdminUser).Error)
+	require.NoError(t, model.DB.AutoMigrate(&model.AffiliateWithdrawal{}))
+	require.NoError(t, model.LOG_DB.AutoMigrate(&model.Log{}))
+	require.NoError(t, model.DB.Model(user).Updates(map[string]any{"aff_quota": 500, "aff_withdrawable_quota": 500, "aff_withdrawal_initialized": true}).Error)
+	withdrawal := model.AffiliateWithdrawal{UserID: user.Id, RequestID: "review-request", Quota: 500, AmountUSD: "0.001", Method: "bank", AccountName: "Test", Account: "123", Status: model.AffiliateWithdrawalPending}
+	require.NoError(t, model.DB.Create(&withdrawal).Error)
+	request := service.AffiliateWithdrawalReviewContext{WithdrawalID: withdrawal.ID, Status: model.AffiliateWithdrawalPaid, Note: "bank-reference"}
+	context, err := common.Marshal(request)
+	require.NoError(t, err)
+	operation := service.VerificationOperation{Scope: service.VerificationScopeAffiliateReview, Context: context}
+	proof := issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+	changed := request
+	changed.Status = model.AffiliateWithdrawalRejected
+	body, err := common.Marshal(changed)
+	require.NoError(t, err)
+	rejected := securityEnrollmentRequest("POST", "/api/user/aff/withdrawals/review", string(body), proof, identity, ReviewAffiliateWithdrawal)
+	assert.Equal(t, http.StatusForbidden, rejected.Code)
+	proof = issueSecurityEnrollmentProof(t, identity, operation, service.VerificationMethodPassword)
+	response := securityEnrollmentRequest("POST", "/api/user/aff/withdrawals/review", string(context), proof, identity, ReviewAffiliateWithdrawal)
+	assert.Equal(t, http.StatusOK, response.Code, response.Body.String())
+	var stored model.AffiliateWithdrawal
+	require.NoError(t, model.DB.First(&stored, withdrawal.ID).Error)
+	assert.Equal(t, model.AffiliateWithdrawalPaid, stored.Status)
+	assert.Equal(t, user.Id, stored.ReviewerID)
+	assert.Equal(t, request.Note, stored.ReviewNote)
 }

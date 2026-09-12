@@ -16,16 +16,22 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import i18next from 'i18next'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import i18next from 'i18next'
 import { toast } from 'sonner'
+
+import { requireServerSuccess } from '@/lib/server-error-message'
 
 import {
   getAffiliateLogs,
   getAffiliateSummary,
   getInvitedUsers,
   transferAffiliateQuota,
+  getWithdrawals,
+  createWithdrawal,
+  reviewWithdrawal,
 } from '../api'
+import type { WithdrawalRequest, WithdrawalReview } from '../types'
 
 export const AFFILIATE_SUMMARY_KEY = ['referral', 'summary'] as const
 const INVITED_USERS_KEY = ['referral', 'invited'] as const
@@ -34,7 +40,7 @@ const AFFILIATE_LOGS_KEY = ['referral', 'logs'] as const
 export function useReferralSummary() {
   return useQuery({
     queryKey: AFFILIATE_SUMMARY_KEY,
-    queryFn: getAffiliateSummary,
+    queryFn: async () => requireServerSuccess(await getAffiliateSummary()),
     select: (response) => (response.success ? response.data : null),
   })
 }
@@ -58,20 +64,46 @@ export function useAffiliateLogs(page: number, pageSize: number) {
 export function useTransferAffiliateQuota() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (quota: number) => transferAffiliateQuota(quota),
+    mutationFn: async (quota: number) =>
+      requireServerSuccess(await transferAffiliateQuota(quota)),
     onSuccess: async (response) => {
-      if (response.success) {
-        toast.success(response.message || i18next.t('Transfer successful'))
-        await Promise.all([
-          queryClient.invalidateQueries({ queryKey: AFFILIATE_SUMMARY_KEY }),
-          queryClient.invalidateQueries({ queryKey: AFFILIATE_LOGS_KEY }),
-        ])
-      } else {
-        toast.error(response.message || i18next.t('Transfer failed'))
-      }
+      toast.success(response.message || i18next.t('Transfer successful'))
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: AFFILIATE_SUMMARY_KEY }),
+        queryClient.invalidateQueries({ queryKey: AFFILIATE_LOGS_KEY }),
+      ])
     },
-    onError: () => {
-      toast.error(i18next.t('Transfer failed'))
+  })
+}
+
+export function useWithdrawals(page: number, pageSize: number, admin = false) {
+  return useQuery({
+    queryKey: ['referral', 'withdrawals', admin, page, pageSize],
+    queryFn: () => getWithdrawals(page, pageSize, admin),
+    select: (response) => response.data,
+  })
+}
+
+export function useCreateWithdrawal() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { request: WithdrawalRequest; proof: string }) =>
+      createWithdrawal(input.request, input.proof),
+    onSuccess: async () => {
+      toast.success(i18next.t('Withdrawal request submitted'))
+      await queryClient.invalidateQueries({ queryKey: ['referral'] })
+    },
+  })
+}
+
+export function useReviewWithdrawal() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (input: { request: WithdrawalReview; proof: string }) =>
+      reviewWithdrawal(input.request, input.proof),
+    onSuccess: async () => {
+      toast.success(i18next.t('Withdrawal updated'))
+      await queryClient.invalidateQueries({ queryKey: ['referral'] })
     },
   })
 }

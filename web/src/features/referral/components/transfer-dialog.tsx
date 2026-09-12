@@ -29,12 +29,14 @@ import {
   parseQuotaFromDollars,
   quotaUnitsToDollars,
 } from '@/lib/format'
+import { handleServerError } from '@/lib/handle-server-error'
 
 interface TransferDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onConfirm: (amount: number) => Promise<boolean>
   availableQuota: number
+  withdrawableQuota: number
   transferring: boolean
 }
 
@@ -45,6 +47,7 @@ export function TransferDialog(props: TransferDialogProps) {
   const transferQuota = parseQuotaFromDollars(amount)
   const canTransfer =
     Number.isFinite(amount) &&
+    Number.isSafeInteger(transferQuota) &&
     transferQuota > 0 &&
     transferQuota <= props.availableQuota
 
@@ -58,9 +61,11 @@ export function TransferDialog(props: TransferDialogProps) {
   const handleConfirm = async () => {
     if (!canTransfer) return
 
-    const success = await props.onConfirm(transferQuota)
-    if (success) {
-      props.onOpenChange(false)
+    try {
+      const success = await props.onConfirm(transferQuota)
+      if (success) props.onOpenChange(false)
+    } catch (error) {
+      handleServerError(error)
     }
   }
 
@@ -88,13 +93,34 @@ export function TransferDialog(props: TransferDialogProps) {
             onClick={handleConfirm}
             disabled={props.transferring || !canTransfer}
           >
-            {props.transferring && <Loader2 className='mr-2 h-4 w-4 animate-spin' />}
+            {props.transferring && (
+              <Loader2 className='mr-2 h-4 w-4 animate-spin' />
+            )}
             {t('Transfer')}
           </Button>
         </>
       }
     >
       <div className='space-y-4 py-3 sm:space-y-6 sm:py-4'>
+        <p className='text-muted-foreground text-sm'>
+          {t(
+            'Transfers use registration rewards first. Rebates transferred to balance can no longer be withdrawn.'
+          )}
+        </p>
+        {canTransfer &&
+          transferQuota > props.availableQuota - props.withdrawableQuota && (
+            <p role='status' className='text-sm'>
+              {t(
+                'This transfer removes withdrawal eligibility for {{amount}} in rebates.',
+                {
+                  amount: formatQuota(
+                    transferQuota -
+                      (props.availableQuota - props.withdrawableQuota)
+                  ),
+                }
+              )}
+            </p>
+          )}
         <div className='space-y-2'>
           <Label className='text-muted-foreground text-xs font-medium tracking-wider uppercase'>
             {t('Available Rewards')}
@@ -114,6 +140,8 @@ export function TransferDialog(props: TransferDialogProps) {
           <Input
             id='transfer-amount'
             type='number'
+            step='any'
+            disabled={props.transferring}
             value={amount}
             onChange={(e) => setAmount(Number(e.target.value))}
             min={0}

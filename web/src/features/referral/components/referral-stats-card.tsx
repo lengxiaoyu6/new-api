@@ -34,8 +34,8 @@ export function ReferralStatsCard(props: ReferralStatsCardProps) {
   const { t } = useTranslation()
   if (props.loading) {
     return (
-      <div className='grid grid-cols-3 divide-x rounded-lg border'>
-        {['pending', 'earned', 'invites'].map((key) => (
+      <div className='grid grid-cols-2 gap-px rounded-lg border sm:grid-cols-4'>
+        {['pending', 'withdrawable', 'earned', 'invites'].map((key) => (
           <div key={key} className='min-w-0 px-2.5 py-2.5 sm:px-5 sm:py-4'>
             <Skeleton className='h-3.5 w-full' />
             <Skeleton className='mt-2 h-6 w-full sm:h-7' />
@@ -54,9 +54,16 @@ export function ReferralStatsCard(props: ReferralStatsCardProps) {
     tone: IconBadgeTone
   }[] = [
     {
-      label: t('Pending'),
+      label: t('Available Rewards'),
       value: formatQuota(props.summary?.aff_quota ?? 0),
-      description: t('Rewards waiting to be transferred'),
+      description: t('Available referral rewards'),
+      icon: Clock,
+      tone: 'success',
+    },
+    {
+      label: t('Withdrawable rebates'),
+      value: formatQuota(props.summary?.aff_withdrawable_quota ?? 0),
+      description: t('Top-up rebates available for withdrawal'),
       icon: Clock,
       tone: 'success',
     },
@@ -77,7 +84,7 @@ export function ReferralStatsCard(props: ReferralStatsCardProps) {
   ]
 
   return (
-    <div className='grid grid-cols-3 divide-x rounded-lg border'>
+    <div className='grid grid-cols-2 gap-px rounded-lg border sm:grid-cols-4'>
       {stats.map((item) => (
         <div key={item.label} className='min-w-0 px-2.5 py-2.5 sm:px-5 sm:py-4'>
           <div className='flex items-center gap-1.5 sm:gap-2.5'>

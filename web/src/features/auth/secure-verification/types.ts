@@ -38,8 +38,28 @@ export type SecurityProofScope =
   | 'account.password.set'
   | 'account.password.change'
   | 'account.delete'
+  | 'affiliate.withdraw'
+  | 'affiliate.withdraw.review'
 
 export type VerificationOperation =
+  | {
+      scope: 'affiliate.withdraw'
+      context: {
+        request_id: string
+        quota: number
+        method: string
+        account_name: string
+        account: string
+      }
+    }
+  | {
+      scope: 'affiliate.withdraw.review'
+      context: {
+        withdrawal_id: number
+        status: 'paid' | 'rejected'
+        note: string
+      }
+    }
   | { scope: 'channel.key.read'; context: { channel_id: number } }
   | {
       scope: 'account.binding.bind'
@@ -49,7 +69,11 @@ export type VerificationOperation =
   | {
       scope: Exclude<
         SecurityProofScope,
-        'channel.key.read' | 'account.binding.bind' | 'account.binding.unbind'
+        | 'channel.key.read'
+        | 'account.binding.bind'
+        | 'account.binding.unbind'
+        | 'affiliate.withdraw'
+        | 'affiliate.withdraw.review'
       >
       context?: Record<string, never>
     }

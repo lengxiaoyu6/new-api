@@ -114,6 +114,8 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.GET("/aff/summary", controller.GetAffSummary)
 				selfRoute.GET("/aff/invited", controller.GetInvitedUsers)
 				selfRoute.GET("/aff/logs", controller.GetAffLogs)
+				selfRoute.GET("/aff/withdrawals", controller.GetSelfAffiliateWithdrawals)
+				selfRoute.POST("/aff/withdrawals", middleware.SessionCookieOriginGuard(), middleware.UserCriticalRateLimit("aff-withdraw"), controller.CreateAffiliateWithdrawal)
 				selfRoute.GET("/topup/info", controller.GetTopUpInfo)
 				selfRoute.GET("/topup/self", controller.GetUserTopUps)
 				selfRoute.POST("/topup", middleware.CriticalRateLimit(), controller.TopUp)
@@ -126,7 +128,7 @@ func SetApiRouter(router *gin.Engine) {
 				selfRoute.POST("/waffo/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPay)
 				selfRoute.POST("/waffo-pancake/amount", controller.RequestWaffoPancakeAmount)
 				selfRoute.POST("/waffo-pancake/pay", middleware.CriticalRateLimit(), controller.RequestWaffoPancakePay)
-				selfRoute.POST("/aff_transfer", middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
+				selfRoute.POST("/aff_transfer", middleware.SessionCookieOriginGuard(), middleware.UserCriticalRateLimit("aff-transfer"), controller.TransferAffQuota)
 				selfRoute.PUT("/setting", controller.UpdateUserSetting)
 
 				// 2FA routes
@@ -150,6 +152,8 @@ func SetApiRouter(router *gin.Engine) {
 			{
 				adminRoute.GET("/", controller.GetAllUsers)
 				adminRoute.GET("/topup", controller.GetAllTopUps)
+				adminRoute.GET("/aff/withdrawals/all", middleware.DisableCache(), controller.GetAffiliateWithdrawals)
+				adminRoute.POST("/aff/withdrawals/review", middleware.SessionCookieOriginGuard(), middleware.UserCriticalRateLimit("aff-review"), controller.ReviewAffiliateWithdrawal)
 				adminRoute.POST("/topup/complete", controller.AdminCompleteTopUp)
 				adminRoute.GET("/search", controller.SearchUsers)
 				adminRoute.GET("/:id/oauth/bindings", controller.GetUserOAuthBindingsByAdmin)
