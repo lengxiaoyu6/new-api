@@ -73,14 +73,15 @@ export type AffiliateLogsResponse = ApiResponse<AffiliateLogsPage>
 export interface WithdrawalRequest {
   request_id: string
   quota: number
-  method: string
+  method: 'alipay'
   account_name: string
   account: string
 }
 
-export interface AffiliateWithdrawal extends WithdrawalRequest {
+export interface AffiliateWithdrawal extends Omit<WithdrawalRequest, 'method'> {
   id: number
   user_id: number
+  method: string
   amount_usd: string
   status: 'pending' | 'paid' | 'rejected'
   review_note: string

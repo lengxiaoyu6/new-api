@@ -71,7 +71,12 @@ export function WithdrawalsCard(props: { admin?: boolean }) {
       header: `${t('Amount')} · USD`,
       cell: ({ row }) => row.original.amount_usd,
     },
-    { accessorKey: 'method', header: t('Payout method') },
+    {
+      accessorKey: 'method',
+      header: t('Payout method'),
+      cell: ({ row }) =>
+        row.original.method === 'alipay' ? t('Alipay') : row.original.method,
+    },
     { accessorKey: 'account_name', header: t('Account holder') },
     {
       accessorKey: 'account',

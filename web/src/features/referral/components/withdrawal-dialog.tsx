@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useState } from 'react'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { z } from 'zod'
 
@@ -26,6 +26,13 @@ import { Dialog } from '@/components/dialog'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   SecureVerificationDialog,
   useSecureVerification,
@@ -62,7 +69,7 @@ export function WithdrawalDialog(props: WithdrawalDialogProps) {
           quota <= props.availableQuota
         )
       }),
-    method: z.string().trim().min(1).max(64),
+    method: z.literal('alipay'),
     account_name: z.string().trim().min(1).max(100),
     account: z.string().trim().min(1).max(200),
   })
@@ -71,7 +78,7 @@ export function WithdrawalDialog(props: WithdrawalDialogProps) {
     mode: 'onChange',
     defaultValues: {
       amount: quotaUnitsToDollars(props.availableQuota),
-      method: '',
+      method: 'alipay',
       account_name: '',
       account: '',
     },
@@ -94,7 +101,7 @@ export function WithdrawalDialog(props: WithdrawalDialogProps) {
         scope: 'affiliate.withdraw',
         context: request,
         title: t('Confirm withdrawal'),
-        description: `${values.amount} ${getCurrencyLabel()} · ${request.method} · ${request.account_name} · ${request.account}`,
+        description: `${values.amount} ${getCurrencyLabel()} · ${t('Alipay')} · ${request.account_name} · ${request.account}`,
       })
       if (!proof) return
       await mutation.mutateAsync({ request, proof: proof.proof_token })
@@ -165,18 +172,37 @@ export function WithdrawalDialog(props: WithdrawalDialogProps) {
                 </p>
               )}
             </Field>
-            <Field data-disabled={busy}>
-              <FieldLabel htmlFor='withdrawal-method'>
-                {t('Payout method')}
-              </FieldLabel>
-              <Input
-                id='withdrawal-method'
-                maxLength={64}
-                disabled={busy}
-                aria-invalid={Boolean(form.formState.errors.method)}
-                {...form.register('method')}
-              />
-            </Field>
+            <Controller
+              name='method'
+              control={form.control}
+              render={({ field, fieldState }) => (
+                <Field data-disabled={busy} data-invalid={fieldState.invalid}>
+                  <FieldLabel htmlFor='withdrawal-method'>
+                    {t('Payout method')}
+                  </FieldLabel>
+                  <Select
+                    name={field.name}
+                    value={field.value}
+                    onValueChange={field.onChange}
+                    disabled={busy}
+                    items={[{ value: 'alipay', label: t('Alipay') }]}
+                  >
+                    <SelectTrigger
+                      id='withdrawal-method'
+                      ref={field.ref}
+                      onBlur={field.onBlur}
+                      aria-invalid={fieldState.invalid}
+                      className='w-full'
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      <SelectItem value='alipay'>{t('Alipay')}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              )}
+            />
             <Field data-disabled={busy}>
               <FieldLabel htmlFor='withdrawal-name'>
                 {t('Account holder')}

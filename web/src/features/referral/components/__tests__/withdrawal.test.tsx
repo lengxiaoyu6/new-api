@@ -103,16 +103,30 @@ it('warns when a transfer consumes rebates and disables amounts beyond the rewar
   ).toBeDisabled()
 })
 
+it('defaults to Alipay and offers only Alipay for keyboard selection', async () => {
+  const user = userEvent.setup()
+  renderReferral(
+    <WithdrawalDialog availableQuota={500000} onOpenChange={() => undefined} />
+  )
+  const method = screen.getByRole('combobox', { name: 'Payout method' })
+  expect(method).toHaveTextContent('Alipay')
+  method.focus()
+  await user.keyboard('{ArrowDown}')
+  const option = await screen.findByRole('option', { name: 'Alipay' })
+  expect(screen.getAllByRole('option')).toHaveLength(1)
+  expect(option).toHaveAttribute('aria-selected', 'true')
+  await user.keyboard('{Enter}')
+  expect(method).toHaveTextContent('Alipay')
+  expect(method).toHaveFocus()
+  expect(method).toHaveAttribute('aria-expanded', 'false')
+})
+
 it('requires a payout account and an amount within withdrawable rebates', async () => {
   const user = userEvent.setup()
   renderReferral(
     <WithdrawalDialog availableQuota={500000} onOpenChange={() => undefined} />
   )
   expect(screen.getByRole('button', { name: 'Submit request' })).toBeDisabled()
-  await user.type(
-    screen.getByRole('textbox', { name: 'Payout method' }),
-    'bank'
-  )
   await user.type(
     screen.getByRole('textbox', { name: 'Account holder' }),
     'Test'
@@ -175,10 +189,7 @@ it.each([true, false])(
     renderReferral(
       <WithdrawalDialog availableQuota={500000} onOpenChange={close} />
     )
-    await user.type(
-      screen.getByRole('textbox', { name: 'Payout method' }),
-      'bank'
-    )
+    const method = screen.getByRole('combobox', { name: 'Payout method' })
     await user.type(
       screen.getByRole('textbox', { name: 'Account holder' }),
       'Test'
@@ -191,6 +202,7 @@ it.each([true, false])(
     const verification = await screen.findByRole('dialog', {
       name: 'Confirm withdrawal',
     })
+    expect(method).toBeDisabled()
     await user.type(
       within(verification).getByLabelText('Password', {
         selector: 'input',
@@ -205,7 +217,7 @@ it.each([true, false])(
         '/api/user/aff/withdrawals',
         expect.objectContaining({
           quota: 500000,
-          method: 'bank',
+          method: 'alipay',
           account_name: 'Test',
           account: '123',
         }),
@@ -233,7 +245,7 @@ const pendingWithdrawal = {
   request_id: 'request-id',
   quota: 500000,
   amount_usd: '1',
-  method: 'bank',
+  method: 'alipay',
   account_name: 'Test',
   account: '123',
   status: 'pending',
@@ -252,6 +264,7 @@ it('shows withdrawal status without administrator actions in personal history', 
   })
   renderReferral(<WithdrawalsCard />)
   expect(await screen.findByText('Pending review')).toBeInTheDocument()
+  expect(screen.getByText('Alipay')).toBeInTheDocument()
   expect(
     screen.queryByRole('button', { name: 'Mark as paid' })
   ).not.toBeInTheDocument()

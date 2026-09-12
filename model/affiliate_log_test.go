@@ -202,7 +202,7 @@ func TestAffiliateWithdrawalDatabaseMatrix(t *testing.T) {
 			assert.Error(t, DB.Create(&duplicate).Error, "username uniqueness survives migration")
 			duplicate = User{Username: "another_user", AffCode: legacy.AffCode}
 			assert.Error(t, DB.Create(&duplicate).Error, "referral code uniqueness survives migration")
-			request := AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: 800, Method: "bank", AccountName: "Legacy", Account: "123"}
+			request := AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: 800, Method: "alipay", AccountName: "Legacy", Account: "123"}
 			_, err = CreateAffiliateWithdrawal(legacy.Id, request)
 			require.NoError(t, err)
 			require.NoError(t, LOG_DB.Where("1 = 1").Delete(&Log{}).Error)
@@ -221,7 +221,7 @@ func testAffiliateWithdrawalAccounting(t *testing.T) {
 	inviter := newTopupRebateTestUser(t, "withdraw_inviter", 0)
 	invitee := newTopupRebateTestUser(t, "withdraw_invitee", inviter.Id)
 	require.NoError(t, inviteUser(inviter.Id))
-	request := AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: 1, Method: "bank", AccountName: "Test", Account: "123"}
+	request := AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: 1, Method: "alipay", AccountName: "Test", Account: "123"}
 	_, err := CreateAffiliateWithdrawal(inviter.Id, request)
 	assert.ErrorIs(t, err, ErrAffiliateWithdrawalInsufficient, "registration rewards cannot be withdrawn")
 	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error { _, _, err := grantTopupInviterRebate(tx, invitee.Id, 10000); return err }))
@@ -229,8 +229,19 @@ func testAffiliateWithdrawalAccounting(t *testing.T) {
 	assert.Equal(t, 800, inviter.AffWithdrawableQuota)
 	assert.Equal(t, 400, inviter.Quota)
 	request.Quota = 500
+	for _, method := range []string{"", "bank", "wxpay"} {
+		invalid := request
+		invalid.Method = method
+		_, err := CreateAffiliateWithdrawal(inviter.Id, invalid)
+		require.ErrorIs(t, err, ErrAffiliateWithdrawalInvalid, "unsupported payout method: %q", method)
+	}
+	unchanged, err := GetAffiliateUser(inviter.Id)
+	require.NoError(t, err)
+	assert.Equal(t, 800, unchanged.AffQuota)
+	assert.Equal(t, 800, unchanged.AffWithdrawableQuota)
 	withdrawal, err := CreateAffiliateWithdrawal(inviter.Id, request)
 	require.NoError(t, err)
+	assert.Equal(t, "alipay", withdrawal.Method)
 	assert.Equal(t, "0.001", withdrawal.AmountUSD)
 	assert.Equal(t, AffiliateWithdrawalPending, withdrawal.Status)
 	repeat, err := CreateAffiliateWithdrawal(inviter.Id, request)
@@ -287,7 +298,7 @@ func testAffiliateConcurrentSpending(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		<-start
-		_, err := CreateAffiliateWithdrawal(user.Id, AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: 700, Method: "bank", AccountName: "Test", Account: "123"})
+		_, err := CreateAffiliateWithdrawal(user.Id, AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: 700, Method: "alipay", AccountName: "Test", Account: "123"})
 		outcomes <- err
 	})
 	wg.Go(func() { <-start; target := User{Id: user.Id}; outcomes <- target.TransferAffQuotaToQuota(700) })
@@ -325,7 +336,7 @@ func TestAffiliateLegacyIncompleteHistoryAndInvalidAmounts(t *testing.T) {
 	assert.Equal(t, 1000, stored.AffQuota)
 	assert.Zero(t, stored.AffWithdrawableQuota)
 	for _, amount := range []int{-1, 0, common.MaxWalletQuota + 1} {
-		_, err := CreateAffiliateWithdrawal(user.Id, AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: amount, Method: "bank", AccountName: "Test", Account: "123"})
+		_, err := CreateAffiliateWithdrawal(user.Id, AffiliateWithdrawalRequest{RequestID: uuid.NewString(), Quota: amount, Method: "alipay", AccountName: "Test", Account: "123"})
 		assert.ErrorIs(t, err, ErrAffiliateWithdrawalInvalid)
 		assert.Error(t, stored.TransferAffQuotaToQuota(amount))
 	}

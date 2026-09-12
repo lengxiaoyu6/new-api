@@ -848,7 +848,7 @@ func TestSecurityAccountUnbindPreservesUsableLoginMethod(t *testing.T) {
 }
 
 func TestAffiliateWithdrawalRequiresBoundSecurityProof(t *testing.T) {
-	for _, scenario := range []string{"missing", "wrong scope", "expired", "consumed", "other session", "amount changed", "recipient changed", "factor added", "valid"} {
+	for _, scenario := range []string{"missing", "wrong scope", "expired", "consumed", "other session", "amount changed", "recipient changed", "method changed", "factor added", "valid"} {
 		t.Run(scenario, func(t *testing.T) {
 			user, identity := setupSecurityEnrollmentTest(t)
 			require.NoError(t, model.DB.AutoMigrate(&model.AffiliateWithdrawal{}))
@@ -863,7 +863,7 @@ func TestAffiliateWithdrawalRequiresBoundSecurityProof(t *testing.T) {
 				*payment = previousPayment
 				common.PasswordLoginEnabled, common.QuotaPerUnit = previousPasswordEnabled, previousQuotaUnit
 			})
-			request := model.AffiliateWithdrawalRequest{RequestID: "d532a44d-94bf-4271-b9d4-5399a87b488d", Quota: 500, Method: "bank", AccountName: "Test", Account: "123"}
+			request := model.AffiliateWithdrawalRequest{RequestID: "d532a44d-94bf-4271-b9d4-5399a87b488d", Quota: 500, Method: "alipay", AccountName: "Test", Account: "123"}
 			context, err := common.Marshal(request)
 			require.NoError(t, err)
 			operation := service.VerificationOperation{Scope: service.VerificationScopeAffiliateWithdraw, Context: context}
@@ -888,11 +888,17 @@ func TestAffiliateWithdrawalRequiresBoundSecurityProof(t *testing.T) {
 				request.Quota = 600
 			case "recipient changed":
 				request.Account = "456"
+			case "method changed":
+				request.Method = "bank"
 			case "factor added":
 				require.NoError(t, model.DB.Create(&model.TwoFA{UserId: user.Id, Secret: "JBSWY3DPEHPK3PXP", IsEnabled: true}).Error)
 			}
 			body, err := common.Marshal(request)
 			require.NoError(t, err)
+			if scenario == "method changed" {
+				_, err := service.BindVerificationOperation(service.VerificationOperation{Scope: service.VerificationScopeAffiliateWithdraw, Context: body})
+				assert.ErrorIs(t, err, service.ErrVerificationContextInvalid)
+			}
 			response := securityEnrollmentRequest("POST", "/api/user/aff/withdrawals", string(body), proof, identity, CreateAffiliateWithdrawal)
 			stored, err := model.GetUserById(user.Id, false)
 			require.NoError(t, err)
@@ -909,7 +915,11 @@ func TestAffiliateWithdrawalRequiresBoundSecurityProof(t *testing.T) {
 				repeat := securityEnrollmentRequest("POST", "/api/user/aff/withdrawals", string(body), proof, identity, CreateAffiliateWithdrawal)
 				assert.Equal(t, http.StatusForbidden, repeat.Code, "proof replay must fail")
 			} else {
-				assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+				expectedStatus := http.StatusForbidden
+				if scenario == "method changed" {
+					expectedStatus = http.StatusBadRequest
+				}
+				assert.Equal(t, expectedStatus, response.Code, response.Body.String())
 				assert.Equal(t, 1000, stored.AffWithdrawableQuota)
 				assert.Equal(t, 1000, stored.AffQuota)
 			}

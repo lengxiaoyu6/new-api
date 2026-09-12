@@ -59,7 +59,7 @@ func (request *AffiliateWithdrawalRequest) Normalize() error {
 	request.Method = strings.TrimSpace(request.Method)
 	request.AccountName = strings.TrimSpace(request.AccountName)
 	request.Account = strings.TrimSpace(request.Account)
-	if request.Method == "" || utf8.RuneCountInString(request.Method) > 64 || request.AccountName == "" || utf8.RuneCountInString(request.AccountName) > 100 || request.Account == "" || utf8.RuneCountInString(request.Account) > 200 {
+	if request.Method != "alipay" || request.AccountName == "" || utf8.RuneCountInString(request.AccountName) > 100 || request.Account == "" || utf8.RuneCountInString(request.Account) > 200 {
 		return ErrAffiliateWithdrawalInvalid
 	}
 	return nil
