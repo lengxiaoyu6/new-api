@@ -1,0 +1,14 @@
+/* Copyright (C) 2023-2026 QuantumNous
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ */
+@import 'tailwindcss';
+
+@layer base {
+  body {
+    margin: 0;
+    background: #ffffff;
+    color: #171717;
+    font-family: system-ui, sans-serif;
+    letter-spacing: 0;
+  }
+}

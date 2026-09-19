@@ -9,4 +9,7 @@ docs
 .gocache
 /web/node_modules
 /web/dist
+/web/appica/node_modules
+/web/appica/dist
+/web/appica/.env*
 !THIRD-PARTY-LICENSES.md
