@@ -413,7 +413,7 @@ func TestSelectedChannelPricingPreservesBillingUnitsAndImageQuantity(t *testing.
 			}
 			require.Nil(t, PrepareTieredBillingForSelectedGroup(ctx, info))
 			if tc.imageCount > 0 {
-				require.Nil(t, PrepareImageBillingForRequest(ctx, info, tc.imageCount, false))
+				require.Nil(t, PrepareImageBillingForRequest(ctx, info, tc.imageCount))
 				assert.Equal(t, tc.imageCount, info.RequestedImageCount())
 			}
 			assert.Equal(t, tc.wantQuota, info.FinalPreConsumedQuota)
