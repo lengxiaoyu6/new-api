@@ -516,8 +516,7 @@ func migrateDBFast() error {
 
 func migrateLotteryIndexes() error {
 	// Early development builds briefly created a unique activity/date index,
-	// which prevented multiple draft revisions. Published-version uniqueness is
-	// enforced by PublishLotteryVersion inside a transaction instead.
+	// which prevented multiple configuration revisions for one activity.
 	if DB.Migrator().HasIndex(&LotteryVersion{}, "idx_lottery_activity_day") {
 		if err := DB.Migrator().DropIndex(&LotteryVersion{}, "idx_lottery_activity_day"); err != nil {
 			return err

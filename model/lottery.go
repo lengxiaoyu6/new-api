@@ -27,6 +27,7 @@ const (
 
 	LotteryVersionDraft     = "draft"
 	LotteryVersionPublished = "published"
+	LotteryVersionArchived  = "archived"
 
 	LotteryPrizeBalance = "balance"
 	LotteryPrizeAgain   = "again"
@@ -104,7 +105,7 @@ type LotteryActivity struct {
 type LotteryVersion struct {
 	Id             int                  `json:"id" gorm:"primaryKey"`
 	ActivityId     int                  `json:"activity_id" gorm:"not null;index:idx_lottery_version_day,priority:1"`
-	BusinessDate   string               `json:"business_date" gorm:"type:char(10);not null;index:idx_lottery_version_day,priority:2"`
+	BusinessDate   string               `json:"-" gorm:"type:char(10);not null;index:idx_lottery_version_day,priority:2"`
 	Revision       int                  `json:"revision" gorm:"not null"`
 	Status         string               `json:"status" gorm:"type:varchar(16);not null;index"`
 	Title          LotteryLocalizedText `json:"title" gorm:"type:text"`
@@ -315,11 +316,7 @@ func NormalizeLotteryPrizeDefinition(prize *LotteryPrize, quotaPerUnit float64) 
 }
 
 func ValidateLotteryVersion(version *LotteryVersion, prizes []LotteryVersionPrizeView) error {
-	if version == nil || version.ActivityId <= 0 || strings.TrimSpace(version.BusinessDate) == "" || version.ThresholdQuota < 0 || version.QuotaPerUnit <= 0 || math.IsNaN(version.QuotaPerUnit) || math.IsInf(version.QuotaPerUnit, 0) || len(prizes) < 2 || len(prizes) > LotteryMaxPrizes {
-		return ErrLotteryInvalidConfig
-	}
-	parsedDate, err := time.ParseInLocation("2006-01-02", version.BusinessDate, lotteryLocation())
-	if err != nil || LotteryBusinessDate(parsedDate) != version.BusinessDate {
+	if version == nil || version.ActivityId <= 0 || version.ThresholdQuota < 0 || version.QuotaPerUnit <= 0 || math.IsNaN(version.QuotaPerUnit) || math.IsInf(version.QuotaPerUnit, 0) || len(prizes) < 2 || len(prizes) > LotteryMaxPrizes {
 		return ErrLotteryInvalidConfig
 	}
 	var total int64
@@ -358,9 +355,9 @@ func ValidateLotteryVersion(version *LotteryVersion, prizes []LotteryVersionPriz
 	return nil
 }
 
-func findLotteryVersionTx(tx *gorm.DB, activityID int, businessDate string) (*LotteryVersion, error) {
+func findLotteryVersionTx(tx *gorm.DB, activityID int) (*LotteryVersion, error) {
 	var version LotteryVersion
-	err := tx.Where("activity_id = ? AND business_date = ? AND status = ?", activityID, businessDate, LotteryVersionPublished).
+	err := tx.Where("activity_id = ? AND status = ?", activityID, LotteryVersionPublished).
 		Order("revision desc, id desc").First(&version).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrLotteryUnavailable
@@ -620,7 +617,7 @@ func GetLotteryActivityView(activityID, userID int, now time.Time) (*LotteryActi
 		return nil, err
 	}
 	date := LotteryBusinessDate(now)
-	version, err := findLotteryVersionTx(DB, activityID, date)
+	version, err := findLotteryVersionTx(DB, activityID)
 	if err != nil && !errors.Is(err, ErrLotteryUnavailable) {
 		return nil, err
 	}
@@ -635,9 +632,8 @@ func GetLotteryActivityView(activityID, userID int, now time.Time) (*LotteryActi
 	} else if participation.ExtraGranted > participation.ExtraUsed {
 		remainingAttempts = participation.ExtraGranted - participation.ExtraUsed
 	}
-	// A missing published version is an intentional unavailable day. Return a
-	// server-owned not-started view so the client can explain the state without
-	// inventing a fallback version from a previous day.
+	// A missing published configuration leaves the draft activity unavailable.
+	// Business dates scope daily participation and stock, not configuration.
 	if errors.Is(err, ErrLotteryUnavailable) {
 		status := "not_started"
 		reason := "version_unavailable"
@@ -873,7 +869,7 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		attemptNo = participation.ExtraUsed + 2
 		usingExtra = true
 	}
-	version, err := findLotteryVersionTx(tx, activityID, date)
+	version, err := findLotteryVersionTx(tx, activityID)
 	if err != nil {
 		return nil, err
 	}
@@ -1207,12 +1203,6 @@ func CreateLotteryVersionTx(tx *gorm.DB, version *LotteryVersion, prizes []Lotte
 	if version == nil || len(prizes) == 0 {
 		return ErrLotteryInvalidConfig
 	}
-	if version.QuotaPerUnit == 0 {
-		version.QuotaPerUnit = common.QuotaPerUnit
-	}
-	if err := ValidateLotteryVersion(version, prizes); err != nil {
-		return err
-	}
 	now := common.GetTimestamp()
 	var activity LotteryActivity
 	if err := lockForUpdate(tx).First(&activity, version.ActivityId).Error; err != nil {
@@ -1221,8 +1211,20 @@ func CreateLotteryVersionTx(tx *gorm.DB, version *LotteryVersion, prizes []Lotte
 		}
 		return err
 	}
+	if activity.Status == LotteryActivityEnded || now >= activity.StartAt {
+		return errors.New("lottery configuration is frozen after the activity starts")
+	}
+	if version.QuotaPerUnit == 0 {
+		version.QuotaPerUnit = common.QuotaPerUnit
+	}
+	// Keep the legacy column populated for schema compatibility. Configuration
+	// selection is activity-wide; daily state uses LotteryDraw.BusinessDate.
+	version.BusinessDate = LotteryBusinessDate(time.Unix(activity.StartAt, 0))
+	if err := ValidateLotteryVersion(version, prizes); err != nil {
+		return err
+	}
 	var count int64
-	if err := tx.Model(&LotteryVersion{}).Where("activity_id = ? AND business_date = ?", version.ActivityId, version.BusinessDate).Count(&count).Error; err != nil {
+	if err := tx.Model(&LotteryVersion{}).Where("activity_id = ?", version.ActivityId).Count(&count).Error; err != nil {
 		return err
 	}
 	version.Revision = int(count) + 1
@@ -1256,7 +1258,7 @@ func CreateLotteryVersion(version *LotteryVersion, prizes []LotteryVersionPrizeV
 
 func ListLotteryVersions(activityID int) ([]LotteryVersion, error) {
 	var versions []LotteryVersion
-	if err := DB.Where("activity_id = ?", activityID).Order("business_date asc, revision desc").Find(&versions).Error; err != nil {
+	if err := DB.Where("activity_id = ?", activityID).Order("revision desc, id desc").Find(&versions).Error; err != nil {
 		return nil, err
 	}
 	return versions, nil
@@ -1268,25 +1270,24 @@ func PublishLotteryVersion(versionID, operatorID int) error {
 		if err := lockForUpdate(tx).First(&version, versionID).Error; err != nil {
 			return err
 		}
-		if version.Status == LotteryVersionPublished {
-			return nil
-		}
 		var activity LotteryActivity
 		if err := lockForUpdate(tx).First(&activity, version.ActivityId).Error; err != nil {
 			return err
 		}
-		date, err := time.ParseInLocation("2006-01-02", version.BusinessDate, lotteryLocation())
-		tomorrow := LotteryBusinessDate(time.Now().In(lotteryLocation()).Add(24 * time.Hour))
-		if err != nil || version.BusinessDate < tomorrow || LotteryBusinessDate(date) != version.BusinessDate {
-			return errors.New("version must be published for a future business date")
+		now := common.GetTimestamp()
+		if version.Status == LotteryVersionPublished {
+			if activity.Status != LotteryActivityDraft {
+				return nil
+			}
+			if now >= activity.EndAt {
+				return ErrLotteryInvalidConfig
+			}
+			return tx.Model(&activity).Updates(map[string]any{
+				"status": LotteryActivityActive, "updated_by": operatorID, "updated_at": now,
+			}).Error
 		}
-		var existing LotteryVersion
-		existingErr := tx.Where("activity_id = ? AND business_date = ? AND status = ?", version.ActivityId, version.BusinessDate, LotteryVersionPublished).First(&existing).Error
-		if existingErr == nil && existing.Id != version.Id {
-			return errors.New("a published version already exists for this business date")
-		}
-		if existingErr != nil && !errors.Is(existingErr, gorm.ErrRecordNotFound) {
-			return existingErr
+		if activity.Status == LotteryActivityEnded || now >= activity.StartAt {
+			return errors.New("lottery configuration must be published before the activity starts")
 		}
 		prizes, err := loadLotteryVersionPrizesTx(tx, version.Id)
 		if err != nil {
@@ -1295,8 +1296,18 @@ func PublishLotteryVersion(versionID, operatorID int) error {
 		if err := ValidateLotteryVersion(&version, prizes); err != nil {
 			return err
 		}
-		version.Status, version.PublishedAt, version.PublishedBy = LotteryVersionPublished, common.GetTimestamp(), operatorID
-		return tx.Save(&version).Error
+		if err := tx.Model(&LotteryVersion{}).
+			Where("activity_id = ? AND id <> ? AND status = ?", version.ActivityId, version.Id, LotteryVersionPublished).
+			Update("status", LotteryVersionArchived).Error; err != nil {
+			return err
+		}
+		version.Status, version.PublishedAt, version.PublishedBy = LotteryVersionPublished, now, operatorID
+		if err := tx.Save(&version).Error; err != nil {
+			return err
+		}
+		return tx.Model(&activity).Updates(map[string]any{
+			"status": LotteryActivityActive, "updated_by": operatorID, "updated_at": now,
+		}).Error
 	})
 }
 
@@ -1317,6 +1328,11 @@ func SetLotteryActivityStatus(activityID int, status string, operatorID int) err
 		}
 		if status == LotteryActivityActive && common.GetTimestamp() >= activity.EndAt {
 			return ErrLotteryInvalidConfig
+		}
+		if status == LotteryActivityActive {
+			if _, err := findLotteryVersionTx(tx, activityID); err != nil {
+				return err
+			}
 		}
 		return tx.Model(&activity).Updates(map[string]any{"status": status, "updated_by": operatorID, "updated_at": common.GetTimestamp()}).Error
 	})

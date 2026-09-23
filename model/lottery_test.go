@@ -349,17 +349,62 @@ func TestDrawLotteryDisabledAccountCannotCreateResult(t *testing.T) {
 	assert.Zero(t, draws)
 }
 
-func TestLotteryActivityViewDoesNotReusePreviousBusinessDateVersion(t *testing.T) {
+func TestLotteryActivityViewUsesPublishedConfigurationAcrossBusinessDates(t *testing.T) {
 	truncateTables(t)
 	now := time.Now()
 	activity, version, _ := lotteryTestActivity(t, now)
-	require.NoError(t, DB.Where("version_id = ?", version.Id).Delete(&LotteryVersionPrize{}).Error)
-	require.NoError(t, DB.Delete(&version).Error)
+	require.NoError(t, DB.Model(&version).Update("business_date", LotteryBusinessDate(now.Add(-24*time.Hour))).Error)
 	view, err := GetLotteryActivityView(activity.Id, 1, now)
 	require.NoError(t, err)
-	assert.Equal(t, "not_started", view.Status)
-	assert.Equal(t, "version_unavailable", view.EligibilityReason)
-	assert.Empty(t, view.Prizes)
+	assert.Equal(t, version.Id, view.Version.Id)
+	assert.NotEmpty(t, view.Prizes)
+}
+
+func TestPublishLotteryVersionAllowsSameDayActivityAndActivatesIt(t *testing.T) {
+	truncateTables(t)
+	now := time.Now()
+	activity := &LotteryActivity{
+		Name:           "same-day-" + common.GetRandomString(8),
+		StartAt:        now.Add(time.Hour).Unix(),
+		EndAt:          now.Add(2 * time.Hour).Unix(),
+		ConsumeStartAt: now.Add(-time.Hour).Unix(),
+		ConsumeEndAt:   now.Add(2 * time.Hour).Unix(),
+		MaxAttempts:    LotteryMaxAttempts,
+	}
+	require.NoError(t, CreateLotteryActivity(activity))
+	prizes := []LotteryPrize{
+		{ActivityId: activity.Id, Code: "same-day-balance", Type: LotteryPrizeBalance, BalanceAmount: 2, BalanceQuota: 2, TotalStock: 10},
+		{ActivityId: activity.Id, Code: "same-day-thanks", Type: LotteryPrizeThanks},
+	}
+	for i := range prizes {
+		require.NoError(t, DB.Create(&prizes[i]).Error)
+	}
+	version := &LotteryVersion{
+		ActivityId:     activity.Id,
+		BusinessDate:   LotteryBusinessDate(now),
+		ThresholdQuota: 0,
+		QuotaPerUnit:   1,
+	}
+	items := []LotteryVersionPrizeView{
+		{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, Enabled: true}, Prize: prizes[0]},
+		{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, Enabled: true}, Prize: prizes[1]},
+	}
+	require.NoError(t, CreateLotteryVersion(version, items))
+	require.NoError(t, PublishLotteryVersion(version.Id, 42))
+
+	var stored LotteryActivity
+	require.NoError(t, DB.First(&stored, activity.Id).Error)
+	assert.Equal(t, LotteryActivityActive, stored.Status)
+
+	require.NoError(t, DB.Model(&stored).Update("status", LotteryActivityDraft).Error)
+	require.NoError(t, PublishLotteryVersion(version.Id, 43))
+	require.NoError(t, DB.First(&stored, activity.Id).Error)
+	assert.Equal(t, LotteryActivityActive, stored.Status)
+
+	require.NoError(t, DB.Model(&stored).Update("status", LotteryActivityPaused).Error)
+	require.NoError(t, PublishLotteryVersion(version.Id, 44))
+	require.NoError(t, DB.First(&stored, activity.Id).Error)
+	assert.Equal(t, LotteryActivityPaused, stored.Status)
 }
 
 func TestLotteryActivityViewDoesNotRecheckConsumptionForExtraAttempt(t *testing.T) {
@@ -500,11 +545,14 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			duplicate := &LotteryPrize{ActivityId: activity.Id, Code: "balance", Type: LotteryPrizeBalance, BalanceAmount: 2, BalanceQuota: 2, TotalStock: 10}
 			assert.Error(t, db.Create(duplicate).Error)
 
-			version := &LotteryVersion{ActivityId: activity.Id, BusinessDate: "2026-09-24", Revision: 1, Status: LotteryVersionDraft, Title: LotteryLocalizedText{"en": "Daily draw", "zh-CN": "每日抽奖"}, RuleText: LotteryLocalizedText{"en": "Rules"}, QuotaPerUnit: 1}
+			version := &LotteryVersion{ActivityId: activity.Id, BusinessDate: "2026-09-24", Revision: 1, Status: LotteryVersionPublished, Title: LotteryLocalizedText{"en": "Daily draw", "zh-CN": "每日抽奖"}, RuleText: LotteryLocalizedText{"en": "Rules"}, QuotaPerUnit: 1}
 			require.NoError(t, db.Create(version).Error)
 			var loaded LotteryVersion
 			require.NoError(t, db.First(&loaded, version.Id).Error)
 			assert.Equal(t, "每日抽奖", loaded.Title["zh-CN"])
+			selected, err := findLotteryVersionTx(db, activity.Id)
+			require.NoError(t, err)
+			assert.Equal(t, version.Id, selected.Id)
 
 			draw := &LotteryDraw{ActivityId: activity.Id, VersionId: version.Id, UserId: user.Id, BusinessDate: version.BusinessDate, AttemptNo: 1, IdempotencyKey: "matrix-key", RawPrizeId: prize.Id, FinalPrizeId: prize.Id, RandomAlgorithm: LotteryRandomAlgorithm, Status: LotteryDrawCompleted}
 			require.NoError(t, db.Create(draw).Error)

@@ -41,7 +41,6 @@ type lotteryVersionPrizeRequest struct {
 }
 
 type lotteryVersionRequest struct {
-	BusinessDate   string                       `json:"business_date"`
 	ThresholdQuota int64                        `json:"threshold_quota"`
 	QuotaPerUnit   float64                      `json:"quota_per_unit"`
 	Title          model.LotteryLocalizedText   `json:"title"`
@@ -434,7 +433,7 @@ func AdminCreateLotteryVersion(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	version := &model.LotteryVersion{ActivityId: activityID, BusinessDate: request.BusinessDate, ThresholdQuota: request.ThresholdQuota, QuotaPerUnit: request.QuotaPerUnit, Title: request.Title, RuleText: request.RuleText, CreatedBy: c.GetInt("id")}
+	version := &model.LotteryVersion{ActivityId: activityID, ThresholdQuota: request.ThresholdQuota, QuotaPerUnit: request.QuotaPerUnit, Title: request.Title, RuleText: request.RuleText, CreatedBy: c.GetInt("id")}
 	quotaPerUnit := request.QuotaPerUnit
 	if quotaPerUnit <= 0 {
 		quotaPerUnit = common.QuotaPerUnit

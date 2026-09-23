@@ -70,17 +70,6 @@ type LotteryVersionFormProps = {
   latestVersion?: LotteryAdminVersion
 }
 
-function tomorrowInShanghai(): string {
-  return new Date(Date.now() + 32 * 60 * 60 * 1000).toISOString().slice(0, 10)
-}
-
-function nextDate(value: string): string {
-  const parsed = new Date(`${value}T00:00:00Z`)
-  if (Number.isNaN(parsed.getTime())) return tomorrowInShanghai()
-  parsed.setUTCDate(parsed.getUTCDate() + 1)
-  return parsed.toISOString().slice(0, 10)
-}
-
 function localizedValue(
   values: Record<string, string>,
   locale: string
@@ -102,7 +91,6 @@ function versionDefaults(
 ): LotteryVersionFormValues {
   if (!latestVersion) {
     return {
-      businessDate: tomorrowInShanghai(),
       thresholdAmount: 0,
       title: activityName,
       ruleText: defaultRule,
@@ -110,7 +98,6 @@ function versionDefaults(
     }
   }
   return {
-    businessDate: nextDate(latestVersion.business_date),
     thresholdAmount: quotaUnitsToEditableAmount(latestVersion.threshold_quota),
     title: localizedValue(latestVersion.title, locale) || activityName,
     ruleText: localizedValue(latestVersion.rule_text, locale) || defaultRule,
@@ -182,16 +169,16 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
     onSuccess: async (response) => {
       if (!response.success) {
         throw new Error(
-          response.message || t('Unable to create lottery version')
+          response.message || t('Unable to save lottery configuration')
         )
       }
-      toast.success(t('Lottery version created'))
+      toast.success(t('Lottery configuration saved'))
       await queryClient.invalidateQueries({
         queryKey: ['lottery-admin-versions', props.activityId],
       })
     },
     onError: (error) =>
-      handleServerError(error, t('Unable to create lottery version')),
+      handleServerError(error, t('Unable to save lottery configuration')),
   })
 
   const prizesError =
@@ -202,7 +189,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
     <Card>
       <CardHeader>
         <div className='flex flex-wrap items-center justify-between gap-2'>
-          <CardTitle>{t('Create version')}</CardTitle>
+          <CardTitle>{t('Configure prizes')}</CardTitle>
           <Badge
             variant={
               Math.abs(probabilityTotal - 100) < 0.00005
@@ -218,20 +205,6 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
         <form onSubmit={form.handleSubmit((value) => mutation.mutate(value))}>
           <FieldGroup>
             <div className='grid gap-4 sm:grid-cols-2'>
-              <Field data-invalid={!!form.formState.errors.businessDate}>
-                <FieldLabel htmlFor='lottery-business-date'>
-                  {t('Business date')}
-                </FieldLabel>
-                <Input
-                  id='lottery-business-date'
-                  type='date'
-                  aria-invalid={!!form.formState.errors.businessDate}
-                  {...form.register('businessDate')}
-                />
-                <FieldError>
-                  {form.formState.errors.businessDate?.message}
-                </FieldError>
-              </Field>
               <Field data-invalid={!!form.formState.errors.thresholdAmount}>
                 <FieldLabel htmlFor='lottery-required-spend'>
                   {t('Required spend')}
@@ -590,7 +563,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
               ) : (
                 <Send aria-hidden='true' />
               )}
-              {t('Create version')}
+              {t('Save configuration')}
             </Button>
           </FieldGroup>
         </form>

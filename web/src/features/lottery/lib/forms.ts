@@ -24,7 +24,6 @@ import { parseQuotaFromDollars } from '@/lib/format'
 import type { LotteryVersionPayload } from '../types'
 
 const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
-const DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 
 export function shanghaiLocalDateTimeToUnix(value: string): number {
   const match = DATE_TIME_PATTERN.exec(value)
@@ -49,20 +48,6 @@ export function shanghaiLocalDateTimeToUnix(value: string): number {
     return 0
   }
   return Math.floor((localAsUtc - 8 * 60 * 60 * 1000) / 1000)
-}
-
-function isCalendarDate(value: string): boolean {
-  const match = DATE_PATTERN.exec(value)
-  if (!match) return false
-  const [, year, month, day] = match
-  const parsed = new Date(
-    Date.UTC(Number(year), Number(month) - 1, Number(day))
-  )
-  return (
-    parsed.getUTCFullYear() === Number(year) &&
-    parsed.getUTCMonth() === Number(month) - 1 &&
-    parsed.getUTCDate() === Number(day)
-  )
 }
 
 export function getLotteryActivityFormSchema(t: TFunction) {
@@ -152,9 +137,6 @@ const lotteryPrizeSchema = z.object({
 export function getLotteryVersionFormSchema(t: TFunction) {
   return z
     .object({
-      businessDate: z
-        .string()
-        .refine(isCalendarDate, t('Enter a valid business date')),
       thresholdAmount: z.number().finite().min(0),
       title: z.string().trim().min(1, t('Lottery title is required')).max(128),
       ruleText: z
@@ -271,7 +253,6 @@ export function lotteryVersionFormToPayload(
   locale: string
 ): LotteryVersionPayload {
   return {
-    business_date: value.businessDate,
     threshold_quota: parseQuotaFromDollars(value.thresholdAmount),
     title: localizedText(value.title, locale),
     rule_text: localizedText(value.ruleText, locale),

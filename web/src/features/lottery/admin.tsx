@@ -66,7 +66,7 @@ import {
 import { LotteryActivityForm } from './components/activity-form'
 import { LotteryStockForm } from './components/stock-form'
 import { LotteryVersionForm } from './components/version-form'
-import type { LotteryAdminPrize, LotteryAdminVersion } from './types'
+import type { LotteryAdminVersion } from './types'
 
 const activityStatusKeys: Record<string, string> = {
   draft: 'Draft',
@@ -134,7 +134,7 @@ export function LotteryAdmin() {
       const response = await listLotteryAdminVersions(selectedId as number)
       if (!response.success) {
         throw new Error(
-          response.message || t('Unable to load lottery versions')
+          response.message || t('Unable to load lottery configuration')
         )
       }
       return response.data ?? []
@@ -170,27 +170,24 @@ export function LotteryAdmin() {
   const latestVersion = useMemo(() => {
     if (!versionsQuery.data || versionsQuery.data.length === 0) return undefined
     return versionsQuery.data.reduce((latest, version) => {
-      if (version.business_date > latest.business_date) {
-        return version
-      }
-      if (
-        version.business_date === latest.business_date &&
-        version.revision > latest.revision
-      ) {
-        return version
-      }
-      return latest
+      return version.revision > latest.revision ? version : latest
     })
   }, [versionsQuery.data])
+  const publishedVersion = useMemo(
+    () => versionsQuery.data?.find((version) => version.status === 'published'),
+    [versionsQuery.data]
+  )
+  const activityStarted =
+    selectedActivity != null && Date.now() / 1000 >= selectedActivity.start_at
+  const displayedVersion = activityStarted
+    ? (publishedVersion ?? latestVersion)
+    : latestVersion
+  const stockVersion = publishedVersion ?? latestVersion
   const balancePrizes = useMemo(() => {
-    const prizes = new Map<number, LotteryAdminPrize>()
-    for (const version of versionsQuery.data ?? []) {
-      for (const prize of version.prizes) {
-        if (prize.type === 'balance') prizes.set(prize.id, prize)
-      }
-    }
-    return [...prizes.values()].sort((left, right) => left.id - right.id)
-  }, [versionsQuery.data])
+    return (stockVersion?.prizes ?? [])
+      .filter((prize) => prize.type === 'balance')
+      .sort((left, right) => left.id - right.id)
+  }, [stockVersion])
 
   const statusMutation = useMutation({
     mutationFn: (status: string) => {
@@ -219,16 +216,21 @@ export function LotteryAdmin() {
     onSuccess: async (response) => {
       if (!response.success) {
         throw new Error(
-          response.message || t('Unable to publish lottery version')
+          response.message || t('Unable to publish lottery activity')
         )
       }
-      toast.success(t('Lottery version published'))
-      await queryClient.invalidateQueries({
-        queryKey: ['lottery-admin-versions', selectedId],
-      })
+      toast.success(t('Lottery activity published'))
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['lottery-admin-versions', selectedId],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['lottery-admin-activities'],
+        }),
+      ])
     },
     onError: (error) =>
-      handleServerError(error, t('Unable to publish lottery version')),
+      handleServerError(error, t('Unable to publish lottery activity')),
   })
 
   return (
@@ -332,43 +334,51 @@ export function LotteryAdmin() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <h3 className='mb-3 text-sm font-medium'>{t('Versions')}</h3>
+                  <h3 className='mb-3 text-sm font-medium'>
+                    {t('Activity configuration')}
+                  </h3>
                   {versionsQuery.isPending && (
                     <LoadingState className='min-h-28' size='sm' />
                   )}
                   {versionsQuery.isError && (
                     <ErrorState
-                      description={t('Unable to load lottery versions')}
+                      description={t('Unable to load lottery configuration')}
                       onRetry={() => void versionsQuery.refetch()}
                     />
                   )}
                   {versionsQuery.data?.length === 0 && (
-                    <EmptyState title={t('No versions')} className='min-h-28' />
+                    <EmptyState
+                      title={t('No configuration')}
+                      className='min-h-28'
+                    />
                   )}
                   <div className='space-y-2'>
-                    {versionsQuery.data?.map((version) => (
+                    {displayedVersion && (
                       <VersionRow
-                        key={version.id}
-                        version={version}
+                        version={displayedVersion}
                         locale={locale}
                         canPublish={canPublish}
                         publishing={publishMutation.isPending}
-                        onPublish={() => publishMutation.mutate(version.id)}
+                        onPublish={() =>
+                          publishMutation.mutate(displayedVersion.id)
+                        }
                       />
-                    ))}
+                    )}
                   </div>
                 </CardContent>
               </Card>
 
               {(canWrite || canAdjustStock) && (
                 <div className='mt-4 grid items-start gap-4 xl:grid-cols-2'>
-                  {canWrite && (
-                    <LotteryVersionForm
-                      activityId={selectedActivity.id}
-                      activityName={selectedActivity.name}
-                      latestVersion={latestVersion}
-                    />
-                  )}
+                  {canWrite &&
+                    selectedActivity.status !== 'ended' &&
+                    !activityStarted && (
+                      <LotteryVersionForm
+                        activityId={selectedActivity.id}
+                        activityName={selectedActivity.name}
+                        latestVersion={latestVersion}
+                      />
+                    )}
                   {canAdjustStock && (
                     <Card>
                       <CardHeader>
@@ -413,10 +423,10 @@ export function LotteryAdmin() {
                             <TableRow>
                               <TableHead>{t('ID')}</TableHead>
                               <TableHead>{t('User')}</TableHead>
-                              <TableHead>{t('Business date')}</TableHead>
+                              <TableHead>{t('Draw date')}</TableHead>
                               <TableHead>{t('Attempt')}</TableHead>
                               <TableHead>{t('Idempotency key')}</TableHead>
-                              <TableHead>{t('Version')}</TableHead>
+                              <TableHead>{t('Configuration ID')}</TableHead>
                               <TableHead>{t('Raw prize')}</TableHead>
                               <TableHead>{t('Final prize')}</TableHead>
                               <TableHead>{t('Random value')}</TableHead>
@@ -539,9 +549,7 @@ function VersionRow(props: VersionRowProps) {
       <div className='flex flex-wrap items-start justify-between gap-3'>
         <div className='min-w-0 text-sm'>
           <div className='flex flex-wrap items-center gap-2'>
-            <span className='font-medium'>
-              {props.version.business_date} · v{props.version.revision}
-            </span>
+            <span className='font-medium'>{t('Current configuration')}</span>
             <Badge
               variant={
                 props.version.status === 'published' ? 'outline' : 'secondary'
@@ -563,7 +571,7 @@ function VersionRow(props: VersionRowProps) {
             onClick={props.onPublish}
           >
             <Send aria-hidden='true' />
-            {t('Publish')}
+            {t('Publish activity')}
           </Button>
         )}
       </div>

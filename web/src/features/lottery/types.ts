@@ -145,7 +145,6 @@ export type LotteryAdminActivitiesResponse = {
 export type LotteryAdminVersion = {
   id: number
   activity_id: number
-  business_date: string
   revision: number
   status: string
   threshold_quota: number
@@ -187,7 +186,6 @@ export type LotteryVersionPrizePayload = {
 }
 
 export type LotteryVersionPayload = {
-  business_date: string
   threshold_quota: number
   title: Record<string, string>
   rule_text: Record<string, string>
