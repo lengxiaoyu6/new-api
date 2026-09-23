@@ -360,6 +360,28 @@ func GetLotteryHistory(c *gin.Context) {
 		lotteryError(c, err)
 		return
 	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": lotteryHistoryPublicView(c, historyPage)})
+}
+
+func GetLotteryUserHistory(c *gin.Context) {
+	if !lotterySessionOnly(c) {
+		return
+	}
+	pageValue := c.Query("page")
+	if pageValue == "" {
+		pageValue = c.Query("p")
+	}
+	page, _ := strconv.Atoi(pageValue)
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	historyPage, err := model.GetLotteryUserHistoryPage(c.GetInt("id"), c.Query("business_date"), page, pageSize)
+	if err != nil {
+		lotteryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": lotteryHistoryPublicView(c, historyPage)})
+}
+
+func lotteryHistoryPublicView(c *gin.Context, historyPage *model.LotteryHistoryPage) gin.H {
 	lang := i18n.GetLangFromContext(c)
 	history := make([]gin.H, 0, len(historyPage.Items))
 	for _, item := range historyPage.Items {
@@ -390,9 +412,9 @@ func GetLotteryHistory(c *gin.Context) {
 			"award":             lotteryPublicAward(item.Award),
 		})
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+	return gin.H{
 		"items": history, "total": historyPage.Total, "page": historyPage.Page, "page_size": historyPage.PageSize,
-	}})
+	}
 }
 
 func RequireLotteryPermission(permission authz.Permission) gin.HandlerFunc {

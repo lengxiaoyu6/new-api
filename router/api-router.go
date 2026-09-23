@@ -64,6 +64,7 @@ func SetApiRouter(router *gin.Engine) {
 		lotteryRoute.Use(middleware.UserAuth(), middleware.DisableCache())
 		{
 			lotteryRoute.GET("/activities", controller.GetLotteryActivities)
+			lotteryRoute.GET("/history", controller.GetLotteryUserHistory)
 			lotteryRoute.GET("/activities/:id", controller.GetLotteryActivity)
 			lotteryRoute.POST("/activities/:id/draw", middleware.SessionCookieOriginGuard(), middleware.UserCriticalRateLimit("lottery-draw"), controller.DrawLottery)
 			lotteryRoute.GET("/activities/:id/history", controller.GetLotteryHistory)

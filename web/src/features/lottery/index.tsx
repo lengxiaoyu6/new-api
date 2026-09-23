@@ -139,8 +139,6 @@ function ActivityCard(props: { activity: LotteryActivity }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
-  const [showHistory, setShowHistory] = useState(false)
-  const [historyPage, setHistoryPage] = useState(1)
   const [wheelRotation, setWheelRotation] = useState(0)
   const [isSpinning, setIsSpinning] = useState(false)
   const [pendingResult, setPendingResult] = useState<LotteryDrawResult | null>(
@@ -150,28 +148,6 @@ function ActivityCard(props: { activity: LotteryActivity }) {
   const [pendingIdempotencyKey, setPendingIdempotencyKey] = useState<
     string | null
   >(null)
-  const historyQuery = useQuery({
-    queryKey: ['lottery-history', props.activity.id, historyPage],
-    queryFn: async () => {
-      const response = await getLotteryHistory(
-        props.activity.id,
-        undefined,
-        historyPage
-      )
-      if (!response.success) {
-        throw new Error(response.message || t('Unable to load draw history'))
-      }
-      return (
-        response.data ?? {
-          items: [],
-          total: 0,
-          page: historyPage,
-          page_size: 20,
-        }
-      )
-    },
-    enabled: showHistory,
-  })
   const drawMutation = useMutation({
     mutationFn: (idempotencyKey: string) =>
       drawLottery(props.activity.id, idempotencyKey),
@@ -203,7 +179,7 @@ function ActivityCard(props: { activity: LotteryActivity }) {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['lottery-activities'] }),
         queryClient.invalidateQueries({
-          queryKey: ['lottery-history', props.activity.id],
+          queryKey: ['lottery-history'],
         }),
       ])
     },
@@ -267,20 +243,11 @@ function ActivityCard(props: { activity: LotteryActivity }) {
             onSpinEnd={completeSpin}
           />
         </div>
-        <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-3'>
-          <div className='text-muted-foreground min-w-0 text-sm'>
-            {props.activity.extra_available && (
-              <span>{t('One extra draw is available.')}</span>
-            )}
-          </div>
-          <Button
-            variant='outline'
-            onClick={() => setShowHistory((value) => !value)}
-          >
-            <History aria-hidden='true' />
-            {t('History')}
-          </Button>
-        </div>
+        {props.activity.extra_available && (
+          <p className='text-muted-foreground border-t pt-3 text-sm'>
+            {t('One extra draw is available.')}
+          </p>
+        )}
         <Dialog
           open={drawResult !== null}
           onOpenChange={(open) => {
@@ -322,59 +289,93 @@ function ActivityCard(props: { activity: LotteryActivity }) {
             </div>
           )}
         </Dialog>
-        {showHistory && (
-          <div className='border-t pt-3'>
-            {historyQuery.isPending && (
-              <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+      </CardContent>
+    </Card>
+  )
+}
+
+function LotteryHistorySection() {
+  const { t } = useTranslation()
+  const [historyPage, setHistoryPage] = useState(1)
+  const historyQuery = useQuery({
+    queryKey: ['lottery-history', 'all', historyPage],
+    queryFn: async () => {
+      const response = await getLotteryHistory(
+        undefined,
+        undefined,
+        historyPage
+      )
+      if (!response.success) {
+        throw new Error(response.message || t('Unable to load draw history'))
+      }
+      return (
+        response.data ?? {
+          items: [],
+          total: 0,
+          page: historyPage,
+          page_size: 20,
+        }
+      )
+    },
+  })
+
+  return (
+    <Card>
+      <CardHeader className='border-b'>
+        <CardTitle className='flex items-center gap-2'>
+          <History className='size-4' aria-hidden='true' />
+          {t('History')}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className='pt-4'>
+        {historyQuery.isPending && (
+          <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+        )}
+        {historyQuery.isError && (
+          <ErrorState description={t('Unable to load draw history')} />
+        )}
+        {historyQuery.data && (
+          <>
+            <HistoryRows rows={historyQuery.data.items} />
+            {historyQuery.data.total > historyQuery.data.page_size && (
+              <div className='flex items-center justify-end gap-2 pt-3'>
+                <Button
+                  size='icon'
+                  variant='outline'
+                  aria-label={t('Previous page')}
+                  disabled={historyPage <= 1 || historyQuery.isFetching}
+                  onClick={() =>
+                    setHistoryPage((page) => Math.max(1, page - 1))
+                  }
+                >
+                  <ChevronLeft aria-hidden='true' />
+                </Button>
+                <span className='text-muted-foreground text-sm tabular-nums'>
+                  {historyQuery.data.page} /{' '}
+                  {Math.max(
+                    1,
+                    Math.ceil(
+                      historyQuery.data.total / historyQuery.data.page_size
+                    )
+                  )}
+                </span>
+                <Button
+                  size='icon'
+                  variant='outline'
+                  aria-label={t('Next page')}
+                  disabled={
+                    historyPage >=
+                      Math.ceil(
+                        historyQuery.data.total / historyQuery.data.page_size
+                      ) || historyQuery.isFetching
+                  }
+                  onClick={() => setHistoryPage((page) => page + 1)}
+                >
+                  <ChevronRight aria-hidden='true' />
+                </Button>
+              </div>
             )}
-            {historyQuery.isError && (
-              <ErrorState description={t('Unable to load draw history')} />
-            )}
-            {historyQuery.data && (
-              <>
-                <HistoryRows rows={historyQuery.data.items} />
-                {historyQuery.data.total > historyQuery.data.page_size && (
-                  <div className='flex items-center justify-end gap-2 pt-3'>
-                    <Button
-                      size='icon'
-                      variant='outline'
-                      aria-label={t('Previous page')}
-                      disabled={historyPage <= 1 || historyQuery.isFetching}
-                      onClick={() =>
-                        setHistoryPage((page) => Math.max(1, page - 1))
-                      }
-                    >
-                      <ChevronLeft aria-hidden='true' />
-                    </Button>
-                    <span className='text-muted-foreground text-sm tabular-nums'>
-                      {historyQuery.data.page} /{' '}
-                      {Math.max(
-                        1,
-                        Math.ceil(
-                          historyQuery.data.total / historyQuery.data.page_size
-                        )
-                      )}
-                    </span>
-                    <Button
-                      size='icon'
-                      variant='outline'
-                      aria-label={t('Next page')}
-                      disabled={
-                        historyPage >=
-                          Math.ceil(
-                            historyQuery.data.total /
-                              historyQuery.data.page_size
-                          ) || historyQuery.isFetching
-                      }
-                      onClick={() => setHistoryPage((page) => page + 1)}
-                    >
-                      <ChevronRight aria-hidden='true' />
-                    </Button>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
+          </>
         )}
       </CardContent>
     </Card>
@@ -416,6 +417,7 @@ export function Lottery() {
             <ActivityCard key={activity.id} activity={activity} />
           ))}
         </div>
+        <LotteryHistorySection />
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )

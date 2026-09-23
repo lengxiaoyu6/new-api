@@ -24,7 +24,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { api } from '@/lib/api'
 
 import { Lottery } from '../index'
-import type { LotteryActivity, LotteryPrize } from '../types'
+import type { LotteryActivity, LotteryDraw, LotteryPrize } from '../types'
 
 const prizes = [
   {
@@ -104,14 +104,29 @@ function renderLottery() {
   return client
 }
 
+function mockLotteryGet(
+  activities: LotteryActivity[],
+  history: LotteryDraw[] = []
+) {
+  return vi.spyOn(api, 'get').mockImplementation(async (url) => {
+    if (url === '/api/lottery/activities') {
+      return { data: { success: true, data: activities } } as never
+    }
+    return {
+      data: {
+        success: true,
+        data: { items: history, total: history.length, page: 1, page_size: 20 },
+      },
+    } as never
+  })
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
 
 it('shows an equal-segment prize wheel without exposing probability values', async () => {
-  vi.spyOn(api, 'get').mockResolvedValue({
-    data: { success: true, data: [activity] },
-  })
+  mockLotteryGet([activity])
   const client = renderLottery()
 
   expect(await screen.findByTestId('lottery-wheel-disc')).toBeVisible()
@@ -127,35 +142,28 @@ it('shows an equal-segment prize wheel without exposing probability values', asy
 })
 
 it('disables the wheel when the activity qualification is not satisfied', async () => {
-  vi.spyOn(api, 'get').mockResolvedValue({
-    data: {
-      success: true,
-      data: [
-        {
-          ...activity,
-          status: 'ineligible',
-          remaining_attempts: 0,
-          qualification: {
-            ...activity.qualification,
-            eligible: false,
-            reason: 'threshold_not_met',
-          },
-        },
-      ],
+  mockLotteryGet([
+    {
+      ...activity,
+      status: 'ineligible',
+      remaining_attempts: 0,
+      qualification: {
+        ...activity.qualification,
+        eligible: false,
+        reason: 'threshold_not_met',
+      },
     },
-  })
+  ])
   const client = renderLottery()
 
   expect(await screen.findByTestId('lottery-wheel-disc')).toBeVisible()
-  expect(screen.getByRole('button', { name: 'Draw now' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Unavailable' })).toBeDisabled()
 
   client.clear()
 })
 
 it('shows the server-selected prize after drawing with reduced motion', async () => {
-  vi.spyOn(api, 'get').mockResolvedValue({
-    data: { success: true, data: [activity] },
-  })
+  mockLotteryGet([activity])
   const post = vi.spyOn(api, 'post').mockResolvedValue({
     data: {
       success: true,
@@ -194,6 +202,38 @@ it('shows the server-selected prize after drawing with reduced motion', async ()
       }
     )
   )
+
+  client.clear()
+})
+
+it('keeps draw history available when there are no active activities', async () => {
+  const get = mockLotteryGet(
+    [],
+    [
+      {
+        id: 21,
+        activity_id: 7,
+        business_date: '2026-09-22',
+        version_id: 2,
+        attempt_no: 1,
+        prize_id: 11,
+        prize_type: 'balance',
+        prize_title: '2 balance',
+        prize_description: 'Added to the account balance',
+        balance_amount: 2,
+        balance_quota: 1_000_000,
+        created_at: 1,
+      },
+    ]
+  )
+  const client = renderLottery()
+
+  expect(await screen.findByText('No active lottery activities')).toBeVisible()
+  expect(screen.getByText('History')).toBeVisible()
+  expect(await screen.findByText('2 balance')).toBeVisible()
+  expect(get).toHaveBeenCalledWith('/api/lottery/history', {
+    params: { page: 1, page_size: 20 },
+  })
 
   client.clear()
 })

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { LoaderCircle, Sparkles, Triangle } from 'lucide-react'
+import { LoaderCircle } from 'lucide-react'
 import type { CSSProperties, TransitionEvent } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -26,29 +26,28 @@ import { cn } from '@/lib/utils'
 import type { LotteryPrize } from '../types'
 
 const WHEEL_COLORS = [
-  '#b83a3a',
-  '#147a6e',
-  '#9a6700',
-  '#2864a6',
-  '#7b4f9d',
-  '#a63d63',
-  '#3f7d3a',
-  '#a5541a',
+  '#f43f46',
+  '#ff7414',
+  '#f2b300',
+  '#14a8d8',
+  '#162cdd',
+  '#dc0bc2',
+  '#22c55e',
+  '#b6eb00',
 ]
-const WHEEL_LIGHT_COUNT = 20
 const WHEEL_LABEL_LIMIT = 10
 
 function wheelBackground(prizeCount: number): string {
   if (prizeCount <= 0) return 'var(--muted)'
 
   const segmentAngle = 360 / prizeCount
-  const separatorAngle = Math.min(0.8, segmentAngle * 0.12)
+  const separatorAngle = Math.min(2.4, segmentAngle * 0.08)
   const stops: string[] = []
   for (let index = 0; index < prizeCount; index += 1) {
     const start = index * segmentAngle
     const end = (index + 1) * segmentAngle
     stops.push(
-      `var(--background) ${start}deg ${start + separatorAngle}deg`,
+      `rgba(255, 255, 255, 0.96) ${start}deg ${start + separatorAngle}deg`,
       `${WHEEL_COLORS[index % WHEEL_COLORS.length]} ${start + separatorAngle}deg ${end}deg`
     )
   }
@@ -69,7 +68,13 @@ export function LotteryWheel(props: LotteryWheelProps) {
   const prizeCount = props.prizes.length
   const segmentAngle = prizeCount > 0 ? 360 / prizeCount : 360
   const showLabels = prizeCount > 0 && prizeCount <= WHEEL_LABEL_LIMIT
-  const labelRadius = prizeCount <= 4 ? 31 : 36
+  const labelRadius = prizeCount <= 4 ? 32 : 36
+  let buttonLabel = 'Draw now'
+  if (props.spinning) {
+    buttonLabel = 'Loading...'
+  } else if (props.disabled) {
+    buttonLabel = 'Unavailable'
+  }
 
   const handleTransitionEnd = (event: TransitionEvent<HTMLDivElement>) => {
     if (
@@ -84,37 +89,25 @@ export function LotteryWheel(props: LotteryWheelProps) {
   return (
     <div
       data-slot='lottery-wheel'
-      className='relative mx-auto aspect-square w-full max-w-[22rem] min-w-0'
+      className='relative mx-auto box-border aspect-square w-full max-w-[calc(100vw-2rem)] min-w-0 overflow-visible sm:max-w-[34rem]'
     >
       <div
         aria-hidden='true'
-        className='bg-foreground/5 absolute inset-[1%] rounded-full shadow-inner'
+        className='absolute inset-0 rounded-full bg-[#fff1a8] shadow-[0_18px_35px_rgba(123,92,13,0.2),0_0_0_1px_rgba(241,196,15,0.24)]'
       />
-      {Array.from({ length: WHEEL_LIGHT_COUNT }, (_, index) => {
-        const angle = (index / WHEEL_LIGHT_COUNT) * Math.PI * 2 - Math.PI / 2
-        return (
-          <span
-            key={index}
-            aria-hidden='true'
-            className='bg-background ring-foreground/15 absolute z-10 size-2.5 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-sm ring-1 sm:size-3'
-            style={{
-              left: `${50 + 46.5 * Math.cos(angle)}%`,
-              top: `${50 + 46.5 * Math.sin(angle)}%`,
-            }}
-          />
-        )
-      })}
       <div
         aria-hidden='true'
-        className='bg-background ring-foreground/10 absolute top-0 left-1/2 z-30 flex size-10 -translate-x-1/2 items-center justify-center rounded-full shadow-md ring-1'
-      >
-        <Triangle className='size-5 rotate-180 fill-amber-500 text-amber-600' />
-      </div>
+        className='absolute inset-[1.4%] rounded-full bg-[#fff9d8] shadow-inner'
+      />
+      <div
+        aria-hidden='true'
+        className='absolute top-0 left-1/2 z-40 h-[9%] w-[8%] -translate-x-1/2 bg-[#ef3f43] shadow-[0_4px_7px_rgba(127,29,29,0.35)] [clip-path:polygon(0_0,100%_0,50%_100%)]'
+      />
       <div
         data-testid='lottery-wheel-disc'
         aria-hidden='true'
         className={cn(
-          'border-background absolute inset-[5%] overflow-hidden rounded-full border-[6px] shadow-[0_18px_45px_rgba(15,23,42,0.22)] transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.64,0.16,1)] motion-reduce:transition-none',
+          'absolute inset-[4%] overflow-hidden rounded-full border-[5px] border-white/95 shadow-[0_10px_28px_rgba(15,23,42,0.18)] transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.64,0.16,1)] motion-reduce:transition-none',
           props.spinning && 'will-change-transform'
         )}
         style={{
@@ -127,15 +120,17 @@ export function LotteryWheel(props: LotteryWheelProps) {
           props.prizes.map((prize, index) => {
             const angle = -90 + (index + 0.5) * segmentAngle
             const radians = (angle * Math.PI) / 180
+            const labelRotation =
+              angle < -90 || angle > 90 ? angle + 180 : angle
             return (
               <span
                 key={prize.id}
-                className='absolute flex w-20 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-center text-xs leading-tight font-semibold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.75)] transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.64,0.16,1)] motion-reduce:transition-none sm:w-24'
+                className='absolute flex w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-center text-sm leading-tight font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.32)] sm:w-32 sm:text-base'
                 style={
                   {
                     left: `${50 + labelRadius * Math.cos(radians)}%`,
                     top: `${50 + labelRadius * Math.sin(radians)}%`,
-                    transform: `translate(-50%, -50%) rotate(${-props.rotation}deg)`,
+                    transform: `translate(-50%, -50%) rotate(${labelRotation}deg)`,
                   } as CSSProperties
                 }
                 title={prize.title}
@@ -146,30 +141,27 @@ export function LotteryWheel(props: LotteryWheelProps) {
               </span>
             )
           })}
-        <div className='border-background/70 absolute inset-[17%] rounded-full border shadow-inner' />
       </div>
       <div
         aria-hidden='true'
-        className='bg-background ring-foreground/10 absolute top-1/2 left-1/2 z-20 size-28 -translate-x-1/2 -translate-y-1/2 rounded-full shadow-[0_8px_24px_rgba(15,23,42,0.24)] ring-1'
+        className='absolute top-1/2 left-1/2 z-20 aspect-square w-[22%] -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-white bg-[#dce8f1] shadow-[0_5px_15px_rgba(15,23,42,0.25)]'
       />
       <Button
         type='button'
-        aria-label={t('Draw now')}
+        aria-label={t(buttonLabel)}
         aria-busy={props.spinning}
         disabled={props.disabled || props.spinning || prizeCount === 0}
         onClick={props.onSpin}
-        className='bg-foreground text-background hover:bg-foreground/90 absolute top-1/2 left-1/2 z-30 size-24 -translate-x-1/2 -translate-y-1/2 flex-col gap-1 rounded-full border-4 border-transparent p-2 shadow-lg focus-visible:ring-offset-2'
+        className='absolute top-1/2 left-1/2 z-30 aspect-square w-[17%] -translate-x-1/2 -translate-y-1/2 rounded-full border-0 bg-[#1741d7] p-1 text-white shadow-[0_5px_12px_rgba(15,23,42,0.24)] hover:bg-[#1236bd] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-[#94a3b8] disabled:text-white disabled:opacity-100 disabled:shadow-none'
       >
         {props.spinning ? (
           <LoaderCircle
             className='size-5 animate-spin motion-reduce:animate-none'
             aria-hidden='true'
           />
-        ) : (
-          <Sparkles className='size-5' aria-hidden='true' />
-        )}
-        <span className='max-w-16 text-center text-xs leading-tight whitespace-normal'>
-          {t(props.spinning ? 'Loading...' : 'Draw now')}
+        ) : null}
+        <span className='max-w-20 text-center text-xs leading-tight font-bold whitespace-normal sm:text-sm'>
+          {t(buttonLabel)}
         </span>
       </Button>
     </div>

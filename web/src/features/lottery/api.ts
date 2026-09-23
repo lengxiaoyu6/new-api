@@ -54,21 +54,22 @@ export async function drawLottery(
 }
 
 export async function getLotteryHistory(
-  activityId: number,
+  activityId?: number,
   businessDate?: string,
   page = 1,
   pageSize = 20
 ): Promise<LotteryHistoryResponse> {
-  const response = await api.get(
-    `/api/lottery/activities/${activityId}/history`,
-    {
-      params: {
-        ...(businessDate ? { business_date: businessDate } : {}),
-        page,
-        page_size: pageSize,
-      },
-    }
-  )
+  const path =
+    activityId === undefined
+      ? '/api/lottery/history'
+      : `/api/lottery/activities/${activityId}/history`
+  const response = await api.get(path, {
+    params: {
+      ...(businessDate ? { business_date: businessDate } : {}),
+      page,
+      page_size: pageSize,
+    },
+  })
   return response.data
 }
 

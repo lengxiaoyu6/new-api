@@ -452,6 +452,29 @@ func TestGetLotteryHistoryPageReturnsMetadataAndItems(t *testing.T) {
 	require.Len(t, page.Items, 1)
 }
 
+func TestGetLotteryUserHistoryPageIncludesDrawsFromAllActivities(t *testing.T) {
+	truncateTables(t)
+	now := time.Now()
+	firstActivity, _, _ := lotteryTestActivity(t, now)
+	secondActivity, _, _ := lotteryTestActivity(t, now)
+	user := lotteryTestUser(t, 0)
+	require.NoError(t, DB.Create(&Log{UserId: user.Id, CreatedAt: now.Add(-time.Second).Unix(), Type: LogTypeConsume, Quota: 100, Other: `{"billing_source":"wallet"}`}).Error)
+
+	oldRandom := lotteryRandomSource
+	t.Cleanup(func() { lotteryRandomSource = oldRandom })
+	lotteryRandomSource = func() (int64, error) { return 350000, nil }
+	_, err := DrawLottery(firstActivity.Id, user.Id, "all-history-first", now)
+	require.NoError(t, err)
+	_, err = DrawLottery(secondActivity.Id, user.Id, "all-history-second", now)
+	require.NoError(t, err)
+
+	page, err := GetLotteryUserHistoryPage(user.Id, LotteryBusinessDate(now), 1, 20)
+	require.NoError(t, err)
+	assert.EqualValues(t, 2, page.Total)
+	require.Len(t, page.Items, 2)
+	assert.NotEqual(t, page.Items[0].Draw.ActivityId, page.Items[1].Draw.ActivityId)
+}
+
 func TestSubscriptionOrderQuotaPrefersCompletionSnapshot(t *testing.T) {
 	order := SubscriptionOrder{Money: 2, PaymentMethod: "stripe", ChargedQuota: 123}
 	quota, err := subscriptionOrderQuotaWithUnit(order, 999999)

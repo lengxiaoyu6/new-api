@@ -1075,6 +1075,16 @@ func loadLotteryDrawResults(tx *gorm.DB, draws []LotteryDraw) ([]LotteryDrawResu
 func GetLotteryHistoryPage(activityID, userID int, businessDate string, page, pageSize int) (*LotteryHistoryPage, error) {
 	page, pageSize = normalizeLotteryHistoryPage(page, pageSize)
 	query := DB.Model(&LotteryDraw{}).Where("activity_id = ? AND user_id = ?", activityID, userID)
+	return getLotteryHistoryPage(query, page, pageSize, businessDate)
+}
+
+func GetLotteryUserHistoryPage(userID int, businessDate string, page, pageSize int) (*LotteryHistoryPage, error) {
+	page, pageSize = normalizeLotteryHistoryPage(page, pageSize)
+	query := DB.Model(&LotteryDraw{}).Where("user_id = ?", userID)
+	return getLotteryHistoryPage(query, page, pageSize, businessDate)
+}
+
+func getLotteryHistoryPage(query *gorm.DB, page, pageSize int, businessDate string) (*LotteryHistoryPage, error) {
 	if businessDate != "" {
 		query = query.Where("business_date = ?", businessDate)
 	}
