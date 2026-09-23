@@ -22,13 +22,13 @@ import {
   ChevronRight,
   Gift,
   History,
-  Play,
-  RefreshCw,
+  RotateCcw,
+  WalletCards,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { toast } from 'sonner'
 
+import { Dialog } from '@/components/dialog'
 import { ErrorState } from '@/components/error-state'
 import { SectionPageLayout } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
@@ -40,6 +40,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { IconBadge } from '@/components/ui/icon-badge'
 import {
   Table,
   TableBody,
@@ -48,11 +49,19 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { useMediaQuery } from '@/hooks/use-media-query'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { drawLottery, getLotteryActivities, getLotteryHistory } from './api'
-import type { LotteryActivity, LotteryDraw } from './types'
+import { LotteryWheel } from './components/lottery-wheel'
+import { getLotteryWheelRotation } from './lib/wheel'
+import type {
+  LotteryActivity,
+  LotteryDraw,
+  LotteryDrawResult,
+  LotteryPrize,
+} from './types'
 
 const statusKeys: Record<string, string> = {
   not_started: 'Not started',
@@ -76,6 +85,16 @@ function statusVariant(
 
 function canDraw(activity: LotteryActivity) {
   return activity.status === 'eligible' || activity.status === 'extra_available'
+}
+
+function PrizeIcon(props: { type: LotteryPrize['type'] }) {
+  if (props.type === 'balance') {
+    return <WalletCards aria-hidden='true' />
+  }
+  if (props.type === 'again') {
+    return <RotateCcw aria-hidden='true' />
+  }
+  return <Gift aria-hidden='true' />
 }
 
 function HistoryRows(props: { rows: LotteryDraw[] }) {
@@ -119,8 +138,15 @@ function HistoryRows(props: { rows: LotteryDraw[] }) {
 function ActivityCard(props: { activity: LotteryActivity }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const [showHistory, setShowHistory] = useState(false)
   const [historyPage, setHistoryPage] = useState(1)
+  const [wheelRotation, setWheelRotation] = useState(0)
+  const [isSpinning, setIsSpinning] = useState(false)
+  const [pendingResult, setPendingResult] = useState<LotteryDrawResult | null>(
+    null
+  )
+  const [drawResult, setDrawResult] = useState<LotteryDrawResult | null>(null)
   const [pendingIdempotencyKey, setPendingIdempotencyKey] = useState<
     string | null
   >(null)
@@ -151,25 +177,55 @@ function ActivityCard(props: { activity: LotteryActivity }) {
       drawLottery(props.activity.id, idempotencyKey),
     onSuccess: async (response) => {
       if (!response.success || !response.data) {
+        setIsSpinning(false)
         throw new Error(
           response.message || t('The draw could not be completed')
         )
       }
-      toast.success(response.data.prize_title || t('Draw completed'))
-      await queryClient.invalidateQueries({ queryKey: ['lottery-activities'] })
-      await queryClient.invalidateQueries({
-        queryKey: ['lottery-history', props.activity.id],
-      })
+      const result = response.data
+      const prizeIndex = props.activity.prizes.findIndex(
+        (prize) => prize.id === result.prize_id
+      )
       setPendingIdempotencyKey(null)
-      setShowHistory(true)
+      if (shouldReduceMotion || prizeIndex < 0) {
+        setIsSpinning(false)
+        setDrawResult(result)
+      } else {
+        setPendingResult(result)
+        setWheelRotation((rotation) =>
+          getLotteryWheelRotation(
+            rotation,
+            prizeIndex,
+            props.activity.prizes.length
+          )
+        )
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['lottery-activities'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['lottery-history', props.activity.id],
+        }),
+      ])
     },
-    onError: (error) =>
-      handleServerError(error, t('The draw could not be completed')),
+    onError: (error) => {
+      setIsSpinning(false)
+      setPendingResult(null)
+      handleServerError(error, t('The draw could not be completed'))
+    },
   })
   const submitDraw = () => {
+    if (isSpinning || drawMutation.isPending) return
     const idempotencyKey = pendingIdempotencyKey ?? crypto.randomUUID()
+    setDrawResult(null)
+    setIsSpinning(true)
     setPendingIdempotencyKey(idempotencyKey)
     drawMutation.mutate(idempotencyKey)
+  }
+  const completeSpin = () => {
+    if (!pendingResult) return
+    setDrawResult(pendingResult)
+    setPendingResult(null)
+    setIsSpinning(false)
   }
   const statusLabel = statusKeys[props.activity.status] || props.activity.status
 
@@ -201,55 +257,63 @@ function ActivityCard(props: { activity: LotteryActivity }) {
         </div>
       </CardHeader>
       <CardContent className='space-y-4 pt-4'>
-        <div className='overflow-x-auto'>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t('Prize')}</TableHead>
-                <TableHead>{t('Probability')}</TableHead>
-                <TableHead>{t('Availability')}</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <div className='grid items-center gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.72fr)]'>
+          <div className='min-w-0'>
+            <LotteryWheel
+              prizes={props.activity.prizes}
+              rotation={wheelRotation}
+              spinning={isSpinning}
+              disabled={!canDraw(props.activity) || drawMutation.isPending}
+              onSpin={submitDraw}
+              onSpinEnd={completeSpin}
+            />
+          </div>
+          <div className='min-w-0 space-y-3'>
+            <div className='flex items-center justify-between gap-3'>
+              <h3 className='text-sm font-medium'>{t('Prize')}</h3>
+              <Badge variant='outline'>
+                {t('Remaining')}: {props.activity.remaining_attempts}
+              </Badge>
+            </div>
+            <div className='divide-y border-y'>
               {props.activity.prizes.map((prize) => (
-                <TableRow key={prize.id}>
-                  <TableCell>
-                    <div className='font-medium'>{prize.title}</div>
-                    <div className='text-muted-foreground text-xs'>
+                <div
+                  key={prize.id}
+                  className='flex min-w-0 items-start gap-3 py-3'
+                >
+                  <IconBadge
+                    size='sm'
+                    tone={prize.type === 'balance' ? 'success' : 'info'}
+                  >
+                    <PrizeIcon type={prize.type} />
+                  </IconBadge>
+                  <div className='min-w-0 flex-1'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <span className='min-w-0 truncate text-sm font-medium'>
+                        {prize.title}
+                      </span>
+                      <Badge
+                        variant={prize.available ? 'outline' : 'secondary'}
+                        className='text-[11px]'
+                      >
+                        {t(prize.available ? 'Available' : 'Out of stock')}
+                      </Badge>
+                    </div>
+                    <p className='text-muted-foreground mt-1 text-xs leading-relaxed'>
                       {prize.description}
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div>
-                      {t('Configured')}: {prize.probability_percent.toFixed(2)}%
-                    </div>
-                    <div className='text-muted-foreground text-xs'>
-                      {t('Effective')}:{' '}
-                      {prize.effective_probability_percent.toFixed(2)}%
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge variant={prize.available ? 'outline' : 'secondary'}>
-                      {t(prize.available ? 'Available' : 'Out of stock')}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
+                    </p>
+                  </div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          </div>
         </div>
-        <div className='flex flex-wrap items-center gap-2'>
-          <Button
-            disabled={!canDraw(props.activity) || drawMutation.isPending}
-            onClick={submitDraw}
-          >
-            {drawMutation.isPending ? (
-              <RefreshCw className='animate-spin' aria-hidden='true' />
-            ) : (
-              <Play aria-hidden='true' />
+        <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-3'>
+          <div className='text-muted-foreground min-w-0 text-sm'>
+            {props.activity.extra_available && (
+              <span>{t('One extra draw is available.')}</span>
             )}
-            {t('Draw now')}
-          </Button>
+          </div>
           <Button
             variant='outline'
             onClick={() => setShowHistory((value) => !value)}
@@ -257,12 +321,48 @@ function ActivityCard(props: { activity: LotteryActivity }) {
             <History aria-hidden='true' />
             {t('History')}
           </Button>
-          {props.activity.extra_available && (
-            <span className='text-muted-foreground text-sm'>
-              {t('One extra draw is available.')}
-            </span>
-          )}
         </div>
+        <Dialog
+          open={drawResult !== null}
+          onOpenChange={(open) => {
+            if (!open) setDrawResult(null)
+          }}
+          title={t('Result')}
+          contentClassName='sm:max-w-md'
+          contentHeight='auto'
+          bodyClassName='space-y-4'
+          footer={
+            <Button onClick={() => setDrawResult(null)}>{t('Close')}</Button>
+          }
+        >
+          {drawResult && (
+            <div className='space-y-4 py-2 text-center'>
+              <IconBadge
+                size='lg'
+                tone={drawResult.prize_type === 'balance' ? 'success' : 'info'}
+                className='mx-auto'
+              >
+                <PrizeIcon type={drawResult.prize_type} />
+              </IconBadge>
+              <div>
+                <p className='text-muted-foreground text-sm'>{t('Prize')}</p>
+                <p className='mt-1 text-xl font-semibold'>
+                  {drawResult.prize_title}
+                </p>
+                {drawResult.prize_description && (
+                  <p className='text-muted-foreground mt-2 text-sm'>
+                    {drawResult.prize_description}
+                  </p>
+                )}
+              </div>
+              {drawResult.prize_type === 'balance' && (
+                <div className='bg-success/10 text-success rounded-lg px-4 py-3 text-sm font-medium'>
+                  {formatQuota(drawResult.balance_quota)}
+                </div>
+              )}
+            </div>
+          )}
+        </Dialog>
         {showHistory && (
           <div className='border-t pt-3'>
             {historyQuery.isPending && (

@@ -24,10 +24,6 @@ export type LotteryPrize = {
   balance_quota: number
   title: string
   description: string
-  weight: number
-  probability_percent: number
-  effective_weight: number
-  effective_probability_percent: number
   available: boolean
 }
 
