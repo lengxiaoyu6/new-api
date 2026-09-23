@@ -257,56 +257,15 @@ function ActivityCard(props: { activity: LotteryActivity }) {
         </div>
       </CardHeader>
       <CardContent className='space-y-4 pt-4'>
-        <div className='grid items-center gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(15rem,0.72fr)]'>
-          <div className='min-w-0'>
-            <LotteryWheel
-              prizes={props.activity.prizes}
-              rotation={wheelRotation}
-              spinning={isSpinning}
-              disabled={!canDraw(props.activity) || drawMutation.isPending}
-              onSpin={submitDraw}
-              onSpinEnd={completeSpin}
-            />
-          </div>
-          <div className='min-w-0 space-y-3'>
-            <div className='flex items-center justify-between gap-3'>
-              <h3 className='text-sm font-medium'>{t('Prize')}</h3>
-              <Badge variant='outline'>
-                {t('Remaining')}: {props.activity.remaining_attempts}
-              </Badge>
-            </div>
-            <div className='divide-y border-y'>
-              {props.activity.prizes.map((prize) => (
-                <div
-                  key={prize.id}
-                  className='flex min-w-0 items-start gap-3 py-3'
-                >
-                  <IconBadge
-                    size='sm'
-                    tone={prize.type === 'balance' ? 'success' : 'info'}
-                  >
-                    <PrizeIcon type={prize.type} />
-                  </IconBadge>
-                  <div className='min-w-0 flex-1'>
-                    <div className='flex flex-wrap items-center gap-2'>
-                      <span className='min-w-0 truncate text-sm font-medium'>
-                        {prize.title}
-                      </span>
-                      <Badge
-                        variant={prize.available ? 'outline' : 'secondary'}
-                        className='text-[11px]'
-                      >
-                        {t(prize.available ? 'Available' : 'Out of stock')}
-                      </Badge>
-                    </div>
-                    <p className='text-muted-foreground mt-1 text-xs leading-relaxed'>
-                      {prize.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+        <div className='flex justify-center'>
+          <LotteryWheel
+            prizes={props.activity.prizes}
+            rotation={wheelRotation}
+            spinning={isSpinning}
+            disabled={!canDraw(props.activity) || drawMutation.isPending}
+            onSpin={submitDraw}
+            onSpinEnd={completeSpin}
+          />
         </div>
         <div className='flex flex-wrap items-center justify-between gap-2 border-t pt-3'>
           <div className='text-muted-foreground min-w-0 text-sm'>

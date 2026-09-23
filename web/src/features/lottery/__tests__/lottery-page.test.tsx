@@ -116,7 +116,9 @@ it('shows an equal-segment prize wheel without exposing probability values', asy
 
   expect(await screen.findByTestId('lottery-wheel-disc')).toBeVisible()
   expect(screen.getByRole('button', { name: 'Draw now' })).toBeEnabled()
-  expect(screen.getAllByText('2 balance').length).toBeGreaterThan(0)
+  expect(screen.getAllByText('2 balance')).toHaveLength(1)
+  expect(screen.queryByText('Available')).not.toBeInTheDocument()
+  expect(screen.queryByText('Out of stock')).not.toBeInTheDocument()
   expect(screen.queryByText('Probability')).not.toBeInTheDocument()
   expect(screen.queryByText('25.00%')).not.toBeInTheDocument()
   expect(screen.queryByText('50.00%')).not.toBeInTheDocument()
