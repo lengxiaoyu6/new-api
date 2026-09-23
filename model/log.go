@@ -327,6 +327,33 @@ func RecordTopupLog(userId int, content string, callerIp string, paymentMethod s
 	}
 }
 
+func recordLotteryAwardLog(award *LotteryAward) {
+	if award == nil || award.Id <= 0 || award.Quota <= 0 {
+		return
+	}
+	username, _ := GetUsernameById(award.UserId, false)
+	other := NewLogOther()
+	other.MergePublic(map[string]any{
+		"lottery_activity_id": award.ActivityId,
+		"lottery_draw_id":     award.DrawId,
+		"lottery_award_id":    award.Id,
+		"lottery_prize_id":    award.PrizeId,
+	})
+	log := &Log{
+		UserId:    award.UserId,
+		Username:  username,
+		CreatedAt: award.CreatedAt,
+		Type:      LogTypeTopup,
+		Content:   fmt.Sprintf("抽奖余额奖励到账，增加 %s", logger.LogQuota(int(award.Quota))),
+		Quota:     int(award.Quota),
+		RequestId: fmt.Sprintf("lottery-award-%d", award.Id),
+		Other:     other.JSONString(),
+	}
+	if err := createLog(log); err != nil {
+		common.SysLog(fmt.Sprintf("failed to record lottery award log award_id=%d: %s", award.Id, err.Error()))
+	}
+}
+
 // getRequestDomain 返回请求进入网关时使用的域名。
 // 反代场景下优先读取 X-Forwarded-Host（透传的原始域名），否则回退到 Host。
 func getRequestDomain(c *gin.Context) string {

@@ -1051,6 +1051,7 @@ func DrawLottery(activityID, userID int, idempotencyKey string, acceptedAt time.
 	}
 	if result.Award != nil && !result.Reused {
 		syncCreditUserQuotaCache(userID, int(result.Award.Quota), "lottery award")
+		recordLotteryAwardLog(result.Award)
 	}
 	return result, nil
 }

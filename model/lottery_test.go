@@ -117,6 +117,7 @@ func TestDrawLotteryCreditsBalanceAndConsumesStock(t *testing.T) {
 	result, err := DrawLottery(activity.Id, user.Id, "balance", now)
 	require.NoError(t, err)
 	assert.Equal(t, prizes[0].Id, result.Draw.FinalPrizeId)
+	require.NotNil(t, result.Award)
 	var userRow User
 	require.NoError(t, DB.First(&userRow, user.Id).Error)
 	assert.Equal(t, 12, userRow.Quota)
@@ -126,6 +127,21 @@ func TestDrawLotteryCreditsBalanceAndConsumesStock(t *testing.T) {
 	var daily LotteryPrizeDailyStock
 	require.NoError(t, DB.Where("prize_id = ?", prizes[0].Id).First(&daily).Error)
 	assert.EqualValues(t, 1, daily.Issued)
+
+	var awardLog Log
+	require.NoError(t, LOG_DB.Where("user_id = ? AND type = ?", user.Id, LogTypeTopup).First(&awardLog).Error)
+	assert.Equal(t, result.Award.CreatedAt, awardLog.CreatedAt)
+	assert.EqualValues(t, result.Award.Quota, awardLog.Quota)
+	assert.Equal(t, fmt.Sprintf("lottery-award-%d", result.Award.Id), awardLog.RequestId)
+	assert.Contains(t, awardLog.Content, "抽奖余额奖励到账")
+	assert.JSONEq(t, fmt.Sprintf(`{"lottery_activity_id":%d,"lottery_draw_id":%d,"lottery_award_id":%d,"lottery_prize_id":%d}`, activity.Id, result.Draw.Id, result.Award.Id, prizes[0].Id), awardLog.Other)
+
+	reused, err := DrawLottery(activity.Id, user.Id, "balance", now)
+	require.NoError(t, err)
+	assert.True(t, reused.Reused)
+	var awardLogCount int64
+	require.NoError(t, LOG_DB.Model(&Log{}).Where("user_id = ? AND type = ?", user.Id, LogTypeTopup).Count(&awardLogCount).Error)
+	assert.EqualValues(t, 1, awardLogCount)
 }
 
 func TestDrawLotteryReusesLatestResultAfterAttemptsAreUsed(t *testing.T) {
@@ -554,13 +570,13 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			require.NoError(t, err)
 			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 
-			oldDB := DB
+			oldDB, oldLogDB := DB, LOG_DB
 			oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
-			DB = db
+			DB, LOG_DB = db, db
 			common.SetDatabaseTypes(test.database, test.database)
 			initCol()
 			t.Cleanup(func() {
-				DB = oldDB
+				DB, LOG_DB = oldDB, oldLogDB
 				common.SetDatabaseTypes(oldMainType, oldLogType)
 				initCol()
 			})
@@ -577,7 +593,7 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 
 			// Representative latest-release structure: users and subscription
 			// orders already exist while lottery tables and ChargedQuota do not.
-			require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionOrder{}))
+			require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionOrder{}, &Log{}))
 			if db.Migrator().HasColumn(&SubscriptionOrder{}, "charged_quota") {
 				require.NoError(t, db.Migrator().DropColumn(&SubscriptionOrder{}, "charged_quota"))
 			}
@@ -642,6 +658,15 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			adjustment, err := AdjustLotteryStock(startedActivity.Id, startedPrizes[0].Id, user.Id, "matrix-stock-"+test.name, 10, "initial stock")
 			require.NoError(t, err)
 			assert.EqualValues(t, 10, adjustment.AfterStock)
+			oldRandom := lotteryRandomSource
+			lotteryRandomSource = func() (int64, error) { return 0, nil }
+			t.Cleanup(func() { lotteryRandomSource = oldRandom })
+			result, err := DrawLottery(startedActivity.Id, user.Id, "matrix-balance-"+test.name, now)
+			require.NoError(t, err)
+			require.NotNil(t, result.Award)
+			var awardLog Log
+			require.NoError(t, db.Where("request_id = ?", fmt.Sprintf("lottery-award-%d", result.Award.Id)).First(&awardLog).Error)
+			assert.EqualValues(t, result.Award.Quota, awardLog.Quota)
 
 			draw := &LotteryDraw{ActivityId: activity.Id, VersionId: version.Id, UserId: user.Id, BusinessDate: version.BusinessDate, AttemptNo: 1, IdempotencyKey: "matrix-key", RawPrizeId: prize.Id, FinalPrizeId: prize.Id, RandomAlgorithm: LotteryRandomAlgorithm, Status: LotteryDrawCompleted}
 			require.NoError(t, db.Create(draw).Error)
