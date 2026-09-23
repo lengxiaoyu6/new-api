@@ -58,6 +58,10 @@ type LotteryStockFormProps = {
 
 export function LotteryStockForm(props: LotteryStockFormProps) {
   const { t } = useTranslation()
+  const prizeOptions = props.prizes.map((prize) => ({
+    value: String(prize.id),
+    label: `${prize.code} · ${formatQuota(prize.balance_quota)} · ${prize.issued_stock}/${prize.total_stock}`,
+  }))
   const queryClient = useQueryClient()
   const form = useForm<LotteryStockFormValues>({
     resolver: zodResolver(
@@ -114,6 +118,7 @@ export function LotteryStockForm(props: LotteryStockFormProps) {
             name='prizeId'
             render={({ field }) => (
               <Select
+                items={prizeOptions}
                 value={field.value > 0 ? String(field.value) : null}
                 onValueChange={(value) => field.onChange(Number(value))}
               >
@@ -126,10 +131,9 @@ export function LotteryStockForm(props: LotteryStockFormProps) {
                 </SelectTrigger>
                 <SelectContent alignItemWithTrigger={false}>
                   <SelectGroup>
-                    {props.prizes.map((prize) => (
-                      <SelectItem key={prize.id} value={String(prize.id)}>
-                        {prize.code} · {formatQuota(prize.balance_quota)} ·{' '}
-                        {prize.issued_stock}/{prize.total_stock}
+                    {prizeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
                       </SelectItem>
                     ))}
                   </SelectGroup>

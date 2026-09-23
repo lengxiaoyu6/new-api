@@ -182,7 +182,8 @@ export function LotteryAdmin() {
   const displayedVersion = activityStarted
     ? (publishedVersion ?? latestVersion)
     : latestVersion
-  const stockVersion = publishedVersion ?? latestVersion
+  const stockVersion = displayedVersion
+  const configurationFrozen = activityStarted && publishedVersion != null
   const balancePrizes = useMemo(() => {
     return (stockVersion?.prizes ?? [])
       .filter((prize) => prize.type === 'balance')
@@ -372,7 +373,8 @@ export function LotteryAdmin() {
                 <div className='mt-4 grid items-start gap-4 xl:grid-cols-2'>
                   {canWrite &&
                     selectedActivity.status !== 'ended' &&
-                    !activityStarted && (
+                    versionsQuery.isSuccess &&
+                    !configurationFrozen && (
                       <LotteryVersionForm
                         activityId={selectedActivity.id}
                         activityName={selectedActivity.name}

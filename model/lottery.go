@@ -365,6 +365,14 @@ func findLotteryVersionTx(tx *gorm.DB, activityID int) (*LotteryVersion, error) 
 	return &version, err
 }
 
+func lotteryHasPublishedVersionTx(tx *gorm.DB, activityID int) (bool, error) {
+	var count int64
+	err := tx.Model(&LotteryVersion{}).
+		Where("activity_id = ? AND status = ?", activityID, LotteryVersionPublished).
+		Count(&count).Error
+	return count > 0, err
+}
+
 func loadLotteryVersionPrizesTx(tx *gorm.DB, versionID int) ([]LotteryVersionPrizeView, error) {
 	var rows []LotteryVersionPrize
 	if err := tx.Where("version_id = ? AND enabled = ?", versionID, true).Order("sort_order asc, id asc").Find(&rows).Error; err != nil {
@@ -1221,7 +1229,14 @@ func CreateLotteryVersionTx(tx *gorm.DB, version *LotteryVersion, prizes []Lotte
 		}
 		return err
 	}
-	if activity.Status == LotteryActivityEnded || now >= activity.StartAt {
+	hasPublishedVersion, err := lotteryHasPublishedVersionTx(tx, version.ActivityId)
+	if err != nil {
+		return err
+	}
+	// A draft activity has no frozen rules yet. Allow its initial configuration
+	// to be prepared after the wall-clock start; later versions remain frozen.
+	if activity.Status == LotteryActivityEnded || now >= activity.EndAt ||
+		(now >= activity.StartAt && hasPublishedVersion) {
 		return errors.New("lottery configuration is frozen after the activity starts")
 	}
 	if version.QuotaPerUnit == 0 {
@@ -1296,7 +1311,12 @@ func PublishLotteryVersion(versionID, operatorID int) error {
 				"status": LotteryActivityActive, "updated_by": operatorID, "updated_at": now,
 			}).Error
 		}
-		if activity.Status == LotteryActivityEnded || now >= activity.StartAt {
+		hasPublishedVersion, err := lotteryHasPublishedVersionTx(tx, version.ActivityId)
+		if err != nil {
+			return err
+		}
+		if activity.Status == LotteryActivityEnded || now >= activity.EndAt ||
+			(now >= activity.StartAt && hasPublishedVersion) {
 			return errors.New("lottery configuration must be published before the activity starts")
 		}
 		prizes, err := loadLotteryVersionPrizesTx(tx, version.Id)

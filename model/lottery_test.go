@@ -300,6 +300,44 @@ func TestCreateLotteryVersionStoresPrizeLinks(t *testing.T) {
 	}
 }
 
+func TestInitialLotteryConfigurationCanBePublishedAfterActivityStart(t *testing.T) {
+	truncateTables(t)
+	now := time.Now()
+	activity := &LotteryActivity{
+		Name:           "started-draft-" + common.GetRandomString(8),
+		StartAt:        now.Add(-time.Hour).Unix(),
+		EndAt:          now.Add(24 * time.Hour).Unix(),
+		ConsumeStartAt: now.Add(-2 * time.Hour).Unix(),
+		ConsumeEndAt:   now.Add(24 * time.Hour).Unix(),
+		MaxAttempts:    LotteryMaxAttempts,
+	}
+	require.NoError(t, CreateLotteryActivity(activity))
+	prizes := []LotteryPrize{
+		{ActivityId: activity.Id, Code: "started-balance", Type: LotteryPrizeBalance, BalanceAmount: 2, BalanceQuota: 2, TotalStock: 0},
+		{ActivityId: activity.Id, Code: "started-thanks", Type: LotteryPrizeThanks},
+	}
+	for i := range prizes {
+		require.NoError(t, DB.Create(&prizes[i]).Error)
+	}
+	version := &LotteryVersion{ActivityId: activity.Id, ThresholdQuota: 0, QuotaPerUnit: 1}
+	items := []LotteryVersionPrizeView{
+		{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, SortOrder: 0, Enabled: true}, Prize: prizes[0]},
+		{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, SortOrder: 1, Enabled: true}, Prize: prizes[1]},
+	}
+
+	require.NoError(t, CreateLotteryVersion(version, items))
+	require.NoError(t, PublishLotteryVersion(version.Id, 42))
+	nextVersion := &LotteryVersion{ActivityId: activity.Id, ThresholdQuota: 0, QuotaPerUnit: 1}
+	assert.Error(t, CreateLotteryVersion(nextVersion, items))
+	adjustment, err := AdjustLotteryStock(activity.Id, prizes[0].Id, 42, "started-stock", 10, "initial stock")
+	require.NoError(t, err)
+	assert.EqualValues(t, 10, adjustment.AfterStock)
+
+	var stored LotteryActivity
+	require.NoError(t, DB.First(&stored, activity.Id).Error)
+	assert.Equal(t, LotteryActivityActive, stored.Status)
+}
+
 func TestDrawLotteryRejectsIdempotencyKeyAcrossActivities(t *testing.T) {
 	truncateTables(t)
 	now := time.Now()
@@ -576,6 +614,34 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			selected, err := findLotteryVersionTx(db, activity.Id)
 			require.NoError(t, err)
 			assert.Equal(t, version.Id, selected.Id)
+
+			now := time.Now()
+			startedActivity := &LotteryActivity{
+				Name:           "matrix-started-" + test.name + "-" + common.GetRandomString(6),
+				StartAt:        now.Add(-time.Hour).Unix(),
+				EndAt:          now.Add(24 * time.Hour).Unix(),
+				ConsumeStartAt: now.Add(-2 * time.Hour).Unix(),
+				ConsumeEndAt:   now.Add(24 * time.Hour).Unix(),
+				MaxAttempts:    LotteryMaxAttempts,
+			}
+			require.NoError(t, CreateLotteryActivity(startedActivity))
+			startedPrizes := []LotteryPrize{
+				{ActivityId: startedActivity.Id, Code: "started-balance", Type: LotteryPrizeBalance, BalanceAmount: 2, BalanceQuota: 2},
+				{ActivityId: startedActivity.Id, Code: "started-thanks", Type: LotteryPrizeThanks},
+			}
+			for i := range startedPrizes {
+				require.NoError(t, db.Create(&startedPrizes[i]).Error)
+			}
+			startedVersion := &LotteryVersion{ActivityId: startedActivity.Id, QuotaPerUnit: 1}
+			startedItems := []LotteryVersionPrizeView{
+				{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, SortOrder: 0, Enabled: true}, Prize: startedPrizes[0]},
+				{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, SortOrder: 1, Enabled: true}, Prize: startedPrizes[1]},
+			}
+			require.NoError(t, CreateLotteryVersion(startedVersion, startedItems))
+			require.NoError(t, PublishLotteryVersion(startedVersion.Id, user.Id))
+			adjustment, err := AdjustLotteryStock(startedActivity.Id, startedPrizes[0].Id, user.Id, "matrix-stock-"+test.name, 10, "initial stock")
+			require.NoError(t, err)
+			assert.EqualValues(t, 10, adjustment.AfterStock)
 
 			draw := &LotteryDraw{ActivityId: activity.Id, VersionId: version.Id, UserId: user.Id, BusinessDate: version.BusinessDate, AttemptNo: 1, IdempotencyKey: "matrix-key", RawPrizeId: prize.Id, FinalPrizeId: prize.Id, RandomAlgorithm: LotteryRandomAlgorithm, Status: LotteryDrawCompleted}
 			require.NoError(t, db.Create(draw).Error)
