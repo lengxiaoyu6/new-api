@@ -383,6 +383,27 @@ func TestLogTaskConsumptionWithoutSnapshotKeepsRatioMode(t *testing.T) {
 	assert.Contains(t, log.Content, "size: 2.00")
 }
 
+func TestLogTaskConsumptionRecordsBillingSource(t *testing.T) {
+	truncate(t)
+	const userID, channelID = 42, 42
+	seedUser(t, userID, 10_000)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, 100, 0, BillingSourceSubscription, 9)
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		OriginModelName: "subscription-task",
+		BillingSource:   BillingSourceSubscription,
+		UsingGroup:      "default",
+		ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channelID},
+		TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "GENERATE"},
+		PriceData:       types.PriceData{Quota: 100, GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1}},
+	}
+	log := callLogTaskConsumption(t, info, task)
+	var other map[string]any
+	require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+	assert.Equal(t, BillingSourceSubscription, other["billing_source"])
+}
+
 // Task logs distinguish jobs the client polls from requests whose HTTP call
 // returned the deliverable itself, and flag results the gateway did not keep.
 func TestLogTaskConsumptionMarksInlineResultsAndDiscardedArtifacts(t *testing.T) {

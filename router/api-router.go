@@ -60,6 +60,28 @@ func SetApiRouter(router *gin.Engine) {
 		apiRouter.GET("/oauth/:provider", middleware.CriticalRateLimit(), middleware.DisableCache(), middleware.TryUserAuth(), controller.HandleOAuth)
 		apiRouter.GET("/ratio_config", middleware.CriticalRateLimit(), controller.GetRatioConfig)
 
+		lotteryRoute := apiRouter.Group("/lottery")
+		lotteryRoute.Use(middleware.UserAuth(), middleware.DisableCache())
+		{
+			lotteryRoute.GET("/activities", controller.GetLotteryActivities)
+			lotteryRoute.GET("/activities/:id", controller.GetLotteryActivity)
+			lotteryRoute.POST("/activities/:id/draw", middleware.SessionCookieOriginGuard(), middleware.UserCriticalRateLimit("lottery-draw"), controller.DrawLottery)
+			lotteryRoute.GET("/activities/:id/history", controller.GetLotteryHistory)
+		}
+
+		lotteryAdminRoute := apiRouter.Group("/lottery/admin")
+		lotteryAdminRoute.Use(middleware.AdminAuth(), middleware.DisableCache())
+		{
+			lotteryAdminRoute.GET("/activities", middleware.RequirePermission(authz.LotteryRead), controller.AdminListLotteryActivities)
+			lotteryAdminRoute.POST("/activities", middleware.RequirePermission(authz.LotteryWrite), controller.AdminCreateLotteryActivity)
+			lotteryAdminRoute.POST("/activities/:id/versions", middleware.RequirePermission(authz.LotteryWrite), controller.AdminCreateLotteryVersion)
+			lotteryAdminRoute.GET("/activities/:id/versions", middleware.RequirePermission(authz.LotteryRead), controller.AdminListLotteryVersions)
+			lotteryAdminRoute.GET("/activities/:id/audit", middleware.RequirePermission(authz.LotteryRead), controller.AdminLotteryAudit)
+			lotteryAdminRoute.POST("/versions/:id/publish", middleware.RequirePermission(authz.LotteryPublish), controller.AdminPublishLotteryVersion)
+			lotteryAdminRoute.POST("/activities/:id/status", middleware.RequirePermission(authz.LotteryOperate), controller.AdminSetLotteryActivityStatus)
+			lotteryAdminRoute.POST("/activities/:id/stock", middleware.RequirePermission(authz.LotteryStock), controller.AdminAdjustLotteryStock)
+		}
+
 		apiRouter.POST("/stripe/webhook", anonymousRequestBodyLimit, controller.StripeWebhook)
 		apiRouter.POST("/creem/webhook", anonymousRequestBodyLimit, controller.CreemWebhook)
 		apiRouter.POST("/waffo/webhook", anonymousRequestBodyLimit, controller.WaffoWebhook)

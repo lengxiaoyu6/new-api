@@ -227,6 +227,9 @@ type SubscriptionOrder struct {
 	Status          string `json:"status"`
 	CreateTime      int64  `json:"create_time"`
 	CompleteTime    int64  `json:"complete_time"`
+	// ChargedQuota records the quota represented by this order at completion
+	// time. Zero keeps compatibility with historical orders.
+	ChargedQuota int64 `json:"charged_quota" gorm:"type:bigint;not null;default:0"`
 
 	ProviderPayload string `json:"provider_payload" gorm:"type:text"`
 }
@@ -683,6 +686,20 @@ func CompleteSubscriptionOrder(tradeNo string, providerPayload string, expectedP
 		if actualPaymentMethod != "" && order.PaymentMethod != actualPaymentMethod {
 			order.PaymentMethod = actualPaymentMethod
 		}
+		if order.ChargedQuota <= 0 {
+			chargedQuota := int64(0)
+			if order.PaymentMethod == PaymentMethodBalance {
+				chargedQuota = parseChargedQuota(order.ProviderPayload)
+			}
+			if chargedQuota <= 0 {
+				var quotaErr error
+				chargedQuota, quotaErr = subscriptionOrderQuotaWithUnit(order, common.QuotaPerUnit)
+				if quotaErr != nil {
+					return quotaErr
+				}
+			}
+			order.ChargedQuota = chargedQuota
+		}
 		if err := tx.Save(&order).Error; err != nil {
 			return err
 		}
@@ -872,6 +889,7 @@ func PurchaseSubscriptionWithBalance(userId int, planId int) error {
 			Status:          common.TopUpStatusSuccess,
 			CreateTime:      now,
 			CompleteTime:    now,
+			ChargedQuota:    int64(requiredQuota),
 			ProviderPayload: fmt.Sprintf("charged_quota=%d", requiredQuota),
 		}
 		if err := tx.Create(order).Error; err != nil {

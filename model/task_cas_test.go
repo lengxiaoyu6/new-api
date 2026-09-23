@@ -59,6 +59,15 @@ func TestMain(m *testing.M) {
 		&SystemInstance{},
 		&SystemTask{},
 		&SystemTaskLock{},
+		&LotteryActivity{},
+		&LotteryVersion{},
+		&LotteryPrize{},
+		&LotteryVersionPrize{},
+		&LotteryParticipation{},
+		&LotteryPrizeDailyStock{},
+		&LotteryDraw{},
+		&LotteryAward{},
+		&LotteryStockAdjustment{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -91,6 +100,15 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_instances")
 		DB.Exec("DELETE FROM system_task_locks")
 		DB.Exec("DELETE FROM system_tasks")
+		DB.Exec("DELETE FROM lottery_stock_adjustments")
+		DB.Exec("DELETE FROM lottery_awards")
+		DB.Exec("DELETE FROM lottery_draws")
+		DB.Exec("DELETE FROM lottery_prize_daily_stocks")
+		DB.Exec("DELETE FROM lottery_participations")
+		DB.Exec("DELETE FROM lottery_version_prizes")
+		DB.Exec("DELETE FROM lottery_versions")
+		DB.Exec("DELETE FROM lottery_prizes")
+		DB.Exec("DELETE FROM lottery_activities")
 	})
 }
 

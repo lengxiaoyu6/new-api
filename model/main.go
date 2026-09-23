@@ -379,8 +379,20 @@ func migrateDB() error {
 		&SystemTaskLock{},
 		&CasbinRule{},
 		&AuthzRole{},
+		&LotteryActivity{},
+		&LotteryVersion{},
+		&LotteryPrize{},
+		&LotteryVersionPrize{},
+		&LotteryParticipation{},
+		&LotteryPrizeDailyStock{},
+		&LotteryDraw{},
+		&LotteryAward{},
+		&LotteryStockAdjustment{},
 	)
 	if err != nil {
+		return err
+	}
+	if err := migrateLotteryIndexes(); err != nil {
 		return err
 	}
 	if err := migratePerfMetricIndexes(); err != nil {
@@ -444,6 +456,15 @@ func migrateDBFast() error {
 		{&SystemInstance{}, "SystemInstance"},
 		{&SystemTask{}, "SystemTask"},
 		{&SystemTaskLock{}, "SystemTaskLock"},
+		{&LotteryActivity{}, "LotteryActivity"},
+		{&LotteryVersion{}, "LotteryVersion"},
+		{&LotteryPrize{}, "LotteryPrize"},
+		{&LotteryVersionPrize{}, "LotteryVersionPrize"},
+		{&LotteryParticipation{}, "LotteryParticipation"},
+		{&LotteryPrizeDailyStock{}, "LotteryPrizeDailyStock"},
+		{&LotteryDraw{}, "LotteryDraw"},
+		{&LotteryAward{}, "LotteryAward"},
+		{&LotteryStockAdjustment{}, "LotteryStockAdjustment"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))
@@ -468,6 +489,9 @@ func migrateDBFast() error {
 			return err
 		}
 	}
+	if err := migrateLotteryIndexes(); err != nil {
+		return err
+	}
 	if err := migratePerfMetricIndexes(); err != nil {
 		return err
 	}
@@ -487,6 +511,25 @@ func migrateDBFast() error {
 		}
 	}
 	common.SysLog("database migrated")
+	return nil
+}
+
+func migrateLotteryIndexes() error {
+	// Early development builds briefly created a unique activity/date index,
+	// which prevented multiple draft revisions. Published-version uniqueness is
+	// enforced by PublishLotteryVersion inside a transaction instead.
+	if DB.Migrator().HasIndex(&LotteryVersion{}, "idx_lottery_activity_day") {
+		if err := DB.Migrator().DropIndex(&LotteryVersion{}, "idx_lottery_activity_day"); err != nil {
+			return err
+		}
+	}
+	// Prize codes are scoped to an activity. Remove the early global unique
+	// index after AutoMigrate has created the activity-scoped replacement.
+	if DB.Migrator().HasIndex(&LotteryPrize{}, "idx_lottery_prizes_code") {
+		if err := DB.Migrator().DropIndex(&LotteryPrize{}, "idx_lottery_prizes_code"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

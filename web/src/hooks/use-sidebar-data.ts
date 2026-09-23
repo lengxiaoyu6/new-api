@@ -41,6 +41,10 @@ import {
 import { useTranslation } from 'react-i18next'
 
 import type { SidebarData } from '@/components/layout/types'
+import {
+  ADMIN_PERMISSION_ACTIONS,
+  ADMIN_PERMISSION_RESOURCES,
+} from '@/lib/admin-permissions'
 import { ROLE } from '@/lib/roles'
 
 /**
@@ -118,6 +122,11 @@ export function useSidebarData(): SidebarData {
             icon: Wallet,
           },
           {
+            title: t('Lottery'),
+            url: '/lottery',
+            icon: Gift,
+          },
+          {
             title: t('Referral'),
             url: '/referral',
             icon: Gift,
@@ -162,6 +171,16 @@ export function useSidebarData(): SidebarData {
             title: t('Subscriptions'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Lottery management'),
+            url: '/lottery-admin',
+            icon: Gift,
+            requiredRole: ROLE.ADMIN,
+            requiredPermission: {
+              resource: ADMIN_PERMISSION_RESOURCES.LOTTERY,
+              action: ADMIN_PERMISSION_ACTIONS.READ,
+            },
           },
           {
             title: t('System Info'),
