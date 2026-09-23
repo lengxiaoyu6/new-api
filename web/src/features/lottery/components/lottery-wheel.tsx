@@ -23,6 +23,7 @@ import { useTranslation } from 'react-i18next'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 
+import { getLotteryWheelLabel } from '../lib/wheel'
 import type { LotteryPrize } from '../types'
 
 const WHEEL_COLORS = [
@@ -66,9 +67,7 @@ type LotteryWheelProps = {
 export function LotteryWheel(props: LotteryWheelProps) {
   const { t } = useTranslation()
   const prizeCount = props.prizes.length
-  const segmentAngle = prizeCount > 0 ? 360 / prizeCount : 360
   const showLabels = prizeCount > 0 && prizeCount <= WHEEL_LABEL_LIMIT
-  const labelRadius = prizeCount <= 4 ? 32 : 36
   let buttonLabel = 'Draw now'
   if (props.spinning) {
     buttonLabel = 'Loading...'
@@ -103,44 +102,47 @@ export function LotteryWheel(props: LotteryWheelProps) {
         aria-hidden='true'
         className='absolute top-0 left-1/2 z-40 h-[9%] w-[8%] -translate-x-1/2 bg-[#ef3f43] shadow-[0_4px_7px_rgba(127,29,29,0.35)] [clip-path:polygon(0_0,100%_0,50%_100%)]'
       />
+      {/* Rotation lives on a bare wrapper so the browser only composites a matrix per frame. */}
       <div
-        data-testid='lottery-wheel-disc'
-        aria-hidden='true'
         className={cn(
-          'absolute inset-[4%] overflow-hidden rounded-full border-[5px] border-white/95 shadow-[0_10px_28px_rgba(15,23,42,0.18)] transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.64,0.16,1)] motion-reduce:transition-none',
-          props.spinning && 'will-change-transform'
+          'absolute inset-[4%] rounded-full transition-transform duration-[4200ms] ease-[cubic-bezier(0.12,0.64,0.16,1)] will-change-transform transform-gpu backface-hidden motion-reduce:transition-none',
+          props.spinning && 'pointer-events-none'
         )}
-        style={{
-          background: wheelBackground(prizeCount),
-          transform: `rotate(${props.rotation}deg)`,
-        }}
+        style={{ transform: `rotate(${props.rotation}deg)` }}
         onTransitionEnd={handleTransitionEnd}
       >
-        {showLabels &&
-          props.prizes.map((prize, index) => {
-            const angle = -90 + (index + 0.5) * segmentAngle
-            const radians = (angle * Math.PI) / 180
-            const labelRotation =
-              angle < -90 || angle > 90 ? angle + 180 : angle
-            return (
-              <span
-                key={prize.id}
-                className='absolute flex w-24 -translate-x-1/2 -translate-y-1/2 items-center justify-center text-center text-sm leading-tight font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.32)] sm:w-32 sm:text-base'
-                style={
-                  {
-                    left: `${50 + labelRadius * Math.cos(radians)}%`,
-                    top: `${50 + labelRadius * Math.sin(radians)}%`,
-                    transform: `translate(-50%, -50%) rotate(${labelRotation}deg)`,
-                  } as CSSProperties
-                }
-                title={prize.title}
-              >
-                <span className='line-clamp-2 max-w-full break-all'>
-                  {prize.title}
+        {/* Paint, border and clipping stay on a child: repainting the conic gradient must not
+            block the rotation, which is what made the spin stutter. */}
+        <div
+          data-testid='lottery-wheel-disc'
+          aria-hidden='true'
+          className='relative size-full overflow-hidden rounded-full border-[5px] border-white/95 shadow-[0_10px_28px_rgba(15,23,42,0.18)]'
+          style={{ background: wheelBackground(prizeCount) }}
+        >
+          {showLabels &&
+            props.prizes.map((prize, index) => {
+              const label = getLotteryWheelLabel(index, prizeCount)
+              return (
+                <span
+                  key={prize.id}
+                  className='absolute flex items-center justify-center text-center text-sm leading-tight font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.32)] sm:text-base'
+                  style={
+                    {
+                      left: `${label.x}%`,
+                      top: `${label.y}%`,
+                      width: `${label.width}%`,
+                      transform: `translate(-50%, -50%) rotate(${label.rotation}deg)`,
+                    } as CSSProperties
+                  }
+                  title={prize.title}
+                >
+                  <span className='line-clamp-2 max-w-full break-all'>
+                    {prize.title}
+                  </span>
                 </span>
-              </span>
-            )
-          })}
+              )
+            })}
+        </div>
       </div>
       <div
         aria-hidden='true'
