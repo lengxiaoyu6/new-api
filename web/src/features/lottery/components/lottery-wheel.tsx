@@ -42,14 +42,12 @@ function wheelBackground(prizeCount: number): string {
   if (prizeCount <= 0) return 'var(--muted)'
 
   const segmentAngle = 360 / prizeCount
-  const separatorAngle = Math.min(2.4, segmentAngle * 0.08)
   const stops: string[] = []
   for (let index = 0; index < prizeCount; index += 1) {
     const start = index * segmentAngle
     const end = (index + 1) * segmentAngle
     stops.push(
-      `rgba(255, 255, 255, 0.96) ${start}deg ${start + separatorAngle}deg`,
-      `${WHEEL_COLORS[index % WHEEL_COLORS.length]} ${start + separatorAngle}deg ${end}deg`
+      `${WHEEL_COLORS[index % WHEEL_COLORS.length]} ${start}deg ${end}deg`
     )
   }
   return `conic-gradient(${stops.join(', ')})`

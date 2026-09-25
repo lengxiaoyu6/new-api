@@ -83,6 +83,14 @@ describe('LotteryWheel', () => {
     expect(disc.style.background).toContain('conic-gradient')
   })
 
+  it('paints prize sections edge to edge without white gaps', () => {
+    renderWheel()
+
+    const background = screen.getByTestId('lottery-wheel-disc').style.background
+
+    expect(background).not.toContain('255, 255, 255')
+  })
+
   it('reports the end of the spin when the rotating layer finishes its transform', () => {
     const onSpinEnd = vi.fn()
     renderWheel({ spinning: true, onSpinEnd })
