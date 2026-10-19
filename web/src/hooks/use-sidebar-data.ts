@@ -59,6 +59,33 @@ export function useSidebarData(): SidebarData {
   return {
     navGroups: [
       {
+        id: 'dashboard',
+        title: t('Dashboards'),
+        items: [
+          {
+            title: t('Overview'),
+            url: '/dashboard/overview',
+            icon: Activity,
+          },
+          {
+            title: t('Dashboard'),
+            url: '/dashboard/models',
+            icon: LayoutDashboard,
+          },
+        ],
+      },
+      {
+        id: 'api-management',
+        title: t('API Management'),
+        items: [
+          {
+            title: t('API Keys'),
+            url: '/keys',
+            icon: Key,
+          },
+        ],
+      },
+      {
         id: 'chat',
         title: t('Chat'),
         items: [
@@ -75,24 +102,9 @@ export function useSidebarData(): SidebarData {
         ],
       },
       {
-        id: 'general',
-        title: t('General'),
+        id: 'logs',
+        title: t('Logs'),
         items: [
-          {
-            title: t('Overview'),
-            url: '/dashboard/overview',
-            icon: Activity,
-          },
-          {
-            title: t('Dashboard'),
-            url: '/dashboard/models',
-            icon: LayoutDashboard,
-          },
-          {
-            title: t('API Keys'),
-            url: '/keys',
-            icon: Key,
-          },
           {
             title: t('Usage Logs'),
             url: '/usage-logs/common',
@@ -113,8 +125,8 @@ export function useSidebarData(): SidebarData {
         ],
       },
       {
-        id: 'personal',
-        title: t('Personal'),
+        id: 'account-assets',
+        title: t('Account & Assets'),
         items: [
           {
             title: t('Subscription Usage'),
@@ -136,6 +148,12 @@ export function useSidebarData(): SidebarData {
             url: '/referral',
             icon: Gift,
           },
+        ],
+      },
+      {
+        id: 'account-settings',
+        title: t('Account Settings'),
+        items: [
           {
             title: t('Profile'),
             url: '/profile',

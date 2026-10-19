@@ -23,7 +23,7 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { render, screen } from '@testing-library/react'
+import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterAll, afterEach, beforeAll, expect, test } from 'vitest'
 
@@ -103,11 +103,34 @@ test('regular users only find their own console pages in search', async () => {
   const entries = await searchEntriesFor(ROLE.USER)
 
   expect(entries).toEqual(
-    expect.arrayContaining(['API Keys', 'Usage Logs', 'Wallet', 'Profile'])
+    expect.arrayContaining([
+      'API Keys',
+      'Playground',
+      'Usage Logs',
+      'Wallet',
+      'Profile',
+    ])
   )
   for (const entry of [...adminEntries, ...superAdminEntries]) {
     expect(entries).not.toContain(entry)
   }
+})
+
+test('regular users find Playground under Chat separately from API Management', async () => {
+  await searchEntriesFor(ROLE.USER)
+
+  const chatGroup = screen.getByRole('group', { name: 'Chat' })
+  const apiGroup = screen.getByRole('group', { name: 'API Management' })
+
+  expect(
+    within(chatGroup).getByRole('option', { name: 'Playground' })
+  ).toBeVisible()
+  expect(
+    within(apiGroup).getByRole('option', { name: 'API Keys' })
+  ).toBeVisible()
+  expect(
+    within(apiGroup).queryByRole('option', { name: 'Playground' })
+  ).not.toBeInTheDocument()
 })
 
 test('admins find admin pages in search but not super admin pages', async () => {

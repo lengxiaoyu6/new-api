@@ -73,6 +73,99 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
   return result
 }
 
+describe('sidebar navigation groups', () => {
+  it('keeps chat in its own group alongside the five personal management groups', () => {
+    const { result } = sidebarFor()
+
+    expect(
+      result.current
+        .filter((group) => group.id !== 'admin')
+        .map((group) => ({
+          title: group.title,
+          items: group.items.map((item) => item.title),
+        }))
+    ).toEqual([
+      { title: 'Dashboards', items: ['Overview', 'Dashboard'] },
+      { title: 'API Management', items: ['API Keys'] },
+      { title: 'Chat', items: ['Playground', 'Chat'] },
+      { title: 'Logs', items: ['Usage Logs', 'Audit Logs', 'Task Logs'] },
+      {
+        title: 'Account & Assets',
+        items: ['Subscription Usage', 'Wallet', 'Lottery', 'Referral'],
+      },
+      { title: 'Account Settings', items: ['Profile', 'Security & Access'] },
+    ])
+  })
+
+  it('keeps the administrator group and its entries in the existing order', () => {
+    const { result } = sidebarFor()
+    const adminGroup = result.current.find((group) => group.id === 'admin')
+
+    expect(adminGroup?.title).toBe('Admin')
+    expect(
+      adminGroup?.items.map((item) => ({ title: item.title, url: item.url }))
+    ).toEqual([
+      { title: 'Channels', url: '/channels' },
+      { title: 'Models', url: '/models/metadata' },
+      { title: 'Users', url: '/users' },
+      { title: 'Redemption Codes', url: '/redemption-codes' },
+      { title: 'Subscription Management', url: '/subscriptions' },
+      { title: 'Lottery management', url: '/lottery-admin' },
+      { title: 'System Info', url: '/system-info' },
+      { title: 'Task Plugins', url: '/task-plugins' },
+      { title: 'System Settings', url: '/system-settings/site' },
+    ])
+  })
+
+  it('honors the legacy console section switch across the new groups', () => {
+    const { result } = sidebarFor({ console: { enabled: false } })
+    const groupIds = result.current.map((group) => group.id)
+
+    expect(groupIds).not.toContain('dashboard')
+    expect(groupIds).not.toContain('api-management')
+    expect(groupIds).not.toContain('logs')
+    expect(
+      result.current
+        .find((group) => group.id === 'chat')
+        ?.items.map((item) => item.title)
+    ).toEqual(['Playground', 'Chat'])
+  })
+
+  it('hides API Management when tokens are disabled and keeps Chat visible', () => {
+    const { result } = sidebarFor({ console: { token: false } })
+
+    expect(result.current.some((group) => group.id === 'api-management')).toBe(
+      false
+    )
+    expect(result.current.some((group) => group.id === 'chat')).toBe(true)
+    expect(result.current.some((group) => group.id === 'dashboard')).toBe(true)
+  })
+
+  it('hides Chat when its section is disabled and keeps API Management visible', () => {
+    const { result } = sidebarFor(undefined, { chat: { enabled: false } })
+
+    expect(result.current.some((group) => group.id === 'chat')).toBe(false)
+    expect(
+      result.current
+        .find((group) => group.id === 'api-management')
+        ?.items.map((item) => item.title)
+    ).toEqual(['API Keys'])
+  })
+
+  it('hides Account Settings when both profile and security are disabled', () => {
+    const { result } = sidebarFor(undefined, {
+      personal: { personal: false, security: false },
+    })
+
+    expect(
+      result.current.some((group) => group.id === 'account-settings')
+    ).toBe(false)
+    expect(result.current.some((group) => group.id === 'account-assets')).toBe(
+      true
+    )
+  })
+})
+
 describe('security sidebar visibility', () => {
   it('old configurations show Security & Access immediately after Profile and keep Referral and API Keys', () => {
     const { result } = sidebarFor(
@@ -81,16 +174,14 @@ describe('security sidebar visibility', () => {
     )
     expect(
       result.current
-        .find((group) => group.id === 'personal')
+        .find((group) => group.id === 'account-settings')
         ?.items.map((item) => item.title)
-    ).toEqual([
-      'Subscription Usage',
-      'Wallet',
-      'Lottery',
-      'Referral',
-      'Profile',
-      'Security & Access',
-    ])
+    ).toEqual(['Profile', 'Security & Access'])
+    expect(
+      result.current
+        .find((group) => group.id === 'account-assets')
+        ?.items.some((item) => item.title === 'Referral')
+    ).toBe(true)
     expect(
       result.current
         .flatMap((group) => group.items)
@@ -135,7 +226,7 @@ describe('subscription usage sidebar entry', () => {
     expect(config.personal.subscription).toBe(true)
     const { result } = sidebarFor(config)
     const items =
-      result.current.find((group) => group.id === 'personal')?.items ?? []
+      result.current.find((group) => group.id === 'account-assets')?.items ?? []
     expect(items).toContainEqual(
       expect.objectContaining({
         title: 'Subscription Usage',
@@ -184,7 +275,7 @@ describe('audit log sidebar entry', () => {
       { console: { enabled: true, log: true } }
     )
     const items =
-      result.current.find((group) => group.id === 'general')?.items ?? []
+      result.current.find((group) => group.id === 'logs')?.items ?? []
     const usageIndex = items.findIndex((item) => item.title === 'Usage Logs')
     expect(items[usageIndex + 1]).toMatchObject({
       title: 'Audit Logs',
