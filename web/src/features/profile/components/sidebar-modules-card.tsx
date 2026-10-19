@@ -117,6 +117,11 @@ export function SidebarModulesCard() {
       description: t('User personal functions'),
       modules: [
         {
+          key: 'subscription',
+          title: t('Subscription Usage'),
+          description: t('Track subscription quota, usage, and reset times.'),
+        },
+        {
           key: 'topup',
           title: t('Wallet Management'),
           description: t('Balance and top-up management'),

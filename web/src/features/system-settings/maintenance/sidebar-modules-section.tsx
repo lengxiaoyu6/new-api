@@ -124,6 +124,10 @@ export function SidebarModulesSection({
       },
     },
     personal: {
+      subscription: {
+        title: t('Subscription Usage'),
+        description: t('Track subscription quota, usage, and reset times.'),
+      },
       topup: {
         title: t('Wallet'),
         description: t('Top up balance and view billing history.'),

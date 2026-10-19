@@ -50,6 +50,7 @@ import { Route as AuthenticatedProfileIndexRouteImport } from './routes/_authent
 import { Route as AuthenticatedRedemptionCodesIndexRouteImport } from './routes/_authenticated/redemption-codes/index'
 import { Route as AuthenticatedReferralIndexRouteImport } from './routes/_authenticated/referral/index'
 import { Route as AuthenticatedSecurityIndexRouteImport } from './routes/_authenticated/security/index'
+import { Route as AuthenticatedSubscriptionUsageIndexRouteImport } from './routes/_authenticated/subscription-usage/index'
 import { Route as AuthenticatedSubscriptionsIndexRouteImport } from './routes/_authenticated/subscriptions/index'
 import { Route as AuthenticatedSystemInfoIndexRouteImport } from './routes/_authenticated/system-info/index'
 import { Route as AuthenticatedSystemSettingsIndexRouteImport } from './routes/_authenticated/system-settings/index'
@@ -294,6 +295,12 @@ const AuthenticatedSecurityIndexRoute =
     path: '/security/',
     getParentRoute: () => AuthenticatedRouteRoute,
   } as any)
+const AuthenticatedSubscriptionUsageIndexRoute =
+  AuthenticatedSubscriptionUsageIndexRouteImport.update({
+    id: '/subscription-usage/',
+    path: '/subscription-usage/',
+    getParentRoute: () => AuthenticatedRouteRoute,
+  } as any)
 const AuthenticatedSubscriptionsIndexRoute =
   AuthenticatedSubscriptionsIndexRouteImport.update({
     id: '/subscriptions/',
@@ -491,6 +498,7 @@ export interface FileRoutesByFullPath {
   '/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/referral/': typeof AuthenticatedReferralIndexRoute
   '/security/': typeof AuthenticatedSecurityIndexRoute
+  '/subscription-usage/': typeof AuthenticatedSubscriptionUsageIndexRoute
   '/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -557,6 +565,7 @@ export interface FileRoutesByTo {
   '/redemption-codes': typeof AuthenticatedRedemptionCodesIndexRoute
   '/referral': typeof AuthenticatedReferralIndexRoute
   '/security': typeof AuthenticatedSecurityIndexRoute
+  '/subscription-usage': typeof AuthenticatedSubscriptionUsageIndexRoute
   '/subscriptions': typeof AuthenticatedSubscriptionsIndexRoute
   '/system-info': typeof AuthenticatedSystemInfoIndexRoute
   '/system-settings': typeof AuthenticatedSystemSettingsIndexRoute
@@ -627,6 +636,7 @@ export interface FileRoutesById {
   '/_authenticated/redemption-codes/': typeof AuthenticatedRedemptionCodesIndexRoute
   '/_authenticated/referral/': typeof AuthenticatedReferralIndexRoute
   '/_authenticated/security/': typeof AuthenticatedSecurityIndexRoute
+  '/_authenticated/subscription-usage/': typeof AuthenticatedSubscriptionUsageIndexRoute
   '/_authenticated/subscriptions/': typeof AuthenticatedSubscriptionsIndexRoute
   '/_authenticated/system-info/': typeof AuthenticatedSystemInfoIndexRoute
   '/_authenticated/system-settings/': typeof AuthenticatedSystemSettingsIndexRoute
@@ -696,6 +706,7 @@ export interface FileRouteTypes {
     | '/redemption-codes/'
     | '/referral/'
     | '/security/'
+    | '/subscription-usage/'
     | '/subscriptions/'
     | '/system-info/'
     | '/system-settings/'
@@ -762,6 +773,7 @@ export interface FileRouteTypes {
     | '/redemption-codes'
     | '/referral'
     | '/security'
+    | '/subscription-usage'
     | '/subscriptions'
     | '/system-info'
     | '/system-settings'
@@ -831,6 +843,7 @@ export interface FileRouteTypes {
     | '/_authenticated/redemption-codes/'
     | '/_authenticated/referral/'
     | '/_authenticated/security/'
+    | '/_authenticated/subscription-usage/'
     | '/_authenticated/subscriptions/'
     | '/_authenticated/system-info/'
     | '/_authenticated/system-settings/'
@@ -1166,6 +1179,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedSecurityIndexRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/_authenticated/subscription-usage/': {
+      id: '/_authenticated/subscription-usage/'
+      path: '/subscription-usage'
+      fullPath: '/subscription-usage/'
+      preLoaderRoute: typeof AuthenticatedSubscriptionUsageIndexRouteImport
+      parentRoute: typeof AuthenticatedRouteRoute
+    }
     '/_authenticated/subscriptions/': {
       id: '/_authenticated/subscriptions/'
       path: '/subscriptions'
@@ -1460,6 +1480,7 @@ interface AuthenticatedRouteRouteChildren {
   AuthenticatedRedemptionCodesIndexRoute: typeof AuthenticatedRedemptionCodesIndexRoute
   AuthenticatedReferralIndexRoute: typeof AuthenticatedReferralIndexRoute
   AuthenticatedSecurityIndexRoute: typeof AuthenticatedSecurityIndexRoute
+  AuthenticatedSubscriptionUsageIndexRoute: typeof AuthenticatedSubscriptionUsageIndexRoute
   AuthenticatedSubscriptionsIndexRoute: typeof AuthenticatedSubscriptionsIndexRoute
   AuthenticatedSystemInfoIndexRoute: typeof AuthenticatedSystemInfoIndexRoute
   AuthenticatedTaskPluginsIndexRoute: typeof AuthenticatedTaskPluginsIndexRoute
@@ -1490,6 +1511,8 @@ const AuthenticatedRouteRouteChildren: AuthenticatedRouteRouteChildren = {
     AuthenticatedRedemptionCodesIndexRoute,
   AuthenticatedReferralIndexRoute: AuthenticatedReferralIndexRoute,
   AuthenticatedSecurityIndexRoute: AuthenticatedSecurityIndexRoute,
+  AuthenticatedSubscriptionUsageIndexRoute:
+    AuthenticatedSubscriptionUsageIndexRoute,
   AuthenticatedSubscriptionsIndexRoute: AuthenticatedSubscriptionsIndexRoute,
   AuthenticatedSystemInfoIndexRoute: AuthenticatedSystemInfoIndexRoute,
   AuthenticatedTaskPluginsIndexRoute: AuthenticatedTaskPluginsIndexRoute,

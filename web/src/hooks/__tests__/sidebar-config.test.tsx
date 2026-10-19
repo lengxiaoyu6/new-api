@@ -83,7 +83,14 @@ describe('security sidebar visibility', () => {
       result.current
         .find((group) => group.id === 'personal')
         ?.items.map((item) => item.title)
-    ).toEqual(['Wallet', 'Referral', 'Profile', 'Security & Access'])
+    ).toEqual([
+      'Subscription Usage',
+      'Wallet',
+      'Lottery',
+      'Referral',
+      'Profile',
+      'Security & Access',
+    ])
     expect(
       result.current
         .flatMap((group) => group.items)
@@ -118,6 +125,41 @@ describe('security sidebar visibility', () => {
         .some((item) => item.title === 'Security & Access')
     ).toBe(true)
   })
+})
+
+describe('subscription usage sidebar entry', () => {
+  it('defaults the personal subscription entry to visible for old configurations', () => {
+    const config = parseSidebarModulesAdmin(
+      '{"personal":{"enabled":true,"topup":false}}'
+    )
+    expect(config.personal.subscription).toBe(true)
+    const { result } = sidebarFor(config)
+    const items =
+      result.current.find((group) => group.id === 'personal')?.items ?? []
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        title: 'Subscription Usage',
+        url: '/subscription-usage',
+      })
+    )
+    expect(items.some((item) => item.title === 'Wallet')).toBe(false)
+  })
+
+  it.each([
+    [{ personal: { enabled: true, subscription: false } }, undefined],
+    [{ personal: { enabled: false } }, undefined],
+    [undefined, { personal: { enabled: true, subscription: false } }],
+  ])(
+    'honors admin and personal subscription visibility settings (%j, %j)',
+    (admin, user) => {
+      const { result } = sidebarFor(admin, user)
+      expect(
+        result.current
+          .flatMap((group) => group.items)
+          .some((item) => item.title === 'Subscription Usage')
+      ).toBe(false)
+    }
+  )
 })
 
 describe('audit log sidebar entry', () => {

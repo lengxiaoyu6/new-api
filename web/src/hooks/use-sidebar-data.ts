@@ -117,6 +117,11 @@ export function useSidebarData(): SidebarData {
         title: t('Personal'),
         items: [
           {
+            title: t('Subscription Usage'),
+            url: '/subscription-usage',
+            icon: CreditCard,
+          },
+          {
             title: t('Wallet'),
             url: '/wallet',
             icon: Wallet,
@@ -168,7 +173,7 @@ export function useSidebarData(): SidebarData {
             icon: Ticket,
           },
           {
-            title: t('Subscriptions'),
+            title: t('Subscription Management'),
             url: '/subscriptions',
             icon: CreditCard,
           },
