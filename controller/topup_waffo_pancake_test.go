@@ -2,6 +2,7 @@ package controller
 
 import (
 	"maps"
+	"strconv"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -31,7 +32,7 @@ func TestFormatWaffoPancakeAmount_UsesDisplayPriceString(t *testing.T) {
 func TestGetWaffoPancakePayMoney(t *testing.T) {
 	originalUnitPrice := setting.WaffoPancakeUnitPrice
 	originalQuotaDisplayType := operation_setting.GetGeneralSetting().QuotaDisplayType
-	originalDiscounts := make(map[int]float64, len(operation_setting.GetPaymentSetting().AmountDiscount))
+	originalDiscounts := make(map[string]float64, len(operation_setting.GetPaymentSetting().AmountDiscount))
 	maps.Copy(originalDiscounts, operation_setting.GetPaymentSetting().AmountDiscount)
 	originalTopupGroupRatio := common.TopupGroupRatio2JSONString()
 
@@ -43,16 +44,16 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 	})
 
 	setting.WaffoPancakeUnitPrice = 2.5
-	operation_setting.GetPaymentSetting().AmountDiscount = map[int]float64{
-		10:                           0.8,
-		int(common.QuotaPerUnit * 3): 0.5,
-		20:                           0,
+	operation_setting.GetPaymentSetting().AmountDiscount = map[string]float64{
+		"10": 0.8,
+		strconv.FormatFloat(common.QuotaPerUnit*3, 'f', -1, 64): 0.5,
+		"20": 0,
 	}
 	require.NoError(t, common.UpdateTopupGroupRatioByJSONString(`{"default":1,"vip":1.2}`))
 
 	testCases := []struct {
 		name             string
-		amount           int64
+		amount           float64
 		group            string
 		quotaDisplayType string
 		expected         float64
@@ -66,7 +67,7 @@ func TestGetWaffoPancakePayMoney(t *testing.T) {
 		},
 		{
 			name:             "tokens display converts quota to display units before pricing",
-			amount:           int64(common.QuotaPerUnit * 3),
+			amount:           common.QuotaPerUnit * 3,
 			group:            "vip",
 			quotaDisplayType: operation_setting.QuotaDisplayTypeTokens,
 			expected:         4.5,

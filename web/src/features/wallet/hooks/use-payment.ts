@@ -114,7 +114,7 @@ export function usePayment() {
         setProcessing(true)
 
         const isStripe = isStripePayment(paymentType)
-        const amount = Math.floor(topupAmount)
+        const amount = topupAmount
 
         const response = isStripe
           ? await requestStripePayment({
