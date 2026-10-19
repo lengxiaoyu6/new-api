@@ -14,6 +14,7 @@ import (
 	taskdto "github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -171,6 +172,29 @@ func TestFormatErrorLogWithStatusCodeResponseMapping(t *testing.T) {
 	// Original error must stay untouched for retry / auto-disable decisions.
 	require.Equal(t, http.StatusForbidden, newAPIError.StatusCode)
 	require.Equal(t, "用户额度不足, 剩余额度: $-0.004828", newAPIError.Error())
+}
+
+func TestFormatErrorLogWithStatusCodeResponseMappingMasksUpstream(t *testing.T) {
+	t.Parallel()
+	message := "request to https://api.upstream.example.com/openai/v1/chat/completions failed; see https://docs.example.org/errors"
+	masked := "request to https://***.com/***/***/***/*** failed; see https://docs.example.org/errors"
+	for _, tc := range []struct {
+		name    string
+		mapping string
+		want    string
+	}{
+		{name: "unmapped", want: "status_code=403, " + masked},
+		{name: "status only", mapping: `{"403":{"status_code":503}}`, want: "status_code=503, " + masked},
+		{name: "replacement message", mapping: `{"403":{"status_code":502,"message":"` + message + `"}}`, want: "status_code=502, " + masked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			apiErr := types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, http.StatusForbidden)
+			got := FormatErrorLogWithStatusCodeResponseMapping(apiErr, tc.mapping, "https://api.upstream.example.com/openai")
+			assert.Equal(t, tc.want, got)
+			assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
+			assert.Equal(t, message, apiErr.Error())
+		})
+	}
 }
 
 func TestResolveStatusCodeWithResponseMapping(t *testing.T) {

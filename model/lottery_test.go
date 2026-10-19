@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
@@ -536,11 +537,8 @@ func TestSubscriptionOrderQuotaPrefersCompletionSnapshot(t *testing.T) {
 	assert.EqualValues(t, 123, quota)
 }
 
-// TestLotteryMigrationMatrix exercises the lottery schema against real MySQL
-// and PostgreSQL instances when their standard test DSNs are configured. It
-// covers a representative pre-feature upgrade, repeated migration, indexes,
-// uniqueness, and JSON value round-trips. SQLite receives equivalent coverage
-// through the package TestMain migration and lottery tests.
+// TestLotteryMigrationMatrix covers upgrades, repeated migration, indexes,
+// uniqueness, JSON values, and prize settlement on all supported databases.
 func TestLotteryMigrationMatrix(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -549,25 +547,34 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 		dialector func(string) gorm.Dialector
 	}{
 		{
+			name: "sqlite", database: common.DatabaseTypeSQLite,
+			dialector: func(string) gorm.Dialector { return sqlite.Open(":memory:") },
+		},
+		{
 			name: "mysql", env: "TEST_MYSQL_DSN", database: common.DatabaseTypeMySQL,
-			dialector: func(dsn string) gorm.Dialector { return mysql.Open(dsn) },
+			dialector: func(dsn string) gorm.Dialector {
+				return mysqlMigrationDialector{mysql.Dialector{Config: &mysql.Config{DSN: dsn}}}
+			},
 		},
 		{
 			name: "postgresql", env: "TEST_POSTGRES_DSN", database: common.DatabaseTypePostgreSQL,
-			dialector: func(dsn string) gorm.Dialector { return postgres.Open(dsn) },
+			dialector: func(dsn string) gorm.Dialector {
+				return postgresMigrationDialector{postgres.Dialector{Config: &postgres.Config{DSN: dsn}}}
+			},
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dsn := os.Getenv(test.env)
-			if dsn == "" {
+			if test.env != "" && dsn == "" {
 				t.Skipf("%s is not configured", test.env)
 			}
 			db, err := gorm.Open(test.dialector(dsn), newGormConfig(false))
 			require.NoError(t, err)
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
 			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
 
 			oldDB, oldLogDB := DB, LOG_DB
@@ -597,13 +604,10 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			if db.Migrator().HasColumn(&SubscriptionOrder{}, "charged_quota") {
 				require.NoError(t, db.Migrator().DropColumn(&SubscriptionOrder{}, "charged_quota"))
 			}
-			user := &User{Username: "lottery-upgrade-" + common.GetRandomString(8), Password: "unused", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", Quota: 17}
+			user := &User{Username: "lottery-upgrade-" + common.GetRandomString(8), Password: "unused", AffCode: common.GetRandomString(12), Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", Quota: 17}
 			require.NoError(t, db.Create(user).Error)
 
 			migrationTables := append([]any{&SubscriptionOrder{}}, lotteryTables...)
-			require.NoError(t, db.AutoMigrate(migrationTables...))
-			require.NoError(t, migrateLotteryIndexes())
-			// A second run proves migration idempotency.
 			require.NoError(t, db.AutoMigrate(migrationTables...))
 			require.NoError(t, migrateLotteryIndexes())
 
@@ -674,6 +678,16 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			duplicateDraw.Id = 0
 			err = db.Create(&duplicateDraw).Error
 			assert.True(t, err != nil && !errors.Is(err, gorm.ErrRecordNotFound), fmt.Sprintf("expected draw uniqueness error, got %v", err))
+
+			recorder := &migrationSQLRecorder{}
+			require.NoError(t, db.Session(&gorm.Session{Logger: recorder}).AutoMigrate(migrationTables...))
+			require.NoError(t, migrateLotteryIndexes())
+			assert.Empty(t, recorder.schemaMutations(), "repeated startup must preserve the lottery schema")
+			var preservedPrize LotteryPrize
+			require.NoError(t, db.First(&preservedPrize, prize.Id).Error)
+			assert.Equal(t, prize.BalanceAmount, preservedPrize.BalanceAmount)
+			assert.Equal(t, prize.BalanceQuota, preservedPrize.BalanceQuota)
+			assert.Equal(t, prize.Code, preservedPrize.Code)
 		})
 	}
 }

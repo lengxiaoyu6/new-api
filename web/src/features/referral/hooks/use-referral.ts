@@ -20,7 +20,10 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import i18next from 'i18next'
 import { toast } from 'sonner'
 
-import { requireServerSuccess } from '@/lib/server-error-message'
+import {
+  getServerMessage,
+  requireServerSuccess,
+} from '@/lib/server-error-message'
 
 import {
   getAffiliateLogs,
@@ -67,7 +70,9 @@ export function useTransferAffiliateQuota() {
     mutationFn: async (quota: number) =>
       requireServerSuccess(await transferAffiliateQuota(quota)),
     onSuccess: async (response) => {
-      toast.success(response.message || i18next.t('Transfer successful'))
+      toast.success(
+        getServerMessage(response) || i18next.t('Transfer successful')
+      )
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: AFFILIATE_SUMMARY_KEY }),
         queryClient.invalidateQueries({ queryKey: AFFILIATE_LOGS_KEY }),

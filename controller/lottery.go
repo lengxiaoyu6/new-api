@@ -168,7 +168,7 @@ func lotteryBalancePrizeAvailable(item model.LotteryVersionPrizeView) bool {
 }
 
 func lotteryPublicView(c *gin.Context, view *model.LotteryActivityView) gin.H {
-	lang := i18n.GetLangFromContext(c)
+	lang := i18n.StatedLang(c)
 	title := localizedLotteryText(view.Version.Title, lang)
 	if title == "" {
 		title = view.Activity.Name
@@ -313,7 +313,7 @@ func DrawLottery(c *gin.Context) {
 		lotteryError(c, err)
 		return
 	}
-	lang := i18n.GetLangFromContext(c)
+	lang := i18n.StatedLang(c)
 	var versionPrize model.LotteryVersionPrize
 	_ = model.DB.Where("version_id = ? AND prize_id = ?", result.Draw.VersionId, result.Draw.FinalPrizeId).First(&versionPrize).Error
 	prizeView := model.LotteryVersionPrizeView{LotteryVersionPrize: versionPrize, Prize: result.Prize}
@@ -382,7 +382,7 @@ func GetLotteryUserHistory(c *gin.Context) {
 }
 
 func lotteryHistoryPublicView(c *gin.Context, historyPage *model.LotteryHistoryPage) gin.H {
-	lang := i18n.GetLangFromContext(c)
+	lang := i18n.StatedLang(c)
 	history := make([]gin.H, 0, len(historyPage.Items))
 	for _, item := range historyPage.Items {
 		var versionPrize model.LotteryVersionPrize

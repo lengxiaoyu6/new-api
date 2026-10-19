@@ -64,8 +64,8 @@ func ClaudeErrorWrapper(err error, code string, statusCode int) *dto.ClaudeError
 	lowerText := strings.ToLower(text)
 	if !strings.HasPrefix(lowerText, "get file base64 from url") {
 		if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-			common.SysLog(fmt.Sprintf("error: %s", text))
-			text = "请求上游地址失败"
+			common.SysLog(common.LogText("error: %s", text))
+			text = "request to the upstream address failed"
 		}
 	}
 	claudeError := types.ClaudeError{
@@ -107,7 +107,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 		if showBodyWhenFail {
 			newApiErr.Err = buildErrWithBody("")
 		} else {
-			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
+			logger.LogError(ctx, common.LogText("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
 		return
@@ -128,7 +128,7 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	if message == "" {
 		// The body parsed as JSON but carried no usable error message; log the
 		// raw body so the upstream failure remains diagnosable.
-		logger.LogError(ctx, fmt.Sprintf("bad response status code %d with empty error message, body: %s", resp.StatusCode, responseBodyPreview))
+		logger.LogError(ctx, common.LogText("bad response status code %d with empty error message, body: %s", resp.StatusCode, responseBodyPreview))
 	}
 	newApiErr = types.NewOpenAIError(errors.New(message), types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 	if showBodyWhenFail {
@@ -211,13 +211,13 @@ func ResolveStatusCodeWithResponseMapping(newApiErr *types.NewAPIError, statusCo
 // matches the user-facing response after status code response mapping is applied.
 // It does not mutate the original error (so retry / auto-disable keep using the
 // pre-response-mapping status code and message).
-func FormatErrorLogWithStatusCodeResponseMapping(newApiErr *types.NewAPIError, statusCodeResponseMappingStr string) string {
+func FormatErrorLogWithStatusCodeResponseMapping(newApiErr *types.NewAPIError, statusCodeResponseMappingStr string, upstreamURLs ...string) string {
 	if newApiErr == nil {
 		return ""
 	}
 	entry, ok := matchStatusCodeResponseMapping(newApiErr.GetOriginalStatusCode(), statusCodeResponseMappingStr)
 	if !ok {
-		return newApiErr.MaskSensitiveErrorWithStatusCode()
+		return newApiErr.MaskSensitiveErrorWithStatusCode(upstreamURLs...)
 	}
 
 	statusCode := newApiErr.StatusCode
@@ -225,9 +225,9 @@ func FormatErrorLogWithStatusCodeResponseMapping(newApiErr *types.NewAPIError, s
 		statusCode = *entry.StatusCode
 	}
 
-	message := newApiErr.MaskSensitiveError()
+	message := newApiErr.MaskSensitiveError(upstreamURLs...)
 	if entry.Message != nil {
-		message = common.MaskSensitiveInfo(*entry.Message)
+		message = common.MaskSensitiveInfo(*entry.Message, upstreamURLs...)
 	}
 	if statusCode == 0 {
 		return message
@@ -371,13 +371,15 @@ func TaskErrorWrapperLocal(err error, code string, statusCode int) *taskdto.Task
 	return openaiErr
 }
 
-func TaskErrorWrapper(err error, code string, statusCode int) *taskdto.TaskError {
+// TaskErrorWrapper masks the upstream addresses of the task channel in network
+// errors; see common.MaskSensitiveInfo.
+func TaskErrorWrapper(err error, code string, statusCode int, upstreamURLs ...string) *taskdto.TaskError {
 	text := err.Error()
 	lowerText := strings.ToLower(text)
 	if strings.Contains(lowerText, "post") || strings.Contains(lowerText, "dial") || strings.Contains(lowerText, "http") {
-		common.SysLog(fmt.Sprintf("error: %s", text))
+		common.SysLog(common.LogText("error: %s", text))
 		//text = "请求上游地址失败"
-		text = common.MaskSensitiveInfo(text)
+		text = common.MaskSensitiveInfo(text, upstreamURLs...)
 	}
 	//避免暴露内部错误
 	taskError := &taskdto.TaskError{

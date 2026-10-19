@@ -124,7 +124,7 @@ type LotteryPrize struct {
 	ActivityId    int     `json:"activity_id" gorm:"not null;index;uniqueIndex:idx_lottery_prize_code,priority:1"`
 	Code          string  `json:"code" gorm:"type:varchar(64);not null;uniqueIndex:idx_lottery_prize_code,priority:2"`
 	Type          string  `json:"type" gorm:"type:varchar(16);not null;index"`
-	BalanceAmount float64 `json:"balance_amount" gorm:"type:decimal(20,8);not null"`
+	BalanceAmount float64 `json:"balance_amount" gorm:"type:decimal(20,8);size:20;not null"`
 	BalanceQuota  int64   `json:"balance_quota" gorm:"not null"`
 	TotalStock    int64   `json:"total_stock" gorm:"not null"`
 	IssuedStock   int64   `json:"issued_stock" gorm:"not null"`

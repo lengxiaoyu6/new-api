@@ -117,7 +117,13 @@ async function renderSection(defaultEnabled: boolean) {
       <QueryClientProvider client={queryClient}>
         <I18nextProvider i18n={i18n}>
           <SettingsPageProvider actionsContainer={actionsContainer}>
-            <LogSettingsSection defaultEnabled={defaultEnabled} />
+            <LogSettingsSection
+              defaultValues={{
+                LogConsumeEnabled: defaultEnabled,
+                'log_setting.user_export_enabled': false,
+                'log_setting.max_range_days': 365,
+              }}
+            />
           </SettingsPageProvider>
         </I18nextProvider>
       </QueryClientProvider>

@@ -1,7 +1,6 @@
 package service
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -66,10 +65,10 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		return
 	}
 	statusCodeResponseMapping := c.GetString(string(constant.ContextKeyChannelStatusCodeResponseMapping))
-	logger.LogError(c, fmt.Sprintf("channel error (channel #%d, status code: %d, original status code: %d): %s",
-		channelError.ChannelId, err.StatusCode, err.GetOriginalStatusCode(), common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode())))
+	upstreamURLs := common.UpstreamAddresses(c)
+	logger.LogError(c, common.LogText("channel error (channel #%d, status code: %d, original status code: %d): %s", channelError.ChannelId, err.StatusCode, err.GetOriginalStatusCode(), common.LocalLogPreview(err.MaskSensitiveErrorWithStatusCode(upstreamURLs...))))
 	if ShouldDisableChannel(err) && channelError.AutoBan {
-		reason := err.MaskSensitiveErrorWithStatusCode()
+		reason := err.MaskSensitiveErrorWithStatusCode(upstreamURLs...)
 		gopool.Go(func() {
 			DisableChannel(channelError, reason)
 		})
@@ -97,7 +96,7 @@ func ProcessChannelError(c *gin.Context, channelError types.ChannelError, err *t
 			startTime = time.Now()
 		}
 		useTimeSeconds := int(time.Since(startTime).Seconds())
-		logContent := FormatErrorLogWithStatusCodeResponseMapping(err, statusCodeResponseMapping)
+		logContent := FormatErrorLogWithStatusCodeResponseMapping(err, statusCodeResponseMapping, upstreamURLs...)
 		model.RecordErrorLog(c, userId, channelError.ChannelId, modelName, tokenName, logContent, tokenId, useTimeSeconds, common.GetContextKeyBool(c, constant.ContextKeyIsStream), userGroup, other)
 	}
 }
