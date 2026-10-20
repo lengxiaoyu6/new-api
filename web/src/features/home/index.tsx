@@ -26,14 +26,10 @@ import { useTheme } from '@/context/theme-provider'
 import { isLikelyHtml } from '@/lib/content-format'
 import { useAuthStore } from '@/stores/auth-store'
 
-import {
-  CTA,
-  Features,
-  Hero,
-  HomeNoticeDialog,
-  HowItWorks,
-  Stats,
-} from './components'
+import '@/styles/gateway-home.css'
+
+import { GatewayLanding } from './components/gateway-landing'
+import { HomeNoticeDialog } from './components/home-notice-dialog'
 import { useHomePageContent } from './hooks'
 
 export function Home() {
@@ -137,16 +133,12 @@ export function Home() {
   }
 
   return (
-    <>
+    <div className='gateway-home'>
       <HomeNoticeDialog />
       <PublicLayout showMainContainer={false}>
-        <Hero isAuthenticated={isAuthenticated} />
-        <Stats />
-        <Features />
-        <HowItWorks />
-        <CTA isAuthenticated={isAuthenticated} />
+        <GatewayLanding isAuthenticated={isAuthenticated} />
         <Footer />
       </PublicLayout>
-    </>
+    </div>
   )
 }

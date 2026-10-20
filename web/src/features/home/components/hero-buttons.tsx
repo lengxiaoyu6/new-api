@@ -24,16 +24,17 @@ import { Button } from '@/components/ui/button'
 
 interface HeroButtonsProps {
   isAuthenticated: boolean
+  secondaryAction?: 'sign-in' | 'pricing'
 }
 
 /**
  * Hero section action buttons
  */
-export function HeroButtons({ isAuthenticated }: HeroButtonsProps) {
+export function HeroButtons(props: HeroButtonsProps) {
   const { t } = useTranslation()
-  if (isAuthenticated) {
+  if (props.isAuthenticated) {
     return (
-      <Button size='lg' render={<Link to='/dashboard' />}>
+      <Button size='lg' role='link' render={<Link to='/dashboard' />}>
         {t('Go to Dashboard')} <ArrowRight className='ml-2 h-5 w-5' />
       </Button>
     )
@@ -41,12 +42,21 @@ export function HeroButtons({ isAuthenticated }: HeroButtonsProps) {
 
   return (
     <>
-      <Button size='lg' render={<Link to='/sign-up' />}>
+      <Button size='lg' role='link' render={<Link to='/sign-up' />}>
         {t('Get Started')}
         <ArrowRight className='ml-2 h-5 w-5' />
       </Button>
-      <Button size='lg' variant='outline' render={<Link to='/sign-in' />}>
-        {t('Sign In')}
+      <Button
+        size='lg'
+        variant='outline'
+        role='link'
+        render={
+          <Link
+            to={props.secondaryAction === 'pricing' ? '/pricing' : '/sign-in'}
+          />
+        }
+      >
+        {props.secondaryAction === 'pricing' ? t('View Pricing') : t('Sign In')}
       </Button>
     </>
   )
