@@ -39,94 +39,31 @@ import { createInstance } from 'i18next'
 import { I18nextProvider, initReactI18next } from 'react-i18next'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-import type { PricingData } from '@/features/pricing/types'
 import en from '@/i18n/locales/en.json'
 import zh from '@/i18n/locales/zh.json'
 import { api } from '@/lib/api'
 import { STATUS_QUERY_KEY, type StatusData } from '@/lib/status-query'
+import { useAuthStore } from '@/stores/auth-store'
 import {
   DEFAULT_CURRENCY_CONFIG,
   useSystemConfigStore,
 } from '@/stores/system-config-store'
 
 import { GatewayLanding } from '../components/gateway-landing'
+import type { HomeCatalog } from '../types'
 
-const catalog: PricingData = {
-  success: true,
-  data: [
-    {
-      id: 1,
-      model_name: 'gpt-example',
-      vendor_id: 1,
-      quota_type: 0,
-      model_ratio: 1.25,
-      completion_ratio: 4,
-      enable_groups: ['default', 'discount'],
-      capabilities: ['streaming', 'vision'],
-    },
-    {
-      id: 2,
-      model_name: 'claude-example',
-      vendor_id: 2,
-      quota_type: 0,
-      model_ratio: 99,
-      completion_ratio: 99,
-      billing_mode: 'tiered_expr',
-      billing_expr: 'tier("base", p * 3 + c * 15)',
-      channel_pricing: [
-        {
-          profile_key: 'model',
-          source: 'model',
-          channel_count: 1,
-          groups: ['default'],
-          billing_mode: 'tiered_expr',
-          billing_expr: 'tier("base", p * 3 + c * 15)',
-          expr_hash: 'flat',
-        },
-      ],
-      enable_groups: ['default'],
-      capabilities: ['reasoning', 'function_calling'],
-    },
-    {
-      id: 3,
-      model_name: 'free-example',
-      vendor_id: 1,
-      quota_type: 0,
-      model_ratio: 0,
-      completion_ratio: 1,
-      enable_groups: ['default'],
-    },
-    {
-      id: 4,
-      model_name: 'image-example',
-      vendor_id: 2,
-      quota_type: 1,
-      model_ratio: 0,
-      model_price: 0.04,
-      completion_ratio: 0,
-      enable_groups: ['default'],
-    },
-    {
-      id: 5,
-      model_name: 'tiered-example',
-      vendor_id: 2,
-      quota_type: 0,
-      model_ratio: 99,
-      completion_ratio: 99,
-      billing_mode: 'tiered_expr',
-      billing_expr:
-        'len <= 200000 ? tier("standard", p * 3 + c * 15) : tier("long", p * 6 + c * 30)',
-      enable_groups: ['default'],
-    },
+const catalog: HomeCatalog = {
+  models: [
+    { model_name: 'gpt-example', icon: 'OpenAI' },
+    { model_name: 'claude-example', icon: 'Anthropic' },
+    { model_name: 'free-example', icon: 'OpenAI' },
+    { model_name: 'image-example', icon: 'Anthropic' },
+    { model_name: 'tiered-example', icon: 'Anthropic' },
   ],
   vendors: [
-    { id: 1, name: 'OpenAI' },
-    { id: 2, name: 'Anthropic' },
+    { id: 1, name: 'OpenAI', icon: 'OpenAI' },
+    { id: 2, name: 'Anthropic', icon: 'Anthropic' },
   ],
-  group_ratio: { default: 1, discount: 0.5 },
-  usable_group: {},
-  supported_endpoint: {},
-  auto_groups: [],
 }
 
 const initialConfig = useSystemConfigStore.getState()
@@ -134,6 +71,7 @@ const clients: QueryClient[] = []
 
 beforeEach(() => {
   localStorage.clear()
+  useAuthStore.getState().auth.reset()
   useSystemConfigStore.getState().setConfig({
     systemName: 'Example Gateway',
     logo: '',
@@ -145,6 +83,7 @@ afterEach(() => {
   cleanup()
   for (const client of clients) client.clear()
   clients.length = 0
+  useAuthStore.getState().auth.reset()
   useSystemConfigStore.setState(initialConfig)
   localStorage.clear()
 })
@@ -152,23 +91,25 @@ afterEach(() => {
 async function renderLanding(
   options: {
     isAuthenticated?: boolean
-    status?: StatusData
-    pricing?: PricingData | null
+    status?: StatusData | null
+    catalog?: HomeCatalog | null
   } = {}
 ) {
   const client = new QueryClient({
-    defaultOptions: { queries: { enabled: false, retry: false } },
+    defaultOptions: {
+      queries: { enabled: options.status === null, retry: false },
+    },
   })
   clients.push(client)
-  client.setQueryData(
-    STATUS_QUERY_KEY,
-    options.status ?? {
+  if (options.status !== null) {
+    client.setQueryData(STATUS_QUERY_KEY, {
       docs_link: 'https://docs.example.com/start',
       server_address: 'https://api.example.com/gateway/v1/',
-    }
-  )
-  if (options.pricing !== null) {
-    client.setQueryData(['pricing'], options.pricing ?? catalog)
+      ...(options.catalog !== null && {
+        home_catalog: options.catalog ?? catalog,
+      }),
+      ...options.status,
+    })
   }
   const i18n = createInstance()
   await i18n.use(initReactI18next).init({
@@ -233,6 +174,80 @@ it('shows configured branding and account actions without a starting price or do
     within(hero).getByRole('link', { name: 'Explore models' })
   ).toHaveAttribute('href', '/pricing')
 })
+
+it('shows the public homepage summary immediately without requesting the full pricing catalog', async () => {
+  const get = vi
+    .spyOn(api, 'get')
+    .mockImplementation(() => new Promise(() => {}))
+  await renderLanding({
+    catalog: null,
+    status: {
+      home_catalog: {
+        models: [{ model_name: 'gpt-summary', icon: 'OpenAI' }],
+        vendors: [{ id: 1, name: 'OpenAI', icon: 'OpenAI' }],
+      },
+    },
+  })
+
+  expect(
+    within(screen.getByRole('region', { name: 'Model network' })).getByRole(
+      'link',
+      { name: 'OpenAI' }
+    )
+  ).toBeVisible()
+  expect(
+    within(screen.getByRole('region', { name: 'Model ticker' })).getAllByText(
+      'gpt-summary'
+    )[0]
+  ).toBeVisible()
+  expect(get).not.toHaveBeenCalled()
+})
+
+it.each([false, true])(
+  'renders every unique full model name once from the complete catalog, authenticated: %s',
+  async (isAuthenticated) => {
+    const models = [
+      ...Array.from({ length: 16 }, (_, index) => ({
+        model_name: `catalog-model-${index}`,
+      })),
+      { model_name: 'deepseek-v4-flash' },
+      { model_name: 'deepseek-v4.1-flash' },
+    ]
+    const fullCatalog = {
+      models: [...models, models[16], models[17]],
+      vendors: catalog.vendors,
+    }
+    const get = vi
+      .spyOn(api, 'get')
+      .mockResolvedValue({ data: { success: true, data: fullCatalog } })
+    await renderLanding({
+      isAuthenticated,
+      catalog: isAuthenticated ? null : fullCatalog,
+      status: {
+        HeaderNavModules: {
+          pricing: { enabled: true, requireAuth: isAuthenticated },
+        },
+      },
+    })
+
+    const ticker = await screen.findByRole('region', { name: 'Model ticker' })
+    await waitFor(() =>
+      expect(within(ticker).getAllByRole('listitem')).toHaveLength(
+        models.length
+      )
+    )
+    for (const list of within(ticker).getAllByRole('list', { hidden: true })) {
+      for (const model of models) {
+        expect(
+          within(list).getAllByText(model.model_name, { exact: true })
+        ).toHaveLength(1)
+      }
+    }
+    expect(get.mock.calls.map(([url]) => url)).toEqual(
+      isAuthenticated ? ['/api/home/catalog'] : []
+    )
+  }
+)
 
 it('omits the homepage model price cards while retaining the ticker and onboarding section', async () => {
   await renderLanding()
@@ -459,7 +474,9 @@ it.each(['pointer', 'keyboard'])(
 )
 
 it('shows only the configured provider when the catalog contains a single provider', async () => {
-  await renderLanding({ pricing: { ...catalog, data: [catalog.data[2]] } })
+  await renderLanding({
+    catalog: { models: [catalog.models[2]], vendors: [catalog.vendors[0]] },
+  })
   const network = screen.getByRole('region', { name: 'Model network' })
   expect(within(network).getByRole('link', { name: 'OpenAI' })).toBeVisible()
   expect(
@@ -478,13 +495,10 @@ it('reserves extra diagram height when eight configured providers need space aro
       name: `Provider ${index + 1}`,
     }))
     await renderLanding({
-      pricing: {
+      catalog: {
         ...catalog,
         vendors,
-        data: vendors.map((vendor) => ({
-          ...catalog.data[0],
-          id: vendor.id,
-          vendor_id: vendor.id,
+        models: vendors.map((vendor) => ({
           model_name: `model-${vendor.id}`,
         })),
       },
@@ -499,7 +513,7 @@ it('reserves extra diagram height when eight configured providers need space aro
   }
 })
 
-it('shows model icons and names for every billing type without prices or token units in the ticker', async () => {
+it('shows model icons and names from the summary without prices or token units in the ticker', async () => {
   await renderLanding()
   const ticker = screen.getByRole('region', { name: 'Model ticker' })
   const items = within(ticker).getAllByRole('listitem')
@@ -526,9 +540,9 @@ it('shows model icons and names for every billing type without prices or token u
 it('retains the full accessible provider name when its visible diagram label is shortened', async () => {
   const providerName = `Example ${'long-provider-name-'.repeat(15)}`
   await renderLanding({
-    pricing: {
+    catalog: {
       ...catalog,
-      data: [catalog.data[0]],
+      models: [catalog.models[0]],
       vendors: [{ id: 1, name: providerName }],
     },
   })
@@ -545,6 +559,7 @@ it('allows the model strip to shrink while reserving space for its pause control
   try {
     await renderLanding()
     const ticker = screen.getByRole('region', { name: 'Model ticker' })
+    expect(getComputedStyle(ticker).minHeight).toBe('68px')
     const strip = ticker.querySelector('.gateway-ticker-window')
     if (!strip) throw new Error('The model strip is missing')
     expect(getComputedStyle(strip).minWidth).toBe('0px')
@@ -573,7 +588,7 @@ it('pauses and resumes the model ticker with an accessible control', async () =>
 })
 
 it('keeps the homepage actions available without provider links or a model ticker when the catalog is empty', async () => {
-  await renderLanding({ pricing: { ...catalog, data: [], vendors: [] } })
+  await renderLanding({ catalog: { models: [], vendors: [] } })
   const network = screen.getByRole('region', { name: 'Model network' })
   expect(within(network).queryByRole('link')).not.toBeInTheDocument()
   expect(
@@ -591,33 +606,64 @@ it('keeps the homepage actions available without provider links or a model ticke
   ).not.toBeInTheDocument()
 })
 
-it('shows provider links and the model ticker only after the catalog data arrives', async () => {
-  let complete: (value: { data: PricingData }) => void = () => {}
-  const request = new Promise<{ data: PricingData }>((resolve) => {
+it('reserves the provider and ticker areas while the first status response is pending', async () => {
+  let complete!: (value: { data: unknown }) => void
+  const request = new Promise<{ data: unknown }>((resolve) => {
     complete = resolve
   })
-  vi.spyOn(api, 'get').mockReturnValue(request)
-  await renderLanding({ pricing: null })
+  const get = vi.spyOn(api, 'get').mockReturnValue(request)
+  await renderLanding({ status: null })
   const network = screen.getByRole('region', { name: 'Model network' })
+  const ticker = screen.getByRole('region', { name: 'Model ticker' })
+  expect(network).toHaveAttribute('aria-busy', 'true')
+  expect(ticker).toHaveAttribute('aria-busy', 'true')
   expect(within(network).queryByRole('link')).not.toBeInTheDocument()
-  expect(
-    screen.queryByRole('region', { name: 'Model ticker' })
-  ).not.toBeInTheDocument()
+  expect(within(ticker).queryByRole('button')).not.toBeInTheDocument()
+  expect(network.querySelector('[data-slot="skeleton"]')).toBeInTheDocument()
+  expect(ticker.querySelector('[data-slot="skeleton"]')).toBeInTheDocument()
   await act(async () => {
-    complete({ data: catalog })
+    complete({ data: { success: true, data: { home_catalog: catalog } } })
   })
   expect(
     await within(network).findByRole('link', { name: 'OpenAI' })
-  ).toHaveAttribute('href', '/pricing?vendor=OpenAI')
-  expect(screen.getByRole('region', { name: 'Model ticker' })).toBeVisible()
+  ).toBeVisible()
+  expect(ticker).toHaveAttribute('aria-busy', 'false')
+  expect(
+    within(ticker).getByRole('button', { name: 'Pause model ticker' })
+  ).toBeVisible()
+  expect(get.mock.calls.map(([url]) => url)).toEqual(['/api/status'])
 })
 
-it('keeps homepage navigation available when loading the catalog fails', async () => {
-  vi.spyOn(api, 'get').mockRejectedValue(new Error('Offline'))
-  const { client } = await renderLanding({ pricing: null })
+it('shows the persisted public summary during a reload and replaces it after background refresh', async () => {
+  localStorage.setItem('status', JSON.stringify({ home_catalog: catalog }))
+  let complete!: (value: { data: unknown }) => void
+  const request = new Promise<{ data: unknown }>((resolve) => {
+    complete = resolve
+  })
+  vi.spyOn(api, 'get').mockReturnValue(request)
+  await renderLanding({ status: null })
+  const ticker = screen.getByRole('region', { name: 'Model ticker' })
+  expect(within(ticker).getAllByText('gpt-example')[0]).toBeVisible()
+  expect(ticker).not.toHaveAttribute('aria-busy', 'true')
+  await act(async () => {
+    complete({
+      data: {
+        success: true,
+        data: {
+          home_catalog: { models: [{ model_name: 'new-model' }], vendors: [] },
+        },
+      },
+    })
+  })
+  expect((await within(ticker).findAllByText('new-model'))[0]).toBeVisible()
+  expect(within(ticker).queryByText('gpt-example')).not.toBeInTheDocument()
+})
 
+it('keeps homepage navigation available when the first status request fails', async () => {
+  vi.spyOn(api, 'get').mockRejectedValue(new Error('Offline'))
+  const { client } = await renderLanding({ status: null })
   await waitFor(() =>
-    expect(client.getQueryState(['pricing'])?.status).toBe('error')
+    expect(client.getQueryState(STATUS_QUERY_KEY)?.status).toBe('error')
   )
   expect(
     within(screen.getByRole('region', { name: 'Model network' })).queryByRole(
@@ -633,11 +679,119 @@ it('keeps homepage navigation available when loading the catalog fails', async (
   )
 })
 
+it('loads an authenticated summary from the lightweight endpoint without persisting it', async () => {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 7, username: 'member', role: 10, group: 'vip' })
+  const get = vi
+    .spyOn(api, 'get')
+    .mockResolvedValue({ data: { success: true, data: catalog } })
+  await renderLanding({
+    isAuthenticated: true,
+    catalog: null,
+    status: {
+      HeaderNavModules: { pricing: { enabled: true, requireAuth: true } },
+    },
+  })
+  expect(await screen.findByRole('link', { name: 'OpenAI' })).toBeVisible()
+  expect(
+    screen.getByRole('region', { name: 'Model ticker' })
+  ).toHaveTextContent('gpt-example')
+  expect(get.mock.calls.map(([url]) => url)).toEqual(['/api/home/catalog'])
+  expect(localStorage.getItem('status')).toBeNull()
+})
+
+it('keeps homepage navigation available without falling back to public data when the authenticated summary fails', async () => {
+  useAuthStore.getState().auth.setUser({
+    id: 7,
+    username: 'member',
+    role: 10,
+    group: 'vip',
+  })
+  vi.spyOn(api, 'get').mockRejectedValue(new Error('Catalog access denied'))
+  const { client } = await renderLanding({
+    isAuthenticated: true,
+    status: {
+      HeaderNavModules: { pricing: { enabled: true, requireAuth: true } },
+    },
+  })
+  await waitFor(() =>
+    expect(
+      client.getQueryState(['home-catalog', 7, 'vip', undefined])?.status
+    ).toBe('error')
+  )
+  expect(screen.queryByRole('link', { name: 'OpenAI' })).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('region', { name: 'Model ticker' })
+  ).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Explore models' })).toHaveAttribute(
+    'href',
+    '/pricing'
+  )
+})
+
+it('ignores malformed summary data while retaining the homepage actions', async () => {
+  await renderLanding({
+    status: { home_catalog: { models: 'invalid', vendors: null } },
+  })
+  expect(screen.queryByRole('link', { name: 'OpenAI' })).not.toBeInTheDocument()
+  expect(
+    screen.queryByRole('region', { name: 'Model ticker' })
+  ).not.toBeInTheDocument()
+  expect(screen.getByRole('link', { name: 'Explore models' })).toHaveAttribute(
+    'href',
+    '/pricing'
+  )
+})
+
+it('hides the previous account summary while a different account summary is loading', async () => {
+  useAuthStore
+    .getState()
+    .auth.setUser({ id: 7, username: 'member', role: 10, group: 'vip' })
+  const get = vi
+    .spyOn(api, 'get')
+    .mockResolvedValueOnce({ data: { success: true, data: catalog } })
+  let complete!: (value: { data: unknown }) => void
+  get.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        complete = resolve
+      })
+  )
+  await renderLanding({
+    isAuthenticated: true,
+    catalog: null,
+    status: {
+      HeaderNavModules: { pricing: { enabled: true, requireAuth: true } },
+    },
+  })
+  expect(await screen.findByRole('link', { name: 'OpenAI' })).toBeVisible()
+  act(() => {
+    useAuthStore
+      .getState()
+      .auth.setUser({ id: 8, username: 'other', role: 10, group: 'default' })
+  })
+  await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+  const ticker = screen.getByRole('region', { name: 'Model ticker' })
+  expect(ticker).toHaveAttribute('aria-busy', 'true')
+  expect(screen.queryByRole('link', { name: 'OpenAI' })).not.toBeInTheDocument()
+  expect(within(ticker).queryByText('gpt-example')).not.toBeInTheDocument()
+  await act(async () => {
+    complete({
+      data: {
+        success: true,
+        data: { models: [{ model_name: 'other-model' }], vendors: [] },
+      },
+    })
+  })
+  expect((await within(ticker).findAllByText('other-model'))[0]).toBeVisible()
+})
+
 it.each([
   { enabled: true, requireAuth: true },
   { enabled: false, requireAuth: false },
 ])(
-  'keeps cached pricing private and avoids fetching when catalog access is restricted: %j',
+  'keeps the cached public summary hidden and avoids fetching when catalog access is restricted: %j',
   async (pricingAccess) => {
     const get = vi.spyOn(api, 'get')
     await renderLanding({

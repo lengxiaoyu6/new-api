@@ -110,6 +110,7 @@ func main() {
 	// Warm pricing after channel cache initialization so Advanced Custom
 	// endpoint inference can read cached route settings on first request.
 	model.GetPricing()
+	go model.SyncHomeCatalog()
 
 	// 热更新配置
 	go model.SyncOptions(common.SyncFrequency)

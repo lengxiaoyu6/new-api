@@ -20,11 +20,10 @@ import { Link } from '@tanstack/react-router'
 import { ArrowUpRight, Sparkles } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { usePricingData } from '@/features/pricing/hooks/use-pricing-data'
 import { useStatus } from '@/hooks/use-status'
 import { useSystemConfig } from '@/hooks/use-system-config'
-import { parseHeaderNavModulesFromStatus } from '@/lib/nav-modules'
 
+import { useHomeCatalog } from '../hooks/use-home-catalog'
 import { GatewayModelNetwork } from './gateway-model-network'
 import { GatewaySections } from './gateway-sections'
 import { GatewayTicker } from './gateway-ticker'
@@ -34,13 +33,7 @@ export function GatewayLanding(props: { isAuthenticated: boolean }) {
   const { t } = useTranslation()
   const { systemName, logo } = useSystemConfig()
   const { status } = useStatus()
-  const access = parseHeaderNavModulesFromStatus(status).pricing
-  const restricted = access.requireAuth && !props.isAuthenticated
-  const pricing = usePricingData(access.enabled && !restricted)
-  const models = access.enabled && !restricted ? pricing.models : []
-  const vendors = pricing.vendors.filter((vendor) =>
-    models.some((model) => model.vendor_id === vendor.id)
-  )
+  const catalog = useHomeCatalog(props.isAuthenticated)
   const serverAddress =
     (typeof status?.server_address === 'string' &&
       status.server_address.trim()) ||
@@ -75,7 +68,8 @@ export function GatewayLanding(props: { isAuthenticated: boolean }) {
           </div>
           <div className='gateway-entrance gateway-entrance-delayed min-w-0'>
             <GatewayModelNetwork
-              vendors={vendors}
+              vendors={catalog.vendors}
+              loading={catalog.loading}
               systemName={systemName}
               logo={logo}
             />
@@ -86,7 +80,7 @@ export function GatewayLanding(props: { isAuthenticated: boolean }) {
           {t('Explore models')}
         </Link>
       </section>
-      <GatewayTicker models={models} />
+      <GatewayTicker models={catalog.models} loading={catalog.loading} />
       <GatewaySections
         isAuthenticated={props.isAuthenticated}
         baseUrl={baseUrl}

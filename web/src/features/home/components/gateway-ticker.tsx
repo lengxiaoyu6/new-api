@@ -17,40 +17,127 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { Pause, Play } from 'lucide-react'
-import { useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import type { PricingModel } from '@/features/pricing/types'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
-export function GatewayTicker(props: { models: PricingModel[] }) {
+import type { HomeCatalogModel } from '../types'
+
+export function GatewayTicker(props: {
+  models: HomeCatalogModel[]
+  loading?: boolean
+}) {
   const { t } = useTranslation()
   const [paused, setPaused] = useState(false)
-  if (props.models.length === 0) return null
+  const windowRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
+  const models = useMemo(() => {
+    const seen = new Set<string>()
+    return props.models.filter((model) => {
+      if (seen.has(model.model_name)) return false
+      seen.add(model.model_name)
+      return true
+    })
+  }, [props.models])
+
+  useLayoutEffect(() => {
+    const viewport = windowRef.current
+    const list = listRef.current
+    if (!viewport || !list || props.loading) return
+
+    const measure = () => {
+      const items = [...list.querySelectorAll('li')].map((item) => ({
+        item,
+        offset: item.offsetLeft,
+        width: item.getBoundingClientRect().width,
+      }))
+      if (items.length === 0) return
+      const widest = Math.max(...items.map((item) => item.width))
+      const cycleWidth = Math.max(
+        list.getBoundingClientRect().width,
+        viewport.getBoundingClientRect().width + widest
+      )
+      if (cycleWidth <= 0) return
+
+      // Each chip wraps outside the viewport; no second copy is rendered.
+      list.style.setProperty('--gateway-ticker-cycle-width', `${cycleWidth}px`)
+      list.style.setProperty('--gateway-ticker-duration', `${cycleWidth / 32}s`)
+      for (const entry of items) {
+        entry.item.style.setProperty(
+          '--gateway-ticker-item-offset',
+          `${entry.offset}px`
+        )
+        entry.item.style.setProperty(
+          '--gateway-ticker-item-width',
+          `${entry.width}px`
+        )
+        entry.item.style.setProperty(
+          '--gateway-ticker-item-delay',
+          `${-(cycleWidth - entry.offset - entry.width) / 32}s`
+        )
+      }
+      list.dataset.ready = 'true'
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(viewport)
+    observer.observe(list)
+    return () => observer.disconnect()
+  }, [models, props.loading])
+
+  if (props.loading) {
+    return (
+      <section
+        className='gateway-ticker'
+        aria-label={t('Model ticker')}
+        aria-busy='true'
+      >
+        <div className='gateway-ticker-window' aria-hidden='true'>
+          <div className='flex w-max gap-3'>
+            {Array.from({ length: 8 }, (_, index) => (
+              <Skeleton
+                key={index}
+                className='h-8 w-36 rounded-full motion-reduce:animate-none'
+              />
+            ))}
+          </div>
+        </div>
+        <Skeleton
+          className='mr-2 size-8 shrink-0 motion-reduce:animate-none'
+          aria-hidden='true'
+        />
+      </section>
+    )
+  }
+  if (models.length === 0) return null
 
   return (
-    <section className='gateway-ticker' aria-label={t('Model ticker')}>
-      <div className='gateway-ticker-window' data-paused={paused}>
+    <section
+      className='gateway-ticker'
+      aria-label={t('Model ticker')}
+      aria-busy={false}
+    >
+      <div
+        ref={windowRef}
+        className='gateway-ticker-window'
+        data-paused={paused}
+      >
         <div className='gateway-ticker-track'>
-          {[false, true].map((duplicate) => (
-            <ul
-              key={String(duplicate)}
-              className='gateway-ticker-list'
-              aria-hidden={duplicate || undefined}
-            >
-              {props.models.slice(0, 12).map((model) => (
-                <li key={model.model_name} className='gateway-ticker-chip'>
-                  <span aria-hidden='true'>
-                    {getLobeIcon(model.icon || model.vendor_icon || '', 14)}
-                  </span>
-                  <span className='max-w-52 truncate font-mono text-[11px]'>
-                    {model.model_name}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          ))}
+          <ul ref={listRef} className='gateway-ticker-list'>
+            {models.map((model) => (
+              <li key={model.model_name} className='gateway-ticker-chip'>
+                <span aria-hidden='true'>
+                  {getLobeIcon(model.icon || '', 14)}
+                </span>
+                <span className='font-mono text-[11px] whitespace-nowrap'>
+                  {model.model_name}
+                </span>
+              </li>
+            ))}
+          </ul>
         </div>
       </div>
       <Button

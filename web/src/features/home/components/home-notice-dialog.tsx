@@ -16,15 +16,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useState } from 'react'
-import { Bell, Megaphone } from 'lucide-react'
-import { useTranslation } from 'react-i18next'
 import { useQuery } from '@tanstack/react-query'
-import { getNotice } from '@/lib/api'
-import { getAnnouncementColorClass } from '@/lib/colors'
-import { formatDateTimeObject } from '@/lib/time'
-import { cn } from '@/lib/utils'
-import { Markdown } from '@/components/ui/markdown'
+import { Bell, Megaphone } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -34,16 +30,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { ScrollArea } from '@/components/ui/scroll-area'
-import { Separator } from '@/components/ui/separator'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Empty,
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty'
+import { Markdown } from '@/components/ui/markdown'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useStatus } from '@/hooks/use-status'
+import { getNotice } from '@/lib/api'
+import { getAnnouncementColorClass } from '@/lib/colors'
+import { formatDateTimeObject } from '@/lib/time'
+import { cn } from '@/lib/utils'
 
 interface AnnouncementItem {
   type?: string
@@ -87,31 +86,39 @@ export function HomeNoticeDialog() {
 
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
-      <AlertDialogContent size='default' className='!max-w-(--container-xl) !grid-rows-[auto_1fr_auto] max-h-[85vh]'>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{t('System Announcements')}</AlertDialogTitle>
-          <AlertDialogDescription className='sr-only'>
+      <AlertDialogContent className='gateway-home gateway-notice'>
+        <AlertDialogHeader className='gateway-notice-header'>
+          <AlertDialogTitle className='gateway-notice-title'>
+            <span className='gateway-notice-icon' aria-hidden='true'>
+              <Bell className='size-5' />
+            </span>
+            {t('System Announcements')}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
             {t('Latest platform updates and notices')}
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <Tabs defaultValue={defaultTab} className='flex min-h-0 flex-col overflow-hidden'>
-          <TabsList className='grid w-full shrink-0 grid-cols-2'>
-            <TabsTrigger value='notice' className='gap-1.5' disabled={!hasNotice}>
-              <Bell className='size-3.5' />
+        <Tabs defaultValue={defaultTab} className='gateway-notice-tabs'>
+          <TabsList
+            className='gateway-notice-tab-list'
+            aria-label={t('System Announcements')}
+          >
+            <TabsTrigger value='notice' disabled={!hasNotice}>
+              <Bell className='size-3.5' aria-hidden='true' />
               {t('Notice')}
             </TabsTrigger>
-            <TabsTrigger value='announcements' className='gap-1.5' disabled={!hasAnnouncements}>
-              <Megaphone className='size-3.5' />
+            <TabsTrigger value='announcements' disabled={!hasAnnouncements}>
+              <Megaphone className='size-3.5' aria-hidden='true' />
               {t('Timeline')}
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value='notice' className='mt-2 min-h-0 flex-1'>
+          <TabsContent value='notice' className='gateway-notice-panel'>
             {hasNotice ? (
-              <ScrollArea className='h-full pr-3'>
+              <div className='gateway-notice-copy'>
                 <Markdown>{noticeContent}</Markdown>
-              </ScrollArea>
+              </div>
             ) : (
               <Empty className='min-h-32 border-0 p-4'>
                 <EmptyHeader>
@@ -124,51 +131,51 @@ export function HomeNoticeDialog() {
             )}
           </TabsContent>
 
-          <TabsContent value='announcements' className='mt-2 min-h-0 flex-1'>
+          <TabsContent value='announcements' className='gateway-notice-panel'>
             {hasAnnouncements ? (
-              <ScrollArea className='h-full pr-3'>
-                <div className='flex flex-col'>
-                  {announcements.map((item, idx) => {
-                    const publishDate = item.publishDate
-                      ? new Date(item.publishDate)
-                      : null
-                    const absoluteTime = publishDate
-                      ? formatDateTimeObject(publishDate)
-                      : ''
+              <ol className='gateway-notice-timeline'>
+                {announcements.map((item) => {
+                  const publishDate = item.publishDate
+                    ? new Date(item.publishDate)
+                    : null
+                  const absoluteTime = publishDate
+                    ? formatDateTimeObject(publishDate)
+                    : ''
 
-                    return (
-                      <div key={idx}>
-                        <div className='py-2.5'>
-                          <div className='flex items-start gap-3'>
-                            <span
-                              className={cn(
-                                'mt-1.5 inline-block size-2 shrink-0 rounded-full',
-                                getAnnouncementColorClass(item.type)
-                              )}
-                            />
-                            <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
-                              <div className='text-sm'>
-                                <Markdown>{item.content || ''}</Markdown>
-                              </div>
-                              {item.extra ? (
-                                <div className='text-muted-foreground text-xs'>
-                                  <Markdown>{item.extra}</Markdown>
-                                </div>
-                              ) : null}
-                              {absoluteTime ? (
-                                <div className='text-muted-foreground text-xs'>
-                                  {absoluteTime}
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
+                  return (
+                    <li
+                      key={`${item.publishDate}-${item.type}-${item.content}-${item.extra}`}
+                      className='gateway-notice-item'
+                    >
+                      <span
+                        aria-hidden='true'
+                        className={cn(
+                          'gateway-notice-dot',
+                          getAnnouncementColorClass(item.type)
+                        )}
+                      />
+                      <div className='flex min-w-0 flex-1 flex-col gap-1.5'>
+                        <div className='text-sm'>
+                          <Markdown>{item.content || ''}</Markdown>
                         </div>
-                        {idx < announcements.length - 1 ? <Separator /> : null}
+                        {item.extra ? (
+                          <div className='text-muted-foreground text-xs'>
+                            <Markdown>{item.extra}</Markdown>
+                          </div>
+                        ) : null}
+                        {absoluteTime ? (
+                          <time
+                            dateTime={item.publishDate}
+                            className='text-muted-foreground text-xs'
+                          >
+                            {absoluteTime}
+                          </time>
+                        ) : null}
                       </div>
-                    )
-                  })}
-                </div>
-              </ScrollArea>
+                    </li>
+                  )
+                })}
+              </ol>
             ) : (
               <Empty className='min-h-32 border-0 p-4'>
                 <EmptyHeader>
@@ -182,8 +189,8 @@ export function HomeNoticeDialog() {
           </TabsContent>
         </Tabs>
 
-        <AlertDialogFooter>
-          <AlertDialogCancel>{t('Close')}</AlertDialogCancel>
+        <AlertDialogFooter className='gateway-notice-footer'>
+          <AlertDialogCancel variant='default'>{t('Close')}</AlertDialogCancel>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

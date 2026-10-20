@@ -16,6 +16,28 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+export interface HomeCatalogModel {
+  model_name: string
+  icon?: string
+}
+
+export interface HomeCatalogVendor {
+  id: number
+  name: string
+  icon?: string
+}
+
+export interface HomeCatalog {
+  models: HomeCatalogModel[]
+  vendors: HomeCatalogVendor[]
+}
+
+export interface HomeCatalogResponse {
+  success: boolean
+  message?: string
+  data: HomeCatalog
+}
+
 // ============================================================================
 // Home Page Types
 // ============================================================================

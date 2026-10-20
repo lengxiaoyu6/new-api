@@ -22,11 +22,14 @@ import type { CSSProperties } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
-import type { PricingVendor } from '@/features/pricing/types'
+import { Skeleton } from '@/components/ui/skeleton'
 import { getLobeIcon } from '@/lib/lobe-icon'
 
+import type { HomeCatalogVendor } from '../types'
+
 interface GatewayModelNetworkProps {
-  vendors: PricingVendor[]
+  vendors: HomeCatalogVendor[]
+  loading?: boolean
   systemName: string
   logo: string
 }
@@ -45,7 +48,11 @@ export function GatewayModelNetwork(props: GatewayModelNetworkProps) {
     }
   })
   return (
-    <section className='gateway-network' aria-label={t('Model network')}>
+    <section
+      className='gateway-network'
+      aria-label={t('Model network')}
+      aria-busy={props.loading}
+    >
       <div className='gateway-network-map'>
         <div className='gateway-network-orbit' aria-hidden='true' />
         <svg
@@ -80,6 +87,29 @@ export function GatewayModelNetwork(props: GatewayModelNetworkProps) {
           <span title={props.systemName}>{props.systemName}</span>
           <small>{t('One API')}</small>
         </div>
+        {props.loading && (
+          <ul className='gateway-network-nodes' aria-hidden='true'>
+            {Array.from({ length: 8 }, (_, index) => {
+              const angle = (index / 8) * Math.PI * 2 - Math.PI * 0.75
+              return (
+                <li
+                  key={index}
+                  style={
+                    {
+                      '--node-x': `${50 + Math.cos(angle) * 34}%`,
+                      '--node-y': `${48 + Math.sin(angle) * 34}%`,
+                    } as CSSProperties
+                  }
+                >
+                  <div className='gateway-network-node'>
+                    <Skeleton className='size-[46px] rounded-[14px] motion-reduce:animate-none' />
+                    <Skeleton className='h-3 w-14 motion-reduce:animate-none' />
+                  </div>
+                </li>
+              )
+            })}
+          </ul>
+        )}
         {nodes.length > 0 && (
           <ul aria-label={t('Vendors')} className='gateway-network-nodes'>
             {nodes.map((node) => (

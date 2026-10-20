@@ -24,6 +24,16 @@ func getHeaderNavAccess(module string) headerNavAccess {
 	raw := common.OptionMap["HeaderNavModules"]
 	common.OptionMapRWMutex.RUnlock()
 
+	return parseHeaderNavConfigAccess(raw, module, fallback)
+}
+
+// IsHeaderNavModulePublic evaluates the same config snapshot exposed by /api/status.
+func IsHeaderNavModulePublic(module, raw string) bool {
+	access := parseHeaderNavConfigAccess(raw, module, headerNavAccess{Enabled: true})
+	return access.Enabled && !access.RequireAuth
+}
+
+func parseHeaderNavConfigAccess(raw, module string, fallback headerNavAccess) headerNavAccess {
 	if strings.TrimSpace(raw) == "" {
 		return fallback
 	}

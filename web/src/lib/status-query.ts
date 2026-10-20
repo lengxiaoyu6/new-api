@@ -31,9 +31,9 @@ import {
 /**
  * Single source of truth for `/api/status`.
  *
- * `/api/status` is entirely global on the backend: every field is read from
- * in-memory option maps under a read lock, with no user context and no auth
- * middleware on the route. That makes it safe to share one cache entry across
+ * `/api/status` is entirely global on the backend: configuration and public
+ * model names/icons, with no user context and no auth middleware on the
+ * route. That makes it safe to share one cache entry across
  * every consumer — branding, nav module gates, and the setup guard.
  *
  * Anything that needs status must go through `statusQueryOptions` so React

@@ -43,7 +43,7 @@ func GetStatus(c *gin.Context) {
 	cs := console_setting.GetConsoleSetting()
 	passkeySetting := system_setting.PasskeySettingsSnapshot()
 	common.OptionMapRWMutex.RLock()
-	defer common.OptionMapRWMutex.RUnlock()
+	headerNavModules := common.OptionMap["HeaderNavModules"]
 
 	legalSetting := system_setting.GetLegalSettings()
 
@@ -105,7 +105,7 @@ func GetStatus(c *gin.Context) {
 		"faq_enabled":           cs.FAQEnabled,
 
 		// 模块管理配置
-		"HeaderNavModules":    common.OptionMap["HeaderNavModules"],
+		"HeaderNavModules":    headerNavModules,
 		"SidebarModulesAdmin": common.OptionMap["SidebarModulesAdmin"],
 
 		"oidc_enabled":                system_setting.GetOIDCSettings().Enabled,
@@ -166,6 +166,11 @@ func GetStatus(c *gin.Context) {
 			})
 		}
 		data["custom_oauth_providers"] = providersInfo
+	}
+	common.OptionMapRWMutex.RUnlock()
+
+	if middleware.IsHeaderNavModulePublic("pricing", headerNavModules) {
+		data["home_catalog"] = model.GetHomeCatalog(service.GetUserUsableGroups(""))
 	}
 
 	c.JSON(http.StatusOK, gin.H{

@@ -18,7 +18,12 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { api } from '@/lib/api'
 
-import type { HomePageContentResponse } from './types'
+import type { HomeCatalogResponse, HomePageContentResponse } from './types'
+
+export async function getHomeCatalog(): Promise<HomeCatalogResponse> {
+  const res = await api.get<HomeCatalogResponse>('/api/home/catalog')
+  return res.data
+}
 
 // ============================================================================
 // Home Page APIs

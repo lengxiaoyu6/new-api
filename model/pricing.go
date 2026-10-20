@@ -89,15 +89,13 @@ var (
 )
 
 func GetPricing() []Pricing {
+	updatePricingLock.Lock()
+	defer updatePricingLock.Unlock()
+
 	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-		updatePricingLock.Lock()
-		defer updatePricingLock.Unlock()
-		// Double check after acquiring the lock
-		if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-			modelSupportEndpointsLock.Lock()
-			defer modelSupportEndpointsLock.Unlock()
-			updatePricing()
-		}
+		modelSupportEndpointsLock.Lock()
+		defer modelSupportEndpointsLock.Unlock()
+		updatePricing()
 	}
 	return pricingMap
 }
@@ -113,10 +111,10 @@ func InvalidatePricingCache() {
 
 // GetVendors 返回当前定价接口使用到的供应商信息
 func GetVendors() []PricingVendor {
-	if time.Since(lastGetPricingTime) > time.Minute*1 || len(pricingMap) == 0 {
-		// 保证先刷新一次
-		GetPricing()
-	}
+	GetPricing()
+	updatePricingLock.Lock()
+	defer updatePricingLock.Unlock()
+
 	return vendorsList
 }
 
@@ -521,10 +519,14 @@ func updatePricing() {
 	}
 	modelEnableGroupsLock.Unlock()
 
+	publishHomeCatalog(pricingMap, vendorsList)
 	lastGetPricingTime = time.Now()
 }
 
 // GetSupportedEndpointMap 返回全局端点到路径的映射
 func GetSupportedEndpointMap() map[string]common.EndpointInfo {
+	updatePricingLock.Lock()
+	defer updatePricingLock.Unlock()
+
 	return supportedEndpointMap
 }
