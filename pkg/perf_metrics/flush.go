@@ -24,9 +24,19 @@ func flushLoop() {
 
 func flushCompletedBuckets() {
 	currentBucket := bucketStart(time.Now().Unix())
+	flushBuckets(currentBucket, false)
+}
+
+// Flush persists all in-memory metrics, including the current bucket.
+// Call this during graceful shutdown before closing the database.
+func Flush() {
+	flushBuckets(bucketStart(time.Now().Unix()), true)
+}
+
+func flushBuckets(currentBucket int64, includeCurrent bool) {
 	hotBuckets.Range(func(key, value any) bool {
 		k := key.(bucketKey)
-		if k.bucketTs >= currentBucket {
+		if !includeCurrent && k.bucketTs >= currentBucket {
 			return true
 		}
 

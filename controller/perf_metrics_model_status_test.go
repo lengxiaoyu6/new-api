@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -114,6 +116,101 @@ func modelStatusTestTime(ts int64) string {
 		return ""
 	}
 	return time.Unix(ts, 0).UTC().Format(time.RFC3339)
+}
+
+func TestGetPerfMetricsSummaryFiltersSelectedGroup(t *testing.T) {
+	for _, dialect := range []struct{ name, env string }{
+		{"sqlite", ""}, {"mysql", "TEST_PERF_MYSQL_DSN"}, {"postgres", "TEST_PERF_POSTGRES_DSN"},
+	} {
+		t.Run(dialect.name, func(t *testing.T) {
+			dsn := os.Getenv(dialect.env)
+			if dialect.env != "" && dsn == "" {
+				t.Skip("isolated test database DSN is not configured")
+			}
+			_, isolatedDSN := newAuditTestDatabase(t, dialect.name, dsn)
+			previousDB, previousLogDB := model.DB, model.LOG_DB
+			previousMain, previousLog := common.MainDatabaseType(), common.LogDatabaseType()
+			previousMaster, previousSQLite := common.IsMasterNode, common.SQLitePath
+			previousGroups := ratio_setting.GroupRatio2JSONString()
+			common.IsMasterNode = false
+			if dialect.name == "sqlite" {
+				common.SQLitePath, isolatedDSN = isolatedDSN, "local"
+			}
+			t.Setenv("SQL_DSN", isolatedDSN)
+			t.Setenv("LOG_SQL_DSN", "")
+			t.Cleanup(func() {
+				model.DB, model.LOG_DB = previousDB, previousLogDB
+				common.IsMasterNode, common.SQLitePath = previousMaster, previousSQLite
+				common.SetDatabaseTypes(previousMain, previousLog)
+				require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousGroups))
+			})
+			require.NoError(t, model.InitDB())
+			db := model.DB
+			connection, err := db.DB()
+			require.NoError(t, err)
+			t.Cleanup(func() { require.NoError(t, connection.Close()) })
+			require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+			require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"a":1,"b":1,"empty":1}`))
+			var version string
+			versionQuery := "SELECT version()"
+			if dialect.name == "sqlite" {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database version: %s", version)
+			bucketTs := time.Now().Unix()
+			bucketTs -= bucketTs % 3600
+			require.NoError(t, db.Create(&[]model.PerfMetric{
+				{ModelName: "group-model", Group: "a", BucketTs: bucketTs, RequestCount: 4, SuccessCount: 4},
+				{ModelName: "group-model", Group: "b", BucketTs: bucketTs, RequestCount: 4, SuccessCount: 1},
+				{ModelName: "group-model", Group: "inactive", BucketTs: bucketTs, RequestCount: 100},
+			}).Error)
+
+			gin.SetMode(gin.TestMode)
+			router := gin.New()
+			router.GET("/api/perf-metrics/summary", GetPerfMetricsSummary)
+			for _, tc := range []struct {
+				name  string
+				query string
+				rate  float64
+				empty bool
+			}{
+				{name: "all active groups", rate: 62.5},
+				{name: "group a", query: "&group=a", rate: 100},
+				{name: "group b", query: "&group=b", rate: 25},
+				{name: "group without requests", query: "&group=empty", empty: true},
+				{name: "inactive group", query: "&group=inactive", empty: true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					request := httptest.NewRequest(http.MethodGet, "/api/perf-metrics/summary?hours=24&recent_model=group-model"+tc.query, nil)
+					response := httptest.NewRecorder()
+					router.ServeHTTP(response, request)
+					require.Equal(t, http.StatusOK, response.Code)
+					var payload struct {
+						Success bool                         `json:"success"`
+						Data    perfmetrics.SummaryAllResult `json:"data"`
+					}
+					require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
+					require.True(t, payload.Success)
+					if tc.empty {
+						assert.Empty(t, payload.Data.Models)
+						assert.Nil(t, payload.Data.Summary)
+						assert.Empty(t, payload.Data.RecentSuccessSeries)
+						return
+					}
+					require.Len(t, payload.Data.Models, 1)
+					require.NotNil(t, payload.Data.Summary)
+					item := payload.Data.Models[0]
+					assert.Equal(t, tc.rate, item.SuccessRate)
+					assert.Equal(t, tc.rate, payload.Data.Summary.SuccessRate)
+					require.Len(t, item.RecentSuccessSeries, 1)
+					assert.Equal(t, tc.rate, item.RecentSuccessSeries[0].SuccessRate)
+					require.Len(t, payload.Data.RecentSuccessSeries["group-model"], 1)
+					assert.Equal(t, tc.rate, payload.Data.RecentSuccessSeries["group-model"][0].SuccessRate)
+				})
+			}
+		})
+	}
 }
 
 func TestGetModelStatusReturnsPublicModelMetrics(t *testing.T) {

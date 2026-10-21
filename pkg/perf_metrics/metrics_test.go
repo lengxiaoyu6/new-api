@@ -12,9 +12,11 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/glebarez/sqlite"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/gorm"
 )
 
 func TestClassifyRelayOutcome(t *testing.T) {
@@ -113,6 +115,51 @@ func TestHourlySuccessSeriesWeightsSmallerBuckets(t *testing.T) {
 func TestRecentHistoryRejectsOversizedModelLists(t *testing.T) {
 	_, err := QuerySummaryAll(24, nil, make([]string, 51)...)
 	require.EqualError(t, err, "Invalid parameters")
+}
+
+func TestFlushPersistsCurrentBucketForShutdown(t *testing.T) {
+	oldDB := model.DB
+	oldLogDB := model.LOG_DB
+	oldRedisEnabled := common.RedisEnabled
+	oldMainDatabaseType := common.MainDatabaseType()
+	db, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
+	require.NoError(t, err)
+	require.NoError(t, db.AutoMigrate(&model.PerfMetric{}))
+
+	model.DB = db
+	model.LOG_DB = db
+	common.RedisEnabled = false
+	common.SetMainDatabaseType(common.DatabaseTypeSQLite)
+	hotBuckets.Clear()
+	t.Cleanup(func() {
+		model.DB = oldDB
+		model.LOG_DB = oldLogDB
+		common.RedisEnabled = oldRedisEnabled
+		common.SetMainDatabaseType(oldMainDatabaseType)
+		hotBuckets.Clear()
+	})
+
+	Record(Sample{
+		Model:     "restart-model",
+		Group:     "default",
+		LatencyMs: 120,
+		Success:   true,
+	})
+
+	Flush()
+	hotBuckets.Clear()
+
+	var row model.PerfMetric
+	require.NoError(t, db.Where("model_name = ?", "restart-model").First(&row).Error)
+	assert.Equal(t, int64(1), row.RequestCount)
+	assert.Equal(t, int64(1), row.SuccessCount)
+	assert.Equal(t, int64(120), row.TotalLatencyMs)
+
+	result, err := Query(QueryParams{Model: "restart-model", Hours: 24})
+	require.NoError(t, err)
+	require.NotNil(t, result.Summary)
+	assert.Equal(t, int64(120), result.Summary.AvgLatencyMs)
+	assert.Equal(t, 100.0, result.Summary.SuccessRate)
 }
 
 // Terminal task sampling: success/failure counts, end-to-end latency, and
