@@ -59,6 +59,22 @@ export function useSidebarData(): SidebarData {
   return {
     navGroups: [
       {
+        id: 'chat',
+        title: t('Chat'),
+        items: [
+          {
+            title: t('Playground'),
+            url: '/playground',
+            icon: FlaskConical,
+          },
+          {
+            title: t('Chat'),
+            icon: MessageSquare,
+            type: 'chat-presets',
+          },
+        ],
+      },
+      {
         id: 'dashboard',
         title: t('Dashboards'),
         items: [
@@ -82,22 +98,6 @@ export function useSidebarData(): SidebarData {
             title: t('API Keys'),
             url: '/keys',
             icon: Key,
-          },
-        ],
-      },
-      {
-        id: 'chat',
-        title: t('Chat'),
-        items: [
-          {
-            title: t('Playground'),
-            url: '/playground',
-            icon: FlaskConical,
-          },
-          {
-            title: t('Chat'),
-            icon: MessageSquare,
-            type: 'chat-presets',
           },
         ],
       },

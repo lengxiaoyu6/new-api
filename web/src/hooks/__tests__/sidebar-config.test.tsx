@@ -74,7 +74,7 @@ function sidebarFor(admin?: object, user?: object, canConfigure = true) {
 }
 
 describe('sidebar navigation groups', () => {
-  it('keeps chat in its own group alongside the five personal management groups', () => {
+  it('shows Chat first, followed by the five personal management groups in order', () => {
     const { result } = sidebarFor()
 
     expect(
@@ -85,9 +85,9 @@ describe('sidebar navigation groups', () => {
           items: group.items.map((item) => item.title),
         }))
     ).toEqual([
+      { title: 'Chat', items: ['Playground', 'Chat'] },
       { title: 'Dashboards', items: ['Overview', 'Dashboard'] },
       { title: 'API Management', items: ['API Keys'] },
-      { title: 'Chat', items: ['Playground', 'Chat'] },
       { title: 'Logs', items: ['Usage Logs', 'Audit Logs', 'Task Logs'] },
       {
         title: 'Account & Assets',
