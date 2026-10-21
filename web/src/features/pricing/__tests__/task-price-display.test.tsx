@@ -44,6 +44,29 @@ import type { PricingModel, BillingUsageSchema } from '../types'
 
 vi.mock('@visactor/react-vchart', () => ({ VChart: () => null }))
 
+it.each([false, true])(
+  'keeps tier prices visible when hideTierTitle is %s',
+  (hideTierTitle) => {
+    render(
+      <DynamicPricingBreakdown
+        compact
+        hideTierTitle={hideTierTitle}
+        billingExpr='tier("base", p * 2 + c * 8)'
+      />
+    )
+
+    if (hideTierTitle) {
+      expect(screen.queryByText('Tiered price table')).not.toBeInTheDocument()
+    } else {
+      expect(screen.getByText('Tiered price table')).toBeVisible()
+    }
+    const table = screen.getByRole('table')
+    expect(within(table).getByText('base')).toBeVisible()
+    expect(within(table).getByText('$2.0000')).toBeVisible()
+    expect(within(table).getByText('$8.0000')).toBeVisible()
+  }
+)
+
 it('shows an explicit free request price alongside token prices with distinct units', () => {
   render(
     <DynamicPricingBreakdown

@@ -37,6 +37,7 @@ import {
   ModelDetailsDrawer,
 } from './components'
 import { PricingHeader } from './components/pricing-header'
+import { FILTER_ALL } from './constants'
 import { useFilters } from './hooks/use-filters'
 import { usePricingData } from './hooks/use-pricing-data'
 import { getCatalogGroups } from './lib/filters'
@@ -211,6 +212,9 @@ export function Pricing() {
                 if (!open) setSelectedModelName(null)
               }}
               model={selectedModel}
+              selectedGroup={
+                groupFilter === FILTER_ALL ? undefined : groupFilter
+              }
               groupRatio={groupRatio || {}}
               usableGroup={usableGroup || {}}
               endpointMap={

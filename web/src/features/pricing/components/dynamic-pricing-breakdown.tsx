@@ -92,6 +92,8 @@ type DynamicPricingBreakdownProps = {
   hideRequestRules?: boolean
   /** Show request-rule details alongside a separately rendered price table. */
   hideTierPrices?: boolean
+  /** Omit the tier table title when the surrounding section provides context. */
+  hideTierTitle?: boolean
   /** Keep unparsable expressions from exposing their raw source text. */
   hideUnparsedExpression?: boolean
   usageSchema?: BillingUsageSchema
@@ -302,6 +304,7 @@ export function DynamicPricingBreakdown({
   priceMultiplier = 1,
   hideRequestRules = false,
   hideTierPrices = false,
+  hideTierTitle = false,
   hideUnparsedExpression = false,
   usageSchema,
   taskPriceOptions,
@@ -494,7 +497,7 @@ export function DynamicPricingBreakdown({
 
       {hasTiers && !hideTierPrices && (
         <div className={cn(compact ? cn(hasRules && 'mb-2') : 'mb-3 sm:mb-4')}>
-          {!usageSchema && (
+          {!usageSchema && !hideTierTitle && (
             <div
               className={
                 compact

@@ -99,6 +99,61 @@ function renderPricingPage(
 }
 
 describe('catalog presentation', () => {
+  it('opens model pricing for the current group after changing the catalog selection', async () => {
+    const user = userEvent.setup()
+    const { unmount, client } = renderPricingPage(
+      '/pricing/',
+      [
+        {
+          id: 1,
+          model_name: 'group-details-model',
+          quota_type: 0,
+          model_ratio: 1,
+          completion_ratio: 2,
+          enable_groups: ['az-gpt', 'premium'],
+        },
+      ],
+      {
+        'az-gpt': { desc: 'AZ', ratio: 1 },
+        premium: { desc: 'Premium', ratio: 2 },
+      }
+    )
+
+    try {
+      await user.click(
+        await screen.findByRole('button', { name: 'group-details-model' })
+      )
+      const firstDrawer = await screen.findByRole('dialog')
+      const firstPrices = within(firstDrawer)
+        .getByText('Pricing by Group')
+        .closest('section')
+      assert.isNotNull(firstPrices)
+      expect(within(firstPrices).getByText('az-gpt')).toBeVisible()
+      expect(within(firstPrices).queryByText('premium')).not.toBeInTheDocument()
+
+      await user.click(
+        within(firstDrawer).getByRole('button', { name: 'Close' })
+      )
+      await waitFor(() =>
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      )
+      await user.click(screen.getByTitle('premium'))
+      await user.click(
+        screen.getByRole('button', { name: 'group-details-model' })
+      )
+      const secondDrawer = await screen.findByRole('dialog')
+      const secondPrices = within(secondDrawer)
+        .getByText('Pricing by Group')
+        .closest('section')
+      assert.isNotNull(secondPrices)
+      expect(within(secondPrices).getByText('premium')).toBeVisible()
+      expect(within(secondPrices).queryByText('az-gpt')).not.toBeInTheDocument()
+    } finally {
+      unmount()
+      client.clear()
+    }
+  })
+
   it.each(['desktop', 'mobile'])(
     'shows the selected group description between search and model results in the %s layout',
     async (viewport) => {

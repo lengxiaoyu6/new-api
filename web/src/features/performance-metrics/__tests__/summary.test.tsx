@@ -17,13 +17,14 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { PerformanceOverview } from '@/features/dashboard/components/models/performance-overview'
 import { PerformanceHealthPanel } from '@/features/dashboard/components/overview/performance-health-panel'
 import { ModelDetailsPerformance } from '@/features/pricing/components/model-details-performance'
 import { UptimeSparkline } from '@/features/pricing/components/model-details-uptime-sparkline'
+import { api } from '@/lib/api'
 
 const chart = vi.hoisted(() =>
   vi.fn(
@@ -84,8 +85,8 @@ const groups = [
   },
 ]
 
-function renderModelDetails() {
-  client.setQueryData(['perf-metrics', 'test-model'], {
+function renderModelDetails(selectedGroup?: string) {
+  client.setQueryData(['perf-metrics', 'test-model', undefined], {
     success: true,
     data: {
       model_name: 'test-model',
@@ -107,6 +108,7 @@ function renderModelDetails() {
   return render(
     <QueryClientProvider client={client}>
       <ModelDetailsPerformance
+        selectedGroup={selectedGroup}
         model={{
           id: 1,
           model_name: 'test-model',
@@ -121,6 +123,82 @@ function renderModelDetails() {
 }
 
 describe('server performance summaries', () => {
+  it('requests and caches separate statistics and chart series for each selected group', async () => {
+    const request = vi.spyOn(api, 'get')
+    for (const group of groups) {
+      request.mockResolvedValueOnce({
+        data: {
+          success: true,
+          data: {
+            model_name: 'test-model',
+            summary: group,
+            series: group.series,
+            groups: [group],
+          },
+        },
+      })
+    }
+
+    const first = renderModelDetails('a')
+    const firstRow = await screen.findByRole('row', { name: /^a / })
+    expect(within(firstRow).getByText('100.00%')).toBeVisible()
+    expect(screen.queryByRole('row', { name: /^b / })).not.toBeInTheDocument()
+    expect(screen.queryByText('99.01%')).not.toBeInTheDocument()
+    await waitFor(() => expect(chart).toHaveBeenCalled())
+    const specs = chart.mock.calls.map(([props]) => props.spec)
+    expect(
+      specs.find((spec) => spec.data[0].id === 'uptime')?.data[0].values
+    ).toEqual(
+      expect.arrayContaining([expect.objectContaining({ uptime: 100 })])
+    )
+    expect(
+      specs.find((spec) => spec.data[0].id === 'latency')?.data[0].values
+    ).toEqual([expect.objectContaining({ ttft: 100 })])
+    expect(request).toHaveBeenCalledWith('/api/perf-metrics', {
+      params: { model: 'test-model', hours: 24, group: 'a' },
+    })
+
+    first.unmount()
+    renderModelDetails('b')
+
+    const secondRow = await screen.findByRole('row', { name: /^b / })
+    expect(within(secondRow).getByText('0.00%')).toBeVisible()
+    expect(screen.queryByRole('row', { name: /^a / })).not.toBeInTheDocument()
+    expect(screen.queryByText('99.01%')).not.toBeInTheDocument()
+    expect(request).toHaveBeenCalledWith('/api/perf-metrics', {
+      params: { model: 'test-model', hours: 24, group: 'b' },
+    })
+  })
+
+  it('shows unavailable data when the selected group has no samples even if global statistics are cached', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          model_name: 'test-model',
+          summary: null,
+          groups: [],
+          series: [],
+        },
+      },
+    })
+
+    renderModelDetails('empty')
+
+    expect(
+      await screen.findByText(
+        'Performance data is not yet available for this model.'
+      )
+    ).toBeVisible()
+    await waitFor(() =>
+      expect(api.get).toHaveBeenCalledWith('/api/perf-metrics', {
+        params: { model: 'test-model', hours: 24, group: 'empty' },
+      })
+    )
+    expect(screen.queryByText('99.01%')).not.toBeInTheDocument()
+    expect(screen.queryByRole('table')).not.toBeInTheDocument()
+  })
+
   it.each([PerformanceHealthPanel, PerformanceOverview])(
     'uses the weighted server result across models',
     (Component) => {

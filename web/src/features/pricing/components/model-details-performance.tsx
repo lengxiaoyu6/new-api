@@ -121,12 +121,17 @@ function toGroupUptimeSeries(group: PerformanceGroup): UptimeDayPoint[] {
   })
 }
 
-export function ModelDetailsPerformance(props: { model: PricingModel }) {
+export function ModelDetailsPerformance(props: {
+  model: PricingModel
+  selectedGroup?: string
+}) {
   const { t } = useTranslation()
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics', props.model.model_name],
+    queryKey: ['perf-metrics', props.model.model_name, props.selectedGroup],
     queryFn: async () =>
-      requireServerSuccess(await getPerfMetrics(props.model.model_name, 24)),
+      requireServerSuccess(
+        await getPerfMetrics(props.model.model_name, 24, props.selectedGroup)
+      ),
     staleTime: 60 * 1000,
   })
   const groups = useMemo(

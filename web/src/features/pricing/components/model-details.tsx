@@ -80,7 +80,6 @@ import {
   isUnconfiguredTaskUsageModel,
   type DynamicPriceEntry,
 } from '../lib/dynamic-price'
-import { parseTags } from '../lib/filters'
 import { getAvailableGroups, isTokenBasedModel } from '../lib/model-helpers'
 import { withPluginPricing } from '../lib/plugin-pricing'
 import { formatFixedPrice, formatGroupPrice } from '../lib/price'
@@ -140,36 +139,25 @@ export function ChannelBillingProfilesSummary(props: {
   groupRatio: number
   usageSchema?: PricingModel['billing_usage_schema']
 }) {
-  const { i18n } = useTranslation()
   if (props.profiles.length === 0) return null
-  const language = i18n.language.toLowerCase().startsWith('zh') ? 'zh' : 'en'
   return (
     <div className='divide-y'>
-      {props.profiles.map((profile) => {
-        const label =
-          profile.label?.[language] ||
-          profile.label?.en ||
-          profile.label?.zh ||
-          profile.profile_key
-        return (
-          <div
-            key={`${profile.source}-${profile.profile_key}-${profile.expr_hash}`}
-            className='px-3 py-2 text-xs'
-          >
-            <div className='truncate font-medium'>{label}</div>
-            <div className='mt-1'>
-              <DynamicPricingBreakdown
-                compact
-                billingExpr={profile.billing_expr}
-                hideRequestRules
-                hideUnparsedExpression
-                priceMultiplier={props.groupRatio}
-                usageSchema={props.usageSchema}
-              />
-            </div>
-          </div>
-        )
-      })}
+      {props.profiles.map((profile) => (
+        <div
+          key={`${profile.source}-${profile.profile_key}-${profile.expr_hash}`}
+          className='px-3 py-2 text-xs'
+        >
+          <DynamicPricingBreakdown
+            compact
+            billingExpr={profile.billing_expr}
+            hideRequestRules
+            hideTierTitle
+            hideUnparsedExpression
+            priceMultiplier={props.groupRatio}
+            usageSchema={props.usageSchema}
+          />
+        </div>
+      ))}
     </div>
   )
 }
@@ -322,12 +310,17 @@ function OverviewMetric(props: {
   )
 }
 
-function OverviewSummaryGrid(props: { model: PricingModel }) {
+function OverviewSummaryGrid(props: {
+  model: PricingModel
+  selectedGroup?: string
+}) {
   const { t } = useTranslation()
   const metricsQuery = useQuery({
-    queryKey: ['perf-metrics', props.model.model_name],
+    queryKey: ['perf-metrics', props.model.model_name, props.selectedGroup],
     queryFn: async () =>
-      requireServerSuccess(await getPerfMetrics(props.model.model_name, 24)),
+      requireServerSuccess(
+        await getPerfMetrics(props.model.model_name, 24, props.selectedGroup)
+      ),
     staleTime: 60 * 1000,
   })
 
@@ -574,9 +567,7 @@ function ModelBackendSignalsSection(props: { model: PricingModel }) {
 function ModelBackendProviderSection(props: { model: PricingModel }) {
   const { t } = useTranslation()
   const model = props.model
-  const groups = normalizeCatalogItems(model.enable_groups)
   const endpoints = normalizeCatalogItems(model.supported_endpoint_types)
-  const tags = parseTags(model.tags)
   const cells: React.ReactNode[] = []
 
   if (model.vendor_name) {
@@ -587,40 +578,10 @@ function ModelBackendProviderSection(props: { model: PricingModel }) {
     )
   }
 
-  cells.push(
-    <CatalogInfoCell key='type' label={t('Type')}>
-      <ModelBillingModeBadge model={model} />
-    </CatalogInfoCell>
-  )
-
-  if (groups.length > 0) {
-    cells.push(
-      <CatalogInfoCell key='groups' label={t('Groups')}>
-        <CatalogPillList items={groups} />
-      </CatalogInfoCell>
-    )
-  }
-
   if (endpoints.length > 0) {
     cells.push(
       <CatalogInfoCell key='endpoints' label={t('Endpoints')}>
         <CatalogPillList items={endpoints} />
-      </CatalogInfoCell>
-    )
-  }
-
-  if (tags.length > 0) {
-    cells.push(
-      <CatalogInfoCell key='tags' label={t('Tags')}>
-        <CatalogPillList items={tags} />
-      </CatalogInfoCell>
-    )
-  }
-
-  if (model.parameter_count) {
-    cells.push(
-      <CatalogInfoCell key='parameters' label={t('Parameters')}>
-        <CatalogTextValue>{model.parameter_count}</CatalogTextValue>
       </CatalogInfoCell>
     )
   }
@@ -1045,6 +1006,7 @@ function getDynamicFormattedPricesByTier(
 
 type GroupPricingSectionProps = {
   model: PricingModel
+  selectedGroup?: string
   groupRatio: Record<string, number>
   usableGroup: PricingData['usable_group']
   autoGroups: string[]
@@ -1115,8 +1077,11 @@ function ProviderGroupPricingSection(
   const showRechargePrice = props.showRechargePrice ?? false
 
   const availableGroups = useMemo(
-    () => getAvailableGroups(props.model, props.usableGroup || {}),
-    [props.model, props.usableGroup]
+    () =>
+      getAvailableGroups(props.model, props.usableGroup || {}).filter(
+        (group) => !props.selectedGroup || group === props.selectedGroup
+      ),
+    [props.model, props.usableGroup, props.selectedGroup]
   )
 
   const isTokenBased = isTokenBasedModel(props.model)
@@ -1610,6 +1575,7 @@ const TAB_META: Record<
 
 export interface ModelDetailsContentProps {
   model: PricingModel
+  selectedGroup?: string
   groupRatio: Record<string, number>
   usableGroup: PricingData['usable_group']
   endpointMap: Record<string, { path?: string; method?: string }>
@@ -1660,7 +1626,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         </TabsList>
 
         <TabsContent value='overview' className='space-y-6 outline-none'>
-          <OverviewSummaryGrid model={props.model} />
+          <OverviewSummaryGrid
+            model={props.model}
+            selectedGroup={props.selectedGroup}
+          />
 
           <section className='bg-card/60 space-y-5 rounded-xl border p-4 shadow-sm'>
             <SectionTitle>{t('Pricing')}</SectionTitle>
@@ -1686,6 +1655,7 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
             )}
             <GroupPricingSection
               model={props.model}
+              selectedGroup={props.selectedGroup}
               groupRatio={props.groupRatio}
               usableGroup={props.usableGroup}
               autoGroups={props.autoGroups}
@@ -1700,7 +1670,10 @@ export function ModelDetailsContent(props: ModelDetailsContentProps) {
         </TabsContent>
 
         <TabsContent value='performance' className='outline-none'>
-          <ModelDetailsPerformance model={props.model} />
+          <ModelDetailsPerformance
+            model={props.model}
+            selectedGroup={props.selectedGroup}
+          />
         </TabsContent>
 
         <TabsContent value='api' className='outline-none'>
