@@ -44,6 +44,7 @@ type DataTableFeatureOptions<TData> = Pick<
   | 'enableRowSelection'
   | 'getRowId'
   | 'getSubRows'
+  | 'getRowCanExpand'
   | 'globalFilterFn'
   | 'autoResetPageIndex'
   | 'manualFiltering'
@@ -396,6 +397,7 @@ export function useDataTable<TData>(options: UseDataTableOptions<TData>) {
     enableSorting: resolvedEnableSorting,
     getRowId: options.getRowId,
     getSubRows: options.getSubRows,
+    getRowCanExpand: options.getRowCanExpand,
     globalFilterFn: options.globalFilterFn,
     autoResetPageIndex: options.autoResetPageIndex,
     manualFiltering,

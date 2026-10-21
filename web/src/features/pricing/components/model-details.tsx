@@ -61,6 +61,9 @@ import { requireServerSuccess } from '@/lib/server-error-message'
 import { cn } from '@/lib/utils'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
+import '@/styles/gateway-home.css'
+import '@/styles/gateway-catalog.css'
+
 import { DEFAULT_TOKEN_UNIT } from '../constants'
 import { useBillingTime } from '../hooks/use-billing-time'
 import { usePricingData } from '../hooks/use-pricing-data'
@@ -98,6 +101,7 @@ import type {
   ChannelBillingPricing,
   ModelCapability,
   PriceType,
+  PricingData,
   PricingModel,
   TokenUnit,
 } from '../types'
@@ -1042,7 +1046,7 @@ function getDynamicFormattedPricesByTier(
 type GroupPricingSectionProps = {
   model: PricingModel
   groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: PricingData['usable_group']
   autoGroups: string[]
   priceRate: number
   usdExchangeRate: number
@@ -1607,7 +1611,7 @@ const TAB_META: Record<
 export interface ModelDetailsContentProps {
   model: PricingModel
   groupRatio: Record<string, number>
-  usableGroup: Record<string, { desc: string; ratio: number }>
+  usableGroup: PricingData['usable_group']
   endpointMap: Record<string, { path?: string; method?: string }>
   autoGroups: string[]
   priceRate: number
@@ -1728,7 +1732,7 @@ export function ModelDetailsDrawer(props: ModelDetailsDrawerProps) {
       <SheetContent
         side='right'
         className={sideDrawerContentClassName(
-          'sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl'
+          'gateway-home gateway-catalog-overlay sm:max-w-2xl lg:max-w-3xl xl:max-w-4xl 2xl:max-w-5xl'
         )}
       >
         <SheetHeader className='sr-only'>
@@ -1774,77 +1778,83 @@ export function ModelDetails() {
 
   if (isLoading) {
     return (
-      <PublicLayout>
-        <div className='mx-auto max-w-5xl px-4 sm:px-6'>
-          <Skeleton className='mb-4 h-5 w-16' />
-          <div className='space-y-2'>
-            <Skeleton className='h-7 w-64' />
-            <Skeleton className='h-4 w-40' />
-            <Skeleton className='h-4 w-full max-w-md' />
+      <div className='gateway-home gateway-catalog'>
+        <PublicLayout>
+          <div className='mx-auto max-w-5xl px-4 sm:px-6'>
+            <Skeleton className='mb-4 h-5 w-16' />
+            <div className='space-y-2'>
+              <Skeleton className='h-7 w-64' />
+              <Skeleton className='h-4 w-40' />
+              <Skeleton className='h-4 w-full max-w-md' />
+            </div>
+            <div className='mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4'>
+              {MODEL_DETAILS_SKELETON_KEYS.map((key) => (
+                <Skeleton key={`metric-${key}`} className='h-16 w-full' />
+              ))}
+            </div>
+            <div className='mt-6 space-y-3'>
+              {MODEL_DETAILS_SKELETON_KEYS.map((key) => (
+                <Skeleton key={`section-${key}`} className='h-24 w-full' />
+              ))}
+            </div>
           </div>
-          <div className='mt-6 grid grid-cols-2 gap-2 sm:grid-cols-4'>
-            {MODEL_DETAILS_SKELETON_KEYS.map((key) => (
-              <Skeleton key={`metric-${key}`} className='h-16 w-full' />
-            ))}
-          </div>
-          <div className='mt-6 space-y-3'>
-            {MODEL_DETAILS_SKELETON_KEYS.map((key) => (
-              <Skeleton key={`section-${key}`} className='h-24 w-full' />
-            ))}
-          </div>
-        </div>
-      </PublicLayout>
+        </PublicLayout>
+      </div>
     )
   }
 
   if (!model) {
     return (
-      <PublicLayout>
-        <div className='mx-auto max-w-2xl px-4 text-center sm:px-6'>
-          <h2 className='mb-1 text-base font-semibold'>
-            {t('Model not found')}
-          </h2>
-          <p className='text-muted-foreground mb-4 text-sm'>
-            {t("The model you're looking for doesn't exist.")}
-          </p>
-          <Button onClick={handleBack} variant='outline' size='sm'>
-            {t('Back to Models')}
-          </Button>
-        </div>
-      </PublicLayout>
+      <div className='gateway-home gateway-catalog'>
+        <PublicLayout>
+          <div className='mx-auto max-w-2xl px-4 text-center sm:px-6'>
+            <h2 className='mb-1 text-base font-semibold'>
+              {t('Model not found')}
+            </h2>
+            <p className='text-muted-foreground mb-4 text-sm'>
+              {t("The model you're looking for doesn't exist.")}
+            </p>
+            <Button onClick={handleBack} variant='outline' size='sm'>
+              {t('Back to Models')}
+            </Button>
+          </div>
+        </PublicLayout>
+      </div>
     )
   }
 
   return (
-    <PublicLayout>
-      <div className='mx-auto max-w-5xl px-4 sm:px-6'>
-        <Button
-          variant='ghost'
-          size='sm'
-          onClick={handleBack}
-          className='text-muted-foreground hover:text-foreground mb-4 h-auto gap-1 px-0 py-1 text-xs'
-        >
-          <ArrowLeft className='size-3.5' />
-          {t('Back')}
-        </Button>
+    <div className='gateway-home gateway-catalog'>
+      <PublicLayout>
+        <div className='mx-auto max-w-5xl px-4 sm:px-6'>
+          <Button
+            variant='ghost'
+            size='sm'
+            onClick={handleBack}
+            className='text-muted-foreground hover:text-foreground mb-4 h-auto gap-1 px-0 py-1 text-xs'
+          >
+            <ArrowLeft className='size-3.5' />
+            {t('Back')}
+          </Button>
 
-        <ModelDetailsContent
-          model={model}
-          groupRatio={groupRatio || {}}
-          usableGroup={usableGroup || {}}
-          autoGroups={autoGroups || []}
-          priceRate={priceRate ?? 1}
-          usdExchangeRate={usdExchangeRate ?? 1}
-          tokenUnit={tokenUnit}
-          showRechargePrice={search.rechargePrice ?? false}
-          endpointMap={
-            (endpointMap as Record<
-              string,
-              { path?: string; method?: string }
-            >) || {}
-          }
-        />
-      </div>
-    </PublicLayout>
+          <ModelDetailsContent
+            model={model}
+            groupRatio={groupRatio || {}}
+            usableGroup={usableGroup || {}}
+            autoGroups={autoGroups || []}
+            priceRate={priceRate ?? 1}
+            usdExchangeRate={usdExchangeRate ?? 1}
+            tokenUnit={tokenUnit}
+            showRechargePrice={search.rechargePrice ?? false}
+            endpointMap={
+              (endpointMap as Record<
+                string,
+                { path?: string; method?: string }
+              >) || {}
+            }
+          />
+        </div>
+      </PublicLayout>
+    </div>
   )
 }

@@ -17,188 +17,165 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { ColumnDef } from '@tanstack/react-table'
+import { ChevronDown, Clock3 } from 'lucide-react'
+import { useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 
-import {
-  BadgeCell,
-  BadgeListCell,
-  DataTableColumnHeader,
-} from '@/components/data-table'
-import { GroupBadge } from '@/components/group-badge'
-import { StatusBadge } from '@/components/status-badge'
+import { CopyButton } from '@/components/copy-button'
+import { Button } from '@/components/ui/button'
 import { getLobeIcon } from '@/lib/lobe-icon'
+import { cn } from '@/lib/utils'
 
-import { parseTags } from '../lib/filters'
+import { DEFAULT_TOKEN_UNIT } from '../constants'
 import type { PricingModel } from '../types'
-import { CachedPriceCell } from './cached-price-cell'
-import { ModelBillingModeBadge } from './model-billing-mode-badge'
-import { ModelPriceCell, type ModelPriceCellOptions } from './model-price-cell'
+import { ModelPerfBadge, type ModelPerfBadgeData } from './model-perf-badge'
+import type { ModelPriceCellOptions } from './model-price-cell'
+import {
+  ModelTierPricing,
+  type ModelPricingDetails,
+} from './model-tier-pricing'
+import {
+  ModelTokenPriceCell,
+  type CatalogPriceType,
+} from './model-token-price-cell'
 
-// ----------------------------------------------------------------------------
-// Pricing Table Columns
-// ----------------------------------------------------------------------------
-
-export type PricingColumnsOptions = ModelPriceCellOptions
+export type PricingColumnsOptions = ModelPriceCellOptions & {
+  onModelClick?: (modelName: string) => void
+  performance?: Map<string, ModelPerfBadgeData>
+  cardView?: boolean
+  mobileView?: boolean
+  pricingDetails?: Map<string, ModelPricingDetails>
+  tierPanelPrefix?: string
+}
 
 export function usePricingColumns(
   options: PricingColumnsOptions = {}
 ): ColumnDef<PricingModel>[] {
   const { t } = useTranslation()
-
-  return [
-    // Model column
-    {
-      accessorKey: 'model_name',
-      meta: { label: t('Model') },
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Model')} />
-      ),
-      cell: ({ row }) => {
-        const model = row.original
-        const modelIconKey = model.icon || model.vendor_icon
-        const modelIcon = modelIconKey ? getLobeIcon(modelIconKey, 14) : null
-
-        return (
-          <div className='flex max-w-full min-w-0 items-center gap-2'>
-            {modelIcon}
-            <span className='truncate font-mono text-sm font-medium'>
-              {model.model_name}
+  const unit = (options.tokenUnit ?? DEFAULT_TOKEN_UNIT) === 'K' ? '1K' : '1M'
+  return useMemo(() => {
+    const prices: Array<{ type: CatalogPriceType; label: string }> = [
+      { type: 'input', label: t('Input price') },
+      { type: 'output', label: t('Output price') },
+      { type: 'create_cache', label: t('Cache Creation') },
+      { type: 'cache', label: t('Cache Read') },
+    ]
+    return [
+      {
+        accessorKey: 'model_name',
+        header: t('Model'),
+        meta: { label: t('Model'), mobileTitle: true },
+        size: 420,
+        enableSorting: false,
+        cell: ({ row }) => {
+          const model = row.original
+          const icon = model.icon || model.vendor_icon
+          const details = options.pricingDetails?.get(model.model_name)
+          let expansionLabel = t('Tiered pricing')
+          let expansionText = t('Tiered')
+          if (details?.hasRequestRules) {
+            expansionLabel = t('Pricing rules')
+            expansionText =
+              details.tiers.length > 1 ? t('Pricing rules') : t('Conditions')
+          }
+          return (
+            <div className='gateway-catalog-model-name'>
+              <Button
+                variant='ghost'
+                className='gateway-catalog-model-button'
+                onClick={() => options.onModelClick?.(model.model_name)}
+                title={model.model_name}
+              >
+                {icon && <span aria-hidden>{getLobeIcon(icon, 18)}</span>}
+                <span>{model.model_name}</span>
+              </Button>
+              {row.getCanExpand() && (
+                <Button
+                  variant='ghost'
+                  size={options.mobileView ? 'icon-sm' : 'xs'}
+                  className={cn(
+                    'gateway-catalog-tier-toggle',
+                    options.mobileView && 'gateway-catalog-tier-toggle-icon'
+                  )}
+                  aria-label={`${expansionLabel} · ${model.model_name}`}
+                  aria-expanded={row.getIsExpanded()}
+                  aria-controls={`${options.tierPanelPrefix}-${encodeURIComponent(model.model_name)}`}
+                  title={row.getIsExpanded() ? t('Collapse') : t('Expand')}
+                  onClick={() => row.toggleExpanded()}
+                >
+                  {!options.mobileView && expansionText}
+                  <ChevronDown className='size-3' aria-hidden />
+                </Button>
+              )}
+              <CopyButton
+                value={model.model_name}
+                tooltip={t('Copy model name')}
+                className='size-7'
+                iconClassName='size-3.5'
+              />
+            </div>
+          )
+        },
+      },
+      ...prices.map((price) => ({
+        id: price.type,
+        size: 110,
+        enableSorting: false,
+        meta: {
+          label: options.cardView
+            ? `${price.label} /${t('{{unit}} tokens', { unit })}`
+            : undefined,
+        },
+        header: () => (
+          <span className='gateway-catalog-price-heading'>
+            <span>{price.label}</span>
+            <span className='gateway-catalog-price-unit'>
+              /{t('{{unit}} tokens', { unit })}
             </span>
-          </div>
-        )
-      },
-      minSize: 200,
-    },
-
-    // Type column
-    {
-      accessorKey: 'quota_type',
-      header: t('Type'),
-      cell: ({ row }) => (
-        <ModelBillingModeBadge model={row.original} className='-ml-1.5' />
-      ),
-      size: 110,
-      enableSorting: false,
-    },
-
-    // Price column
-    {
-      accessorKey: 'price',
-      meta: { label: t('Price') },
-      header: ({ column }) => (
-        <DataTableColumnHeader column={column} title={t('Price')} />
-      ),
-      cell: ({ row }) => (
-        <ModelPriceCell model={row.original} options={options} />
-      ),
-      size: 180,
-      enableSorting: false,
-    },
-
-    // Cached price column (Vercel AI Gateway style)
-    {
-      id: 'cached_price',
-      header: t('Cached'),
-      cell: ({ row }) => (
-        <CachedPriceCell model={row.original} options={options} />
-      ),
-      size: 110,
-      enableSorting: false,
-    },
-
-    // Vendor column
-    {
-      accessorKey: 'vendor_name',
-      header: t('Vendor'),
-      cell: ({ row }) => {
-        const model = row.original
-        if (!model.vendor_name) {
-          return <span className='text-muted-foreground/50 text-xs'>—</span>
-        }
-        const vendorIcon = model.vendor_icon
-          ? getLobeIcon(model.vendor_icon, 12)
-          : null
-        return (
-          <BadgeCell className='gap-1.5'>
-            {vendorIcon}
-            <StatusBadge
-              label={model.vendor_name}
-              autoColor={model.vendor_name}
-              size='sm'
-              copyable={false}
-            />
-          </BadgeCell>
-        )
-      },
-      size: 130,
-      enableSorting: false,
-    },
-
-    // Tags column
-    {
-      accessorKey: 'tags',
-      header: t('Tags'),
-      cell: ({ row }) => {
-        const tags = parseTags(row.original.tags)
-        return (
-          <BadgeListCell
-            items={tags.map((tag) => (
-              <StatusBadge
-                key={tag}
-                label={tag}
-                autoColor={tag}
-                size='sm'
-                copyable={false}
+          </span>
+        ),
+        cell: ({ row }: { row: { original: PricingModel } }) => (
+          <ModelTokenPriceCell
+            model={row.original}
+            type={price.type}
+            options={options}
+          />
+        ),
+      })),
+      {
+        id: 'actions',
+        size: 240,
+        enableSorting: false,
+        header: () => (
+          <span className='gateway-catalog-availability-heading'>
+            <span>{t('Availability')}</span>
+            <span className='gateway-catalog-window'>
+              <Clock3 className='size-3' aria-hidden />
+              {t('Past 24 hours')}
+            </span>
+          </span>
+        ),
+        cell: ({ row }) => {
+          const details = options.pricingDetails?.get(row.original.model_name)
+          return (
+            <div className='w-full min-w-0'>
+              <ModelPerfBadge
+                variant='availability'
+                perf={options.performance?.get(row.original.model_name)}
               />
-            ))}
-          />
-        )
+              {options.cardView && details && row.getIsExpanded() && (
+                <ModelTierPricing
+                  id={`${options.tierPanelPrefix}-${encodeURIComponent(row.original.model_name)}`}
+                  model={row.original}
+                  details={details}
+                  options={options}
+                  cardView
+                />
+              )}
+            </div>
+          )
+        },
       },
-      size: 140,
-      enableSorting: false,
-    },
-
-    // Endpoints column
-    {
-      accessorKey: 'supported_endpoint_types',
-      header: t('Endpoints'),
-      cell: ({ row }) => {
-        const endpoints = row.original.supported_endpoint_types || []
-        return (
-          <BadgeListCell
-            items={endpoints.map((ep) => (
-              <StatusBadge
-                key={ep}
-                label={ep}
-                autoColor={ep}
-                size='sm'
-                copyable={false}
-              />
-            ))}
-          />
-        )
-      },
-      size: 130,
-      enableSorting: false,
-    },
-
-    // Enable Groups column
-    {
-      accessorKey: 'enable_groups',
-      header: t('Groups'),
-      cell: ({ row }) => {
-        const groups = row.original.enable_groups || []
-        return (
-          <BadgeListCell
-            items={groups.map((group) => (
-              <GroupBadge key={group} group={group} size='sm' />
-            ))}
-            tooltipClassName='max-w-[280px] p-2'
-          />
-        )
-      },
-      size: 130,
-      enableSorting: false,
-    },
-  ]
+    ]
+  }, [t, unit, options])
 }

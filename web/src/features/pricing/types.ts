@@ -139,12 +139,13 @@ export type PricingData = {
   data: PricingModel[]
   vendors: PricingVendor[]
   group_ratio: Record<string, number>
-  usable_group: Record<string, { desc: string; ratio: number }>
+  usable_group: Record<string, string | { desc: string; ratio: number }>
   supported_endpoint: Record<string, string>
   auto_groups: string[]
 }
 
 export type TokenUnit = 'M' | 'K'
+export type PriceDisplayMode = 'site' | 'official'
 export type PriceType =
   | 'input'
   | 'output'

@@ -22,6 +22,7 @@ import {
   QUOTA_TYPES,
   QUOTA_TYPE_VALUES,
   ENDPOINT_TYPES,
+  EXCLUDED_GROUPS,
   type SortOption,
 } from '../constants'
 import type { PricingModel } from '../types'
@@ -37,6 +38,14 @@ import { calculateTokenPrice } from './price'
 // ----------------------------------------------------------------------------
 // Filter Utilities
 // ----------------------------------------------------------------------------
+
+export function getCatalogGroups(groups: readonly string[]): string[] {
+  return groups
+    .filter((group) => group !== 'default' && !EXCLUDED_GROUPS.includes(group))
+    .sort((left, right) =>
+      left.localeCompare(right, 'en', { sensitivity: 'base', numeric: true })
+    )
+}
 
 /**
  * Filter models by search query
@@ -250,7 +259,7 @@ export function extractAllTags(models: PricingModel[]): string[] {
     }
   })
 
-  return Array.from(tagSet).sort((a, b) => a.localeCompare(b))
+  return [...tagSet].sort((a, b) => a.localeCompare(b))
 }
 
 /**

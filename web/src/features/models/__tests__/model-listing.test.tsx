@@ -25,11 +25,6 @@ import {
   RouterProvider,
 } from '@tanstack/react-router'
 import {
-  flexRender,
-  getCoreRowModel,
-  useReactTable,
-} from '@tanstack/react-table'
-import {
   render,
   screen,
   within,
@@ -46,7 +41,7 @@ import type {
   ModelPricingEntry,
 } from '@/features/model-pricing/api'
 import { pricingOptions } from '@/features/model-pricing/pricing'
-import { usePricingColumns } from '@/features/pricing/components/pricing-columns'
+import { ModelPriceCell } from '@/features/pricing/components/model-price-cell'
 import type { PricingModel } from '@/features/pricing/types'
 import fr from '@/i18n/locales/fr.json'
 import zhCN from '@/i18n/locales/zh.json'
@@ -95,19 +90,9 @@ function Page() {
 }
 
 function CatalogPrice(props: { model: PricingModel }) {
-  const columns = usePricingColumns({ tokenUnit: 'M' })
-  const table = useReactTable({
-    data: [props.model],
-    columns,
-    getCoreRowModel: getCoreRowModel(),
-  })
-  const cell = table
-    .getRowModel()
-    .rows[0].getAllCells()
-    .find((item) => item.column.id === 'price')
   return (
     <div role='group' aria-label='Catalog price'>
-      {cell && flexRender(cell.column.columnDef.cell, cell.getContext())}
+      <ModelPriceCell model={props.model} options={{ tokenUnit: 'M' }} />
     </div>
   )
 }

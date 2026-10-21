@@ -90,6 +90,8 @@ type DynamicPricingBreakdownProps = {
   priceMultiplier?: number
   /** Omit request-rule details when only the tier table is relevant. */
   hideRequestRules?: boolean
+  /** Show request-rule details alongside a separately rendered price table. */
+  hideTierPrices?: boolean
   /** Keep unparsable expressions from exposing their raw source text. */
   hideUnparsedExpression?: boolean
   usageSchema?: BillingUsageSchema
@@ -299,6 +301,7 @@ export function DynamicPricingBreakdown({
   compact = false,
   priceMultiplier = 1,
   hideRequestRules = false,
+  hideTierPrices = false,
   hideUnparsedExpression = false,
   usageSchema,
   taskPriceOptions,
@@ -330,9 +333,10 @@ export function DynamicPricingBreakdown({
       requestRules != null
         ? requestRuleGroupsFromTrace(requestRules)
         : tryParseRequestRuleExpr(split.requestRuleExpr || '')
-    if (!parsedRules && requestRules == null) {
+    if (requestRules == null) {
       const compiled = compileBillingExpression(expr)
-      if (compiled.status === 'ready') {
+      if (compiled.status === 'ready' && compiled.requestRules.length > 0) {
+        // Preserve the condition source for calendar and timezone formatting.
         parsedRules = requestRuleGroupsFromTrace(
           compiled.requestRules.map((rule) => ({
             cond: expr.slice(rule.condition.start, rule.condition.end),
@@ -352,8 +356,9 @@ export function DynamicPricingBreakdown({
   const hasRules = ruleGroups.length > 0
 
   if (!expr) return null
+  if (hideTierPrices && (!hasRules || hideRequestRules)) return null
 
-  if (!hasTiers) {
+  if (!hasTiers && !hideTierPrices) {
     if (hideUnparsedExpression) return null
     return (
       <section className={cn('min-w-0', !compact && 'py-4')}>
@@ -471,7 +476,7 @@ export function DynamicPricingBreakdown({
 
   return (
     <section className={cn('min-w-0', !compact && 'py-3 sm:py-4')}>
-      {!compact && !usageSchema && (
+      {!compact && !usageSchema && !hideTierPrices && (
         <div className='mb-3 flex items-start gap-2 sm:mb-4'>
           <span className='mt-0.5 inline-flex size-6 items-center justify-center rounded-lg bg-amber-100 text-amber-700 shadow-sm dark:bg-amber-500/20 dark:text-amber-300'>
             <TagIcon className='size-3.5' />
@@ -487,7 +492,7 @@ export function DynamicPricingBreakdown({
         </div>
       )}
 
-      {hasTiers && (
+      {hasTiers && !hideTierPrices && (
         <div className={cn(compact ? cn(hasRules && 'mb-2') : 'mb-3 sm:mb-4')}>
           {!usageSchema && (
             <div

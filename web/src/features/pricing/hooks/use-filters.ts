@@ -30,7 +30,11 @@ import {
   VIEW_MODES,
   type ViewMode,
 } from '../constants'
-import { filterAndSortModels, extractAllTags } from '../lib/filters'
+import {
+  filterAndSortModels,
+  filterBySearch,
+  extractAllTags,
+} from '../lib/filters'
 import type { PricingModel, TokenUnit } from '../types'
 
 type FilterState = {
@@ -47,19 +51,19 @@ type FilterState = {
 }
 
 function normalizeViewMode(value: unknown): ViewMode {
-  if (value === VIEW_MODES.TABLE) {
-    return VIEW_MODES.TABLE
+  if (value === VIEW_MODES.CARD) {
+    return VIEW_MODES.CARD
   }
-  return VIEW_MODES.CARD
+  return VIEW_MODES.TABLE
 }
 
-export function useFilters(models: PricingModel[]) {
+export function useFilters(models: PricingModel[], catalogGroups: string[]) {
   const search = useSearch({ from: '/pricing/' })
   const [filterState, setFilterState] = useState<FilterState>(() => ({
     search: search.search,
     sort: search.sort,
     vendor: search.vendor,
-    group: search.group,
+    group: search.search ? undefined : search.group,
     quotaType: search.quotaType,
     endpointType: search.endpointType,
     tag: search.tag,
@@ -72,7 +76,24 @@ export function useFilters(models: PricingModel[]) {
   const debouncedSearchInput = useDebounce(searchInput, 200)
   const sortBy = filterState.sort || SORT_OPTIONS.NAME
   const vendorFilter = filterState.vendor || FILTER_ALL
-  const groupFilter = filterState.group || FILTER_ALL
+  const searchModels = useMemo(
+    () => filterBySearch(models, debouncedSearchInput),
+    [models, debouncedSearchInput]
+  )
+  const availableGroups = useMemo(() => {
+    if (!debouncedSearchInput) return catalogGroups
+
+    const matchingGroups = new Set(
+      searchModels.flatMap((model) => model.enable_groups || [])
+    )
+    return catalogGroups.filter((group) => matchingGroups.has(group))
+  }, [catalogGroups, debouncedSearchInput, searchModels])
+  const defaultGroup = availableGroups[0] || FILTER_ALL
+  const selectedGroup = filterState.group || defaultGroup
+  const groupFilter =
+    debouncedSearchInput && !availableGroups.includes(selectedGroup)
+      ? defaultGroup
+      : selectedGroup
   const quotaTypeFilter = filterState.quotaType || QUOTA_TYPES.ALL
   const endpointTypeFilter = filterState.endpointType || ENDPOINT_TYPES.ALL
   const tagFilter = filterState.tag || FILTER_ALL
@@ -94,7 +115,7 @@ export function useFilters(models: PricingModel[]) {
   }, [])
 
   const setSearchInput = useCallback(
-    (v: string) => updateFilters({ search: v || undefined }),
+    (v: string) => updateFilters({ search: v || undefined, group: undefined }),
     [updateFilters]
   )
   const setSortBy = useCallback(
@@ -107,7 +128,7 @@ export function useFilters(models: PricingModel[]) {
     [updateFilters]
   )
   const setGroupFilter = useCallback(
-    (v: string) => updateFilters({ group: v === FILTER_ALL ? undefined : v }),
+    (v: string) => updateFilters({ group: v }),
     [updateFilters]
   )
   const setQuotaTypeFilter = useCallback(
@@ -133,7 +154,7 @@ export function useFilters(models: PricingModel[]) {
   )
   const setViewMode = useCallback(
     (v: ViewMode) =>
-      updateFilters({ view: v === VIEW_MODES.CARD ? undefined : v }),
+      updateFilters({ view: v === VIEW_MODES.TABLE ? undefined : v }),
     [updateFilters]
   )
   const setShowRechargePrice = useCallback(
@@ -147,10 +168,17 @@ export function useFilters(models: PricingModel[]) {
   }, [models])
 
   const filteredModels = useMemo(() => {
-    if (!models || models.length === 0) return []
+    if (searchModels.length === 0) return []
+    if (
+      debouncedSearchInput &&
+      catalogGroups.length > 0 &&
+      availableGroups.length === 0
+    ) {
+      return []
+    }
 
-    return filterAndSortModels(models, {
-      search: debouncedSearchInput,
+    return filterAndSortModels(searchModels, {
+      search: '',
       vendor: vendorFilter,
       group: groupFilter,
       quotaType: quotaTypeFilter,
@@ -159,8 +187,10 @@ export function useFilters(models: PricingModel[]) {
       sortBy,
     })
   }, [
-    models,
+    searchModels,
     debouncedSearchInput,
+    catalogGroups.length,
+    availableGroups.length,
     vendorFilter,
     groupFilter,
     quotaTypeFilter,
@@ -200,7 +230,7 @@ export function useFilters(models: PricingModel[]) {
   }, [updateFilters])
 
   const clearSearch = useCallback(() => {
-    updateFilters({ search: undefined })
+    updateFilters({ search: undefined, group: undefined })
   }, [updateFilters])
 
   return {
@@ -228,6 +258,7 @@ export function useFilters(models: PricingModel[]) {
     hasActiveFilters,
     activeFilterCount,
     availableTags,
+    availableGroups,
     clearFilters,
     clearSearch,
   }

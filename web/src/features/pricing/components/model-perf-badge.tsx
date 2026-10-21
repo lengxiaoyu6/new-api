@@ -25,6 +25,8 @@ import {
   getSuccessRateDotClass,
 } from '@/features/performance-metrics/lib/format'
 import type { SuccessRatePoint } from '@/features/performance-metrics/types'
+import { toIntlLocale } from '@/i18n/languages'
+import { formatNumber } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 export type ModelPerfBadgeData = {
@@ -38,6 +40,7 @@ export type ModelPerfBadgeData = {
 
 export interface ModelPerfBadgeProps extends React.HTMLAttributes<HTMLDivElement> {
   perf: ModelPerfBadgeData | undefined
+  variant?: 'default' | 'availability'
 }
 
 const STATUS_SAMPLE_LIMIT = 24
@@ -45,7 +48,7 @@ const STATUS_SAMPLE_LIMIT = 24
 export const ModelPerfBadge = memo(function ModelPerfBadge(
   props: ModelPerfBadgeProps
 ) {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const latencyText = formatLatency(props.perf?.avg_latency_ms ?? 0)
   const throughputText = formatThroughput(props.perf?.avg_tps ?? 0).replace(
     ' t/s',
@@ -75,6 +78,78 @@ export const ModelPerfBadge = memo(function ModelPerfBadge(
     statusSamples.length > 0
       ? t('Success rate')
       : t('No performance data available')
+
+  if (props.variant === 'availability') {
+    const sampleMap = new Map(
+      statusSamples.map((sample) => [sample.ts, sample])
+    )
+    const windowEnd = props.perf?.window_end
+    let samples: Array<SuccessRatePoint | undefined> = statusSamples
+    if (windowEnd != null && Number.isFinite(windowEnd)) {
+      const lastHour = Math.floor(windowEnd / 3600) * 3600
+      samples = Array.from({ length: STATUS_SAMPLE_LIMIT }, (_, index) =>
+        sampleMap.get(lastHour - (STATUS_SAMPLE_LIMIT - 1 - index) * 3600)
+      )
+    }
+    const rate = hasSuccessRate ? successRate : Number.NaN
+    const rateText = hasSuccessRate
+      ? `${formatNumber(rate, toIntlLocale(i18n.resolvedLanguage || i18n.language))}%`
+      : '—'
+    return (
+      <div
+        className={cn('gateway-catalog-availability', props.className)}
+        aria-label={t('Performance metrics for the last 24 hours')}
+        title={t(
+          'Success rate excludes business rejections and includes the current partial hour.'
+        )}
+      >
+        <span
+          role='img'
+          aria-label={statusLabel}
+          className='gateway-catalog-status-bars'
+        >
+          {samples.length > 0 ? (
+            samples.map((sample, index) => (
+              <span
+                key={sample?.ts ?? index}
+                aria-hidden
+                title={
+                  sample
+                    ? `${formatNumber(sample.success_rate)}%`
+                    : t('No performance data available')
+                }
+                className={cn(
+                  'gateway-catalog-status-bar',
+                  sample
+                    ? getSuccessRateDotClass(sample.success_rate)
+                    : 'bg-muted'
+                )}
+                style={
+                  sample
+                    ? { height: `${Math.max(20, sample.success_rate)}%` }
+                    : undefined
+                }
+              />
+            ))
+          ) : (
+            <span className='text-muted-foreground text-xs'>
+              {t('No performance data available')}
+            </span>
+          )}
+        </span>
+        <span className='gateway-catalog-status-rate'>
+          <span
+            aria-hidden
+            className={cn(
+              'size-1.5 rounded-full',
+              getSuccessRateDotClass(rate)
+            )}
+          />
+          {rateText}
+        </span>
+      </div>
+    )
+  }
 
   return (
     <div

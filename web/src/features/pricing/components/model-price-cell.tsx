@@ -41,6 +41,7 @@ export type ModelPriceCellOptions = {
   usdExchangeRate?: number
   showRechargePrice?: boolean
   selectedGroup?: string
+  groupRatioMultiplier?: number
 }
 
 export function ModelPriceCell(props: {
@@ -65,10 +66,9 @@ export function ModelPriceCell(props: {
         now: billingTime === undefined ? undefined : new Date(billingTime),
         tokenUnit,
         showCurrencySymbol: false,
-        groupRatioMultiplier: getDynamicDisplayGroupRatio(
-          props.model,
-          options.selectedGroup
-        ),
+        groupRatioMultiplier:
+          options.groupRatioMultiplier ??
+          getDynamicDisplayGroupRatio(props.model, options.selectedGroup),
       }),
     // Currency is read indirectly by the price formatter.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -79,6 +79,7 @@ export function ModelPriceCell(props: {
       options.usdExchangeRate,
       options.showRechargePrice,
       options.selectedGroup,
+      options.groupRatioMultiplier,
       billingTime,
       currency,
     ]
@@ -199,7 +200,8 @@ export function ModelPriceCell(props: {
             options.priceRate,
             options.usdExchangeRate,
             options.selectedGroup,
-            false
+            false,
+            options.groupRatioMultiplier
           ),
         },
         {
@@ -212,7 +214,8 @@ export function ModelPriceCell(props: {
             options.priceRate,
             options.usdExchangeRate,
             options.selectedGroup,
-            false
+            false,
+            options.groupRatioMultiplier
           ),
         },
       ]
@@ -226,7 +229,8 @@ export function ModelPriceCell(props: {
             options.priceRate,
             options.usdExchangeRate,
             options.selectedGroup,
-            false
+            false,
+            options.groupRatioMultiplier
           ),
         },
       ]
