@@ -18,6 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor, within } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
 import { assert, describe, expect, it, vi } from 'vitest'
 
 import { getPerfMetrics } from '@/features/performance-metrics/api'
@@ -77,6 +78,31 @@ function renderModelDetails(model: PricingModel, selectedGroup?: string) {
 function getGroupPricingSection() {
   return screen.getByText('Pricing by Group').closest('section') as HTMLElement
 }
+
+describe('model details API', () => {
+  it('shows authentication and supported parameters without example rate limits when opening the API tab', async () => {
+    const user = userEvent.setup()
+    renderModelDetails(pricingModel())
+
+    await user.click(screen.getByRole('tab', { name: 'API' }))
+
+    const panel = screen.getByRole('tabpanel', { name: 'API' })
+    expect(
+      within(panel).getByRole('heading', { name: 'Authentication' })
+    ).toBeVisible()
+    expect(
+      within(panel).getByRole('heading', { name: 'Supported parameters' })
+    ).toBeVisible()
+    expect(
+      within(panel).queryByRole('heading', { name: 'Rate limits' })
+    ).not.toBeInTheDocument()
+    for (const name of ['RPM', 'TPM', 'RPD']) {
+      expect(
+        within(panel).queryByRole('columnheader', { name })
+      ).not.toBeInTheDocument()
+    }
+  })
+})
 
 describe('model details metadata', () => {
   it('shows only provider and endpoints when other model metadata is configured', () => {
