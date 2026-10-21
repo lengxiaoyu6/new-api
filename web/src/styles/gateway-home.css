@@ -1,4 +1,8 @@
-.gateway-home {
+.gateway-home,
+body:has(.gateway-console):where(
+  :not([data-theme-preset]),
+  [data-theme-preset='default']
+) {
   --background: #fcfaf7;
   --foreground: #302b27;
   --card: #fffcf9;
@@ -19,7 +23,12 @@
   font-family: 'Public Sans Variable', sans-serif;
 }
 
-.dark .gateway-home {
+.dark .gateway-home,
+.dark
+  body:has(.gateway-console):where(
+    :not([data-theme-preset]),
+    [data-theme-preset='default']
+  ) {
   --background: #0d0d0f;
   --foreground: #f5f1ed;
   --card: #141416;

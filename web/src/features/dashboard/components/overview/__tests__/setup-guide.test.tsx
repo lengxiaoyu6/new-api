@@ -23,7 +23,14 @@ import {
   createRouter,
   RouterProvider,
 } from '@tanstack/react-router'
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -107,6 +114,37 @@ async function renderOverview() {
 }
 
 describe('overview setup guide', () => {
+  it('keeps usage before balance in the original combined summary panel', async () => {
+    await renderOverview()
+    const heading = await screen.findByRole('heading', {
+      name: 'Usage at a glance',
+    })
+    const summary = heading.closest<HTMLElement>('.bg-card')
+    expect(summary).toBeInTheDocument()
+    if (!summary) throw new Error('The combined summary panel is missing')
+
+    const layout = heading.closest('.grid')
+    expect(layout).toHaveClass('xl:grid-cols-[minmax(0,1fr)_19rem]')
+    const balance = within(summary)
+      .getByText('Credit remaining')
+      .closest('.border-t')
+    expect(balance).toBeInTheDocument()
+    expect(
+      within(summary).getByRole('button', { name: 'Wallet' })
+    ).toHaveAttribute('href', '/wallet')
+
+    for (const title of ['Historical Usage', 'Request Count']) {
+      const label = within(summary).getByText(title)
+      expect(label.closest('.grid-cols-3')).toBeInTheDocument()
+      expect(balance).not.toContainElement(label)
+      expect(
+        label.compareDocumentPosition(
+          within(summary).getByText('Credit remaining')
+        ) & Node.DOCUMENT_POSITION_FOLLOWING
+      ).toBeTruthy()
+    }
+  })
+
   it('shows usage first and only a header entry when setup is complete', async () => {
     await renderOverview()
 
