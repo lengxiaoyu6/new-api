@@ -24,6 +24,7 @@ import { ErrorState } from '@/components/error-state'
 import { SectionPageLayout } from '@/components/layout'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { formatQuota } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -141,21 +142,54 @@ export function Referral() {
               </div>
             </div>
 
-            <InvitedUsersCard
-              data={invitedQuery.data ?? null}
-              loading={invitedQuery.isLoading}
-              page={invitedPage}
-              onPageChange={setInvitedPage}
-            />
+            <Tabs defaultValue='invited' className='min-w-0 gap-4'>
+              <div className='min-w-0 overflow-x-auto pb-1'>
+                <TabsList
+                  aria-label={t('Referral Program')}
+                  className='h-auto min-h-10 w-max min-w-full sm:min-w-0'
+                >
+                  <TabsTrigger value='invited' className='min-h-9 px-4'>
+                    {t('Invited Users')}
+                  </TabsTrigger>
+                  <TabsTrigger value='earnings' className='min-h-9 px-4'>
+                    {t('Earnings Detail')}
+                  </TabsTrigger>
+                  <TabsTrigger value='withdrawals' className='min-h-9 px-4'>
+                    {t('Withdrawal history')}
+                  </TabsTrigger>
+                  {isAdmin && (
+                    <TabsTrigger value='review' className='min-h-9 px-4'>
+                      {t('Withdrawal review')}
+                    </TabsTrigger>
+                  )}
+                </TabsList>
+              </div>
 
-            <EarningsCard
-              data={earningsQuery.data ?? null}
-              loading={earningsQuery.isLoading}
-              page={earningsPage}
-              onPageChange={setEarningsPage}
-            />
-            <WithdrawalsCard />
-            {isAdmin && <WithdrawalsCard admin />}
+              <TabsContent value='invited' keepMounted className='min-w-0'>
+                <InvitedUsersCard
+                  data={invitedQuery.data ?? null}
+                  loading={invitedQuery.isLoading}
+                  page={invitedPage}
+                  onPageChange={setInvitedPage}
+                />
+              </TabsContent>
+              <TabsContent value='earnings' keepMounted className='min-w-0'>
+                <EarningsCard
+                  data={earningsQuery.data ?? null}
+                  loading={earningsQuery.isLoading}
+                  page={earningsPage}
+                  onPageChange={setEarningsPage}
+                />
+              </TabsContent>
+              <TabsContent value='withdrawals' keepMounted className='min-w-0'>
+                <WithdrawalsCard />
+              </TabsContent>
+              {isAdmin && (
+                <TabsContent value='review' keepMounted className='min-w-0'>
+                  <WithdrawalsCard admin />
+                </TabsContent>
+              )}
+            </Tabs>
           </div>
         </SectionPageLayout.Content>
       </SectionPageLayout>
