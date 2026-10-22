@@ -30,26 +30,56 @@ import {
 import { useTheme } from '@/context/theme-provider'
 import { cn } from '@/lib/utils'
 
-export function ThemeSwitch() {
+type ThemeSwitchProps = {
+  presentation?: 'menu' | 'toggle'
+}
+
+export function ThemeSwitch(props: ThemeSwitchProps) {
   const { t } = useTranslation()
-  const { theme, setTheme } = useTheme()
+  const { theme, resolvedTheme, setTheme } = useTheme()
 
   /* Update theme-color meta tag
    * when theme is updated */
   useEffect(() => {
-    const themeColor = theme === 'dark' ? '#020817' : '#fff'
+    const themeColor = resolvedTheme === 'dark' ? '#020817' : '#fff'
     const metaThemeColor = document.querySelector("meta[name='theme-color']")
     if (metaThemeColor) metaThemeColor.setAttribute('content', themeColor)
-  }, [theme])
+  }, [resolvedTheme])
+
+  const content = (
+    <>
+      <Sun
+        className='size-[1.2rem] scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90'
+        aria-hidden='true'
+      />
+      <Moon
+        className='absolute size-[1.2rem] scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0'
+        aria-hidden='true'
+      />
+      <span className='sr-only'>{t('Toggle theme')}</span>
+    </>
+  )
+
+  if (props.presentation === 'toggle') {
+    return (
+      <Button
+        variant='ghost'
+        size='icon'
+        className='relative h-9 w-9'
+        aria-pressed={resolvedTheme === 'dark'}
+        onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+      >
+        {content}
+      </Button>
+    )
+  }
 
   return (
     <DropdownMenu modal={false}>
       <DropdownMenuTrigger
         render={<Button variant='ghost' size='icon' className='h-9 w-9' />}
       >
-        <Sun className='size-[1.2rem] scale-100 rotate-0 transition-all dark:scale-0 dark:-rotate-90' />
-        <Moon className='absolute size-[1.2rem] scale-0 rotate-90 transition-all dark:scale-100 dark:rotate-0' />
-        <span className='sr-only'>{t('Toggle theme')}</span>
+        {content}
       </DropdownMenuTrigger>
       <DropdownMenuContent align='end'>
         <DropdownMenuItem onClick={() => setTheme('light')}>

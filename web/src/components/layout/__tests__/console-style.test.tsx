@@ -30,8 +30,10 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { DirectionProvider } from '@/context/direction-provider'
+import { ThemeProvider } from '@/context/theme-provider'
 import { api } from '@/lib/api'
 import { STATUS_QUERY_KEY } from '@/lib/status-query'
+import { THEME_STORAGE_KEYS } from '@/lib/theme-storage'
 import { useAuthStore } from '@/stores/auth-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
@@ -41,6 +43,7 @@ import { SectionPageLayout } from '../components/section-page-layout'
 let client: QueryClient
 let style: HTMLStyleElement
 const originalWidth = window.innerWidth
+const originalMatchMedia = window.matchMedia
 
 beforeEach(() => {
   window.localStorage.clear()
@@ -76,7 +79,7 @@ afterEach(() => {
   cleanup()
   client.clear()
   style.remove()
-  document.documentElement.classList.remove('dark')
+  document.documentElement.classList.remove('light', 'dark')
   document.body.removeAttribute('data-theme-preset')
   document.cookie = 'sidebar_state=; path=/; max-age=0'
   Object.defineProperty(window, 'innerWidth', {
@@ -88,7 +91,7 @@ afterEach(() => {
   window.localStorage.clear()
 })
 
-async function renderConsole() {
+async function renderConsole(defaultTheme?: 'light' | 'dark' | 'system') {
   const router = createRouter({
     routeTree: createRootRoute({
       component: () => (
@@ -105,14 +108,108 @@ async function renderConsole() {
     history: createMemoryHistory({ initialEntries: ['/'] }),
   })
   await router.load()
-  return render(
+  const content = (
     <DirectionProvider>
       <QueryClientProvider client={client}>
         <RouterProvider router={router} />
       </QueryClientProvider>
     </DirectionProvider>
   )
+  return render(
+    defaultTheme ? (
+      <ThemeProvider defaultTheme={defaultTheme}>{content}</ThemeProvider>
+    ) : (
+      content
+    )
+  )
 }
+
+it.each([1280, 390])(
+  'omits the header search entry at %ipx while retaining navigation controls',
+  async (width) => {
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      value: width,
+    })
+    await renderConsole()
+    const header = within(screen.getByRole('banner'))
+
+    expect(
+      header.queryByRole('button', { name: 'Search' })
+    ).not.toBeInTheDocument()
+    expect(header.getByRole('button', { name: 'Toggle Sidebar' })).toBeEnabled()
+    expect(header.getByRole('button', { name: 'Notifications' })).toBeEnabled()
+    expect(
+      header.getByRole('button', { name: 'Change language' })
+    ).toBeEnabled()
+    expect(header.getByRole('button', { name: 'Toggle theme' })).toBeEnabled()
+    expect(
+      header.queryByRole('button', { name: 'Open theme settings' })
+    ).not.toBeInTheDocument()
+    expect(header.getByRole('link', { name: 'Home' })).toHaveAttribute(
+      'href',
+      '/'
+    )
+    expect(header.getByRole('link', { name: 'Console' })).toHaveAttribute(
+      'href',
+      '/dashboard'
+    )
+  }
+)
+
+it.each([
+  { theme: 'light', systemDark: false, initial: 'light', next: 'dark' },
+  { theme: 'dark', systemDark: false, initial: 'dark', next: 'light' },
+  { theme: 'system', systemDark: false, initial: 'light', next: 'dark' },
+  { theme: 'system', systemDark: true, initial: 'dark', next: 'light' },
+] as const)(
+  'switches the $theme theme from $initial to $next without opening settings',
+  async ({ theme, systemDark, initial, next }) => {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => {
+      const media = originalMatchMedia(query)
+      return {
+        ...media,
+        matches:
+          query === '(prefers-color-scheme: dark)' ? systemDark : media.matches,
+      }
+    })
+    await renderConsole(theme)
+    const user = userEvent.setup()
+    const toggle = screen.getByRole('button', { name: 'Toggle theme' })
+    expect(toggle).toHaveAttribute('aria-pressed', String(initial === 'dark'))
+    expect(document.documentElement).toHaveClass(initial)
+
+    await user.click(toggle)
+
+    expect(document.documentElement).toHaveClass(next)
+    expect(toggle).toHaveAttribute('aria-pressed', String(next === 'dark'))
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(toggle).toHaveFocus()
+
+    await user.keyboard('{Enter}')
+
+    expect(document.documentElement).toHaveClass(initial)
+    expect(toggle).toHaveAttribute('aria-pressed', String(initial === 'dark'))
+    expect(toggle).toHaveFocus()
+  }
+)
+
+it('restores the console theme selection when the page is mounted again', async () => {
+  const firstView = await renderConsole('dark')
+  const user = userEvent.setup()
+  await user.click(screen.getByRole('button', { name: 'Toggle theme' }))
+  expect(window.localStorage.getItem(THEME_STORAGE_KEYS.mode)).toBe('light')
+  firstView.unmount()
+
+  await renderConsole('dark')
+
+  expect(document.documentElement).toHaveClass('light')
+  expect(screen.getByRole('button', { name: 'Toggle theme' })).toHaveAttribute(
+    'aria-pressed',
+    'false'
+  )
+})
 
 it.each(['light', 'dark'])(
   'uses the homepage %s palette for the console and portalled menus',

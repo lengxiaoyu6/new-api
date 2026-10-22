@@ -151,26 +151,36 @@ afterEach(() => {
     .setConfig({ currency: { ...DEFAULT_CURRENCY_CONFIG } })
 })
 
-it('shows desktop remaining and used amounts side by side without labels, with the currency only in the header', () => {
+it('shows desktop used and total amounts separated by a slash, with the currency only in the header', () => {
   renderQuota()
   expect(
     screen.getByRole('columnheader', { name: 'Quota ($)' })
   ).toBeInTheDocument()
   const trigger = screen.getByRole('button', {
-    name: /Remaining 80; Remaining percentage 40%; Used amount 120/,
+    name: /Used amount 120; Current total quota 200/,
   })
-  expect(trigger).toHaveTextContent('80120')
+  expect(trigger).toHaveTextContent('120 / 200')
   expect(trigger).not.toHaveTextContent(/Remaining|Used amount/)
-  expect(
-    trigger.querySelector('[data-slot="api-key-quota-values"]')
-  ).toHaveClass('grid-cols-2')
-  expect(within(trigger).getByText('80')).toHaveClass('text-left')
-  expect(within(trigger).getByText('120')).toHaveClass('text-right')
+  expect(trigger).not.toHaveTextContent('80')
   expect(trigger.parentElement).toHaveClass('max-w-45')
   expect(trigger).not.toHaveTextContent('$')
   expect(trigger.querySelector('svg')).toBeNull()
   expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '40')
 })
+
+it.each([
+  ['unused', 500000, 0, '0 / 1'],
+  ['exhausted', 0, 500000, '1 / 1'],
+  ['overdrawn', -50000, 500000, '1 / 0.9'],
+  ['zero total', 0, 0, '0 / 0'],
+  ['negative total', -500000, 100000, '0.2 / -0.8'],
+])(
+  'shows used and current total amounts for a key with %s quota',
+  (_label, remaining, used, expected) => {
+    renderQuota({ ...key, remain_quota: remaining, used_quota: used })
+    expect(screen.getByRole('button')).toHaveTextContent(expected)
+  }
+)
 
 it.each([
   ['unused', 500000, 0, 100, 'text-emerald-500'],
@@ -184,14 +194,13 @@ it.each([
   'renders the %s progress without invalid values or hiding negative balances',
   (_label, remaining, used, percentage, color) => {
     renderQuota({ ...key, remain_quota: remaining, used_quota: used })
-    const button = screen.getByRole('button')
     const progress = screen.getByRole('progressbar')
     expect(progress).toHaveAttribute('aria-valuenow', String(percentage))
     if (color) expect(progress).toHaveClass(color)
     if (remaining < 0) {
-      expect(
-        within(button).getByText(remaining === -500000 ? '-1' : '-0.1')
-      ).toHaveClass('text-destructive')
+      expect(screen.getByRole('button')).toHaveAccessibleName(
+        new RegExp(`Remaining ${remaining === -500000 ? '-1' : '-0.1'}(?:;|$)`)
+      )
     }
   }
 )
@@ -200,9 +209,8 @@ it('shows unlimited with cumulative usage and explains it on demand', async () =
   renderQuota({ ...key, unlimited_quota: true })
   const button = screen.getByRole('button', { name: /Unlimited/ })
   expect(button).toHaveTextContent('Unlimited')
-  expect(button).toHaveTextContent('Unlimited120')
+  expect(button).toHaveTextContent('120 / Unlimited')
   expect(button).not.toHaveTextContent(/Remaining|Used amount/)
-  expect(within(button).getByText('Unlimited')).toHaveClass('text-left')
   expect(screen.queryByRole('progressbar')).not.toBeInTheDocument()
   await userEvent.click(button)
   const detail = await screen.findByRole('dialog')
@@ -225,7 +233,7 @@ it('keeps small custom-currency amounts exact and shows full values in the detai
     screen.getByRole('columnheader', { name: 'Quota (🐱)' })
   ).toBeInTheDocument()
   const button = screen.getByRole('button')
-  expect(button).toHaveTextContent('0.0038')
+  expect(button).toHaveTextContent('0.0022 / 0.006')
   expect(button).not.toHaveTextContent('🐱')
   await userEvent.click(button)
   const detail = await screen.findByRole('dialog')
@@ -261,7 +269,7 @@ it('recalculates the progress when remaining quota is edited', () => {
     </I18nextProvider>
   )
   expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '60')
-  expect(screen.getByText('180')).toBeInTheDocument()
+  expect(screen.getByRole('button')).toHaveTextContent('120 / 300')
 })
 
 it('opens details with the keyboard and restores focus when Escape closes them', async () => {
@@ -362,7 +370,7 @@ it('combines creation and last use while keeping expiry, models and IP restricti
   expect(within(timeCell).getByText('Last Used')).toBeInTheDocument()
   const quotaHeader = screen.getByRole('columnheader', { name: 'Quota ($)' })
   const quotaTrigger = screen.getByRole('button', {
-    name: /Remaining 80; Remaining percentage 40%; Used amount 120/,
+    name: /Used amount 120; Current total quota 200/,
   })
   expect(quotaHeader).not.toHaveClass('pr-8')
   expect(quotaTrigger.closest('td')).not.toHaveClass('pr-8')
