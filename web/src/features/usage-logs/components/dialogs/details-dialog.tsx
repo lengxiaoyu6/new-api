@@ -516,6 +516,9 @@ export function DetailsDialog(props: DetailsDialogProps) {
   const showAdminIp =
     !!props.log.ip && (showTiming || (props.isAdmin && isTopup))
   const adminInfo = other?.admin_info
+  const responseModel = props.isAdmin
+    ? (adminInfo?.response_model ?? other?.response_model)
+    : undefined
   const topupAuditFields =
     isTopup && props.isAdmin && adminInfo
       ? ([
@@ -1160,13 +1163,13 @@ export function DetailsDialog(props: DetailsDialogProps) {
           />
         )}
 
-        {other?.response_model && (
+        {responseModel && (
           <DetailSection label={t('Response Model')}>
-            <ResponseModelDetails observation={other.response_model} />
+            <ResponseModelDetails observation={responseModel} />
           </DetailSection>
         )}
         {/* Model mapping for logs without response observations */}
-        {!other?.response_model &&
+        {!responseModel &&
           other?.is_model_mapped &&
           other?.upstream_model_name && (
             <DetailSection label={t('Model Mapping')}>

@@ -236,7 +236,10 @@ export function getResponseTimeColor(
 /**
  * Format model name with mapping indicator
  */
-export function formatModelName(log: UsageLog): {
+export function formatModelName(
+  log: UsageLog,
+  isAdmin = false
+): {
   name: string
   isMapped: boolean
   actualModel?: string
@@ -253,7 +256,9 @@ export function formatModelName(log: UsageLog): {
     name: log.model_name,
     isMapped,
     actualModel: isMapped ? other.upstream_model_name : undefined,
-    responseModel: other?.response_model,
+    responseModel: isAdmin
+      ? (other?.admin_info?.response_model ?? other?.response_model)
+      : undefined,
   }
 }
 

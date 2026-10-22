@@ -116,6 +116,7 @@ export interface ToolSurchargeItem {
 
 export interface LogOtherData {
   admin_info?: {
+    response_model?: LogOtherData['response_model']
     request_policy?: PolicyEvent[]
     is_multi_key?: boolean
     multi_key_index?: number
@@ -208,8 +209,8 @@ export interface LogOtherData {
   cache_creation_ratio_1h?: number
   is_model_mapped?: boolean
   upstream_model_name?: string
-  // Diagnostic only. Whether the names disagree is derived in the UI via
-  // isResponseModelMismatch so old rows follow the current comparison rule.
+  // Legacy top-level diagnostics; new logs store this under admin_info.
+  // Both shapes are shown only in the administrator view.
   response_model?: {
     requested_model: string
     upstream_model: string

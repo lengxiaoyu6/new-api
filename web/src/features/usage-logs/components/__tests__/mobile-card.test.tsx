@@ -24,14 +24,26 @@ import {
 } from '@tanstack/react-table'
 import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
+
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { usageLogSchema, type UsageLog } from '../../data/schema'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
 import { UsageLogsMobileList } from '../usage-logs-mobile-card'
-import { UsageLogsProvider, useUsageLogsContext } from '../usage-logs-provider'
+import {
+  UsageLogsProvider,
+  useLogsViewScope,
+  useUsageLogsContext,
+} from '../usage-logs-provider'
 
 const longName = 'enterprise-production-failover-2026-without-any-short-alias'
+const responseModel = {
+  requested_model: longName,
+  upstream_model: 'mapped-model',
+  returned_model: 'unexpected-model',
+}
 const log = usageLogSchema.parse({
   id: 1,
   user_id: 2,
@@ -61,7 +73,8 @@ function Fixture(props: {
   logs?: UsageLog[]
   loading?: boolean
 }) {
-  const columns = useCommonLogsColumns(props.admin ?? true, false)
+  const { isAdminView } = useLogsViewScope()
+  const columns = useCommonLogsColumns(isAdminView, false)
   const context = useUsageLogsContext()
   const table = useReactTable({
     data: props.logs ?? [log],
@@ -74,6 +87,9 @@ function Fixture(props: {
       <button type='button' onClick={() => context.setSensitiveVisible(false)}>
         Hide sensitive data
       </button>
+      <button type='button' onClick={() => context.setViewScope('self')}>
+        Show own logs
+      </button>
       <UsageLogsMobileList
         table={table}
         logCategory='common'
@@ -84,6 +100,11 @@ function Fixture(props: {
 }
 
 function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
+  useAuthStore.getState().auth.setUser({
+    id: 1,
+    username: 'viewer',
+    role: props.admin === false ? ROLE.USER : ROLE.ADMIN,
+  })
   return render(
     <QueryClientProvider
       client={
@@ -97,34 +118,73 @@ function renderLogs(props: Parameters<typeof Fixture>[0] = {}) {
   )
 }
 
-it('shows model mismatch evidence when tapping the mobile model badge', async () => {
-  const user = userEvent.setup()
-  renderLogs({
-    logs: [
-      {
-        ...log,
-        other: JSON.stringify({
-          response_model: {
-            requested_model: longName,
-            upstream_model: 'mapped-model',
-            returned_model: 'unexpected-model',
-          },
-        }),
-      },
-    ],
-  })
-  await user.click(
-    screen.getByRole('button', {
-      name: `Model: ${longName}, Response model: unexpected-model`,
-    })
-  )
-  const dialog = await screen.findByRole('dialog', { name: 'Model' })
-  expect(
-    within(dialog).getByText('Response model: unexpected-model')
-  ).toBeVisible()
-  expect(within(dialog).getByText('mapped-model')).toBeVisible()
-  expect(within(dialog).getByText('unexpected-model')).toBeVisible()
+afterEach(() => {
+  useAuthStore.getState().auth.reset()
 })
+
+it.each([false, true])(
+  'hides response model diagnostics in mobile cards for ordinary users even with cached admin data (legacy: %s)',
+  async (legacy) => {
+    const user = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    renderLogs({
+      admin: false,
+      logs: [
+        {
+          ...log,
+          other: JSON.stringify(
+            legacy
+              ? { response_model: responseModel }
+              : { admin_info: { response_model: responseModel } }
+          ),
+        },
+      ],
+    })
+    expect(screen.queryByText(/Response model:/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: `Model: ${longName}` }))
+    expect(copy).toHaveBeenCalledWith(longName)
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.queryByText('unexpected-model')).not.toBeInTheDocument()
+  }
+)
+
+it.each([false, true])(
+  'shows model mismatch evidence to administrators when tapping the mobile model badge (legacy: %s)',
+  async (legacy) => {
+    const user = userEvent.setup()
+    renderLogs({
+      logs: [
+        {
+          ...log,
+          other: JSON.stringify(
+            legacy
+              ? { response_model: responseModel }
+              : { admin_info: { response_model: responseModel } }
+          ),
+        },
+      ],
+    })
+    await user.click(
+      screen.getByRole('button', {
+        name: `Model: ${longName}, Response model: unexpected-model`,
+      })
+    )
+    const dialog = await screen.findByRole('dialog', { name: 'Model' })
+    expect(
+      within(dialog).getByText('Response model: unexpected-model')
+    ).toBeVisible()
+    expect(within(dialog).getByText('mapped-model')).toBeVisible()
+    expect(within(dialog).getByText('unexpected-model')).toBeVisible()
+    await user.keyboard('{Escape}')
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+    await user.click(screen.getByRole('button', { name: 'Show own logs' }))
+    expect(screen.queryByText(/Response model:/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: `Model: ${longName}` }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  }
+)
 
 it('opens long channel text on tap and copies the complete value', async () => {
   const user = userEvent.setup()

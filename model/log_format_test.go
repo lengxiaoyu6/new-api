@@ -1,6 +1,7 @@
 package model
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -165,6 +166,40 @@ func TestLegacyLogOtherVisibilityIsRoleSeparated(t *testing.T) {
 		assert.Equal(t, "preserved", adminInfo["existing_admin_field"])
 		assert.Equal(t, "legacy-policy-rejection", adminInfo["reject_reason"])
 	})
+}
+
+func TestResponseModelLogVisibilityIsRoleSeparated(t *testing.T) {
+	observation := map[string]any{
+		"requested_model": "requested",
+		"upstream_model":  "mapped",
+		"returned_model":  "unexpected",
+	}
+	for _, legacy := range []bool{false, true} {
+		for _, visibility := range []logOtherVisibility{
+			logOtherVisibilityUser, logOtherVisibilityAdmin, logOtherVisibilityRoot,
+		} {
+			t.Run(fmt.Sprintf("legacy=%t/visibility=%d", legacy, visibility), func(t *testing.T) {
+				values := map[string]any{"request_path": "/v1/chat/completions"}
+				if legacy {
+					values["response_model"] = observation
+				} else {
+					values["admin_info"] = map[string]any{"response_model": observation}
+				}
+				stored, err := common.Marshal(values)
+				require.NoError(t, err)
+				formatted := formatLogOtherJSON(string(stored), visibility)
+				parsed, err := common.StrToMap(formatted)
+				require.NoError(t, err)
+				assert.Equal(t, "/v1/chat/completions", parsed["request_path"])
+				if visibility == logOtherVisibilityUser {
+					assert.NotContains(t, parsed, "response_model")
+					assert.NotContains(t, parsed, "admin_info")
+					return
+				}
+				assert.Equal(t, string(stored), formatted)
+			})
+		}
+	}
 }
 
 func TestLegacyRejectReasonDoesNotOverrideScopedValue(t *testing.T) {

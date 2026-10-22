@@ -16,6 +16,12 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import {
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+} from '@tanstack/react-table'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { expect, it, vi } from 'vitest'
@@ -26,7 +32,85 @@ import {
 } from '@/features/channels/lib/model-categories'
 import { getLobeIconNames } from '@/lib/lobe-icon'
 
+import { usageLogSchema } from '../../data/schema'
+import type { LogOtherData } from '../../types'
+import { useCommonLogsColumns } from '../columns/common-logs-columns'
 import { ModelBadge } from '../model-badge'
+import { UsageLogsProvider } from '../usage-logs-provider'
+
+function ModelColumnFixture(props: { isAdmin: boolean; other: LogOtherData }) {
+  const columns = useCommonLogsColumns(props.isAdmin, false)
+  const table = useReactTable({
+    data: [
+      usageLogSchema.parse({
+        id: 1,
+        user_id: 1,
+        created_at: 1,
+        type: 2,
+        content: '',
+        model_name: 'requested-model',
+        other: JSON.stringify(props.other),
+      }),
+    ],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+  })
+  const cell = table
+    .getRowModel()
+    .rows[0].getAllCells()
+    .find((item) => item.column.id === 'model_name')
+  return cell ? flexRender(cell.column.columnDef.cell, cell.getContext()) : null
+}
+
+it.each([
+  { isAdmin: false, legacy: false },
+  { isAdmin: false, legacy: true },
+  { isAdmin: true, legacy: false },
+  { isAdmin: true, legacy: true },
+])(
+  'shows desktop response model diagnostics only in the administrator view ($isAdmin, legacy: $legacy)',
+  async ({ isAdmin, legacy }) => {
+    const user = userEvent.setup()
+    const copy = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const responseModel = {
+      requested_model: 'requested-model',
+      upstream_model: 'mapped-model',
+      returned_model: 'unexpected-model',
+    }
+    render(
+      <QueryClientProvider client={client}>
+        <UsageLogsProvider>
+          <ModelColumnFixture
+            isAdmin={isAdmin}
+            other={
+              legacy
+                ? { response_model: responseModel }
+                : { admin_info: { response_model: responseModel } }
+            }
+          />
+        </UsageLogsProvider>
+      </QueryClientProvider>
+    )
+    if (isAdmin) {
+      expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
+      await user.click(
+        screen.getByRole('button', { name: /Model: requested-model/ })
+      )
+      expect(await screen.findByText('mapped-model')).toBeVisible()
+      expect(screen.getByText('unexpected-model')).toBeVisible()
+    } else {
+      expect(screen.queryByText(/Response model:/)).not.toBeInTheDocument()
+      await user.click(screen.getByText('requested-model'))
+      expect(copy).toHaveBeenCalledWith('requested-model')
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.queryByText('unexpected-model')).not.toBeInTheDocument()
+    }
+    client.clear()
+  }
+)
 
 const providers = [
   {

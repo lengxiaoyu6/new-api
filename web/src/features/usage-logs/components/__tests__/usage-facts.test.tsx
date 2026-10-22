@@ -64,7 +64,11 @@ function makeLog(other: LogOtherData): UsageLog {
   }
 }
 
-function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
+function renderDetails(
+  other: LogOtherData,
+  promptTokens = 0,
+  isAdmin = false
+): QueryClient {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -80,7 +84,7 @@ function renderDetails(other: LogOtherData, promptTokens = 0): QueryClient {
     <QueryClientProvider client={queryClient}>
       <DetailsDialog
         log={{ ...makeLog(other), prompt_tokens: promptTokens }}
-        isAdmin={false}
+        isAdmin={isAdmin}
         isRoot={false}
         open
         onOpenChange={() => undefined}
@@ -94,20 +98,40 @@ function rowValue(label: string): string | null {
   return screen.getByText(label).nextElementSibling?.textContent ?? null
 }
 
-test('shows the recorded request and response models in log details', () => {
-  const queryClient = renderDetails({
-    response_model: {
+test.each([
+  { isAdmin: false, legacy: false },
+  { isAdmin: false, legacy: true },
+  { isAdmin: true, legacy: false },
+  { isAdmin: true, legacy: true },
+])(
+  'shows response model diagnostics in log details only for administrators ($isAdmin, legacy: $legacy)',
+  ({ isAdmin, legacy }) => {
+    const responseModel = {
       requested_model: 'requested-model',
       upstream_model: 'mapped-model',
       returned_model: 'unexpected-model',
-    },
-  })
-  expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
-  expect(rowValue('Request Model')).toBe('requested-model')
-  expect(rowValue('Upstream Model')).toBe('mapped-model')
-  expect(screen.getByText('unexpected-model')).toBeVisible()
-  queryClient.clear()
-})
+    }
+    const queryClient = renderDetails(
+      legacy
+        ? { response_model: responseModel }
+        : { admin_info: { response_model: responseModel } },
+      0,
+      isAdmin
+    )
+    if (isAdmin) {
+      expect(screen.getByText('Response model: unexpected-model')).toBeVisible()
+      expect(rowValue('Request Model')).toBe('requested-model')
+      expect(rowValue('Upstream Model')).toBe('mapped-model')
+      expect(screen.getByText('unexpected-model')).toBeVisible()
+    } else {
+      expect(screen.queryByText('Response Model')).not.toBeInTheDocument()
+      expect(screen.queryByText('mapped-model')).not.toBeInTheDocument()
+      expect(screen.queryByText('unexpected-model')).not.toBeInTheDocument()
+      expect(screen.queryByText(/Response model:/)).not.toBeInTheDocument()
+    }
+    queryClient.clear()
+  }
+)
 
 describe('usage facts billing details', () => {
   test('shows the settled image count and a per-image price', () => {
