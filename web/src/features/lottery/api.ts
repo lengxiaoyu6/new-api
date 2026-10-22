@@ -162,3 +162,10 @@ export async function createLotteryVersion(
   )
   return response.data
 }
+
+export async function savePaymentLottery(
+  payload: LotteryVersionPayload
+): Promise<{ success: boolean; message?: string }> {
+  const response = await api.post('/api/lottery/admin/settings', payload)
+  return response.data
+}

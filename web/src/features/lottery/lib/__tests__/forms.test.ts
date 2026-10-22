@@ -24,7 +24,6 @@ describe('lottery configuration payload', () => {
   test('keeps business dates server-owned', () => {
     const payload = lotteryVersionFormToPayload(
       {
-        thresholdAmount: 10,
         title: 'Evening draw',
         ruleText: 'Spend and draw.',
         prizes: [
@@ -54,6 +53,7 @@ describe('lottery configuration payload', () => {
     )
 
     expect(payload).not.toHaveProperty('business_date')
+    expect(payload.threshold_quota).toBe(0)
     expect(payload.prizes.map((prize) => prize.weight)).toEqual([
       200_000, 800_000,
     ])

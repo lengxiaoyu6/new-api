@@ -291,6 +291,10 @@ func GetLotteryActivity(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"success": false, "code": "LOTTERY_QUALIFICATION_UNAVAILABLE", "message": err.Error()})
 		return
 	}
+	if view.Activity.Name != model.PaymentLotteryName {
+		lotteryError(c, model.ErrLotteryUnavailable)
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": lotteryPublicView(c, view)})
 }
 
@@ -306,6 +310,15 @@ func DrawLottery(c *gin.Context) {
 	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
 	if idempotencyKey == "" || len(idempotencyKey) > 128 {
 		lotteryError(c, errors.New("Idempotency-Key is required and must be at most 128 characters"))
+		return
+	}
+	paymentBased, err := model.IsPaymentLottery(id)
+	if err != nil {
+		lotteryError(c, err)
+		return
+	}
+	if !paymentBased {
+		lotteryError(c, model.ErrLotteryUnavailable)
 		return
 	}
 	result, err := model.DrawLottery(id, c.GetInt("id"), idempotencyKey, time.Now())
@@ -423,7 +436,7 @@ func RequireLotteryPermission(permission authz.Permission) gin.HandlerFunc {
 
 func AdminListLotteryActivities(c *gin.Context) {
 	var activities []model.LotteryActivity
-	if err := model.DB.Order("id desc").Find(&activities).Error; err != nil {
+	if err := model.DB.Where("name = ?", model.PaymentLotteryName).Find(&activities).Error; err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -450,6 +463,14 @@ func AdminCreateLotteryVersion(c *gin.Context) {
 		lotteryError(c, model.ErrLotteryNotFound)
 		return
 	}
+	createLotteryVersion(c, activityID, false)
+}
+
+func AdminSavePaymentLottery(c *gin.Context) {
+	createLotteryVersion(c, 0, true)
+}
+
+func createLotteryVersion(c *gin.Context, activityID int, paymentBased bool) {
 	var request lotteryVersionRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
 		common.ApiError(c, err)
@@ -462,7 +483,15 @@ func AdminCreateLotteryVersion(c *gin.Context) {
 	}
 	version.QuotaPerUnit = quotaPerUnit
 	items := make([]model.LotteryVersionPrizeView, 0, len(request.Prizes))
-	err = model.DB.Transaction(func(tx *gorm.DB) error {
+	err := model.DB.Transaction(func(tx *gorm.DB) error {
+		if paymentBased {
+			activity, err := model.EnsurePaymentLotteryTx(tx, c.GetInt("id"))
+			if err != nil {
+				return err
+			}
+			activityID = activity.Id
+			version.ActivityId = activityID
+		}
 		var activity model.LotteryActivity
 		if err := tx.Select("id").First(&activity, activityID).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -507,7 +536,13 @@ func AdminCreateLotteryVersion(c *gin.Context) {
 			}
 			items = append(items, model.LotteryVersionPrizeView{LotteryVersionPrize: model.LotteryVersionPrize{PrizeId: prize.Id, Title: item.Title, Description: item.Description, Weight: item.Weight, DailyLimit: item.DailyLimit, SortOrder: item.SortOrder, Enabled: item.Enabled}, Prize: prize})
 		}
-		return model.CreateLotteryVersionTx(tx, version, items)
+		if err := model.CreateLotteryVersionTx(tx, version, items); err != nil {
+			return err
+		}
+		if paymentBased {
+			return model.PublishLotteryVersionTx(tx, version.Id, c.GetInt("id"))
+		}
+		return nil
 	})
 	if err != nil {
 		lotteryError(c, err)

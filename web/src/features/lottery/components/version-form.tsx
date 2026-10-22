@@ -52,10 +52,10 @@ import {
 import { Spinner } from '@/components/ui/spinner'
 import { Textarea } from '@/components/ui/textarea'
 import { toIntlLocale } from '@/i18n/languages'
-import { formatNumber, quotaUnitsToEditableAmount } from '@/lib/format'
+import { formatNumber } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
-import { createLotteryVersion } from '../api'
+import { savePaymentLottery } from '../api'
 import {
   DEFAULT_LOTTERY_PRIZES,
   getLotteryVersionFormSchema,
@@ -65,7 +65,7 @@ import {
 import type { LotteryAdminVersion } from '../types'
 
 type LotteryVersionFormProps = {
-  activityId: number
+  activityId?: number
   activityName: string
   latestVersion?: LotteryAdminVersion
 }
@@ -91,22 +91,18 @@ function versionDefaults(
 ): LotteryVersionFormValues {
   if (!latestVersion) {
     return {
-      thresholdAmount: 0,
       title: activityName,
       ruleText: defaultRule,
       prizes: DEFAULT_LOTTERY_PRIZES.map((prize) => ({ ...prize })),
     }
   }
   return {
-    thresholdAmount: quotaUnitsToEditableAmount(latestVersion.threshold_quota),
     title: localizedValue(latestVersion.title, locale) || activityName,
     ruleText: localizedValue(latestVersion.rule_text, locale) || defaultRule,
     prizes: latestVersion.prizes.map((prize) => ({
+      prizeId: prize.id,
       code: prize.code,
-      type:
-        prize.type === 'again' || prize.type === 'thanks'
-          ? prize.type
-          : 'balance',
+      type: prize.type === 'thanks' ? 'thanks' : 'balance',
       balanceAmount: prize.balance_amount,
       totalStock: prize.total_stock,
       dailyLimit: prize.daily_limit,
@@ -122,7 +118,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
   const queryClient = useQueryClient()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language) || 'en'
   const defaultRule = t(
-    'Spend the required amount during the configured period to draw once.'
+    'Each successful online payment grants one draw. Unused draws carry over.'
   )
   const schema = getLotteryVersionFormSchema(t)
   const form = useForm<LotteryVersionFormValues>({
@@ -161,21 +157,26 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
   ])
 
   const mutation = useMutation({
-    mutationFn: (value: LotteryVersionFormValues) =>
-      createLotteryVersion(
-        props.activityId,
-        lotteryVersionFormToPayload(value, locale)
-      ),
-    onSuccess: async (response) => {
+    mutationFn: async (value: LotteryVersionFormValues) => {
+      const response = await savePaymentLottery(
+        lotteryVersionFormToPayload(value, locale, props.latestVersion)
+      )
       if (!response.success) {
         throw new Error(
           response.message || t('Unable to save lottery configuration')
         )
       }
+      return response
+    },
+    onSuccess: async () => {
       toast.success(t('Lottery configuration saved'))
-      await queryClient.invalidateQueries({
-        queryKey: ['lottery-admin-versions', props.activityId],
-      })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['lottery-admin-versions'] }),
+        queryClient.invalidateQueries({
+          queryKey: ['lottery-admin-activities'],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['lottery-activities'] }),
+      ])
     },
     onError: (error) =>
       handleServerError(error, t('Unable to save lottery configuration')),
@@ -204,25 +205,11 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
       <CardContent>
         <form onSubmit={form.handleSubmit((value) => mutation.mutate(value))}>
           <FieldGroup>
-            <div className='grid gap-4 sm:grid-cols-2'>
-              <Field data-invalid={!!form.formState.errors.thresholdAmount}>
-                <FieldLabel htmlFor='lottery-required-spend'>
-                  {t('Required spend')}
-                </FieldLabel>
-                <Input
-                  id='lottery-required-spend'
-                  type='number'
-                  min={0}
-                  step='any'
-                  inputMode='decimal'
-                  aria-invalid={!!form.formState.errors.thresholdAmount}
-                  {...form.register('thresholdAmount', { valueAsNumber: true })}
-                />
-                <FieldError>
-                  {form.formState.errors.thresholdAmount?.message}
-                </FieldError>
-              </Field>
-            </div>
+            <p className='text-muted-foreground text-sm'>
+              {t(
+                'Existing prize amounts and initial stock are fixed. Add stock below or create a new prize to change the reward.'
+              )}
+            </p>
             <Field data-invalid={!!form.formState.errors.title}>
               <FieldLabel htmlFor='lottery-version-title'>
                 {t('Lottery title')}
@@ -294,6 +281,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                             </FieldLabel>
                             <Input
                               id={`lottery-prize-${index}-code`}
+                              readOnly={prizes[index]?.prizeId != null}
                               aria-invalid={
                                 !!form.formState.errors.prizes?.[index]?.code
                               }
@@ -320,10 +308,10 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                               render={({ field }) => (
                                 <Select
                                   value={field.value}
+                                  disabled={prizes[index]?.prizeId != null}
                                   onValueChange={(value) => {
                                     if (
                                       value !== 'balance' &&
-                                      value !== 'again' &&
                                       value !== 'thanks'
                                     ) {
                                       return
@@ -359,9 +347,6 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                                     <SelectGroup>
                                       <SelectItem value='balance'>
                                         {t('Balance reward')}
-                                      </SelectItem>
-                                      <SelectItem value='again'>
-                                        {t('Draw again')}
                                       </SelectItem>
                                       <SelectItem value='thanks'>
                                         {t('Thank you for participating')}
@@ -425,6 +410,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                               </FieldLabel>
                               <Input
                                 id={`lottery-prize-${index}-amount`}
+                                readOnly={prizes[index]?.prizeId != null}
                                 type='number'
                                 min={0}
                                 step={0.00000001}
@@ -460,6 +446,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                               </FieldLabel>
                               <Input
                                 id={`lottery-prize-${index}-stock`}
+                                readOnly={prizes[index]?.prizeId != null}
                                 type='number'
                                 min={0}
                                 step={1}

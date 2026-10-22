@@ -168,6 +168,7 @@ export type LotteryAdminPrize = {
 }
 
 export type LotteryVersionPrizePayload = {
+  prize_id?: number
   type: string
   code: string
   balance_amount: number

@@ -685,6 +685,9 @@ func GetLotteryActivityView(activityID, userID int, now time.Time) (*LotteryActi
 			prizes[i].DailyIssued = dailyIssued[prizes[i].Prize.Id]
 		}
 	}
+	if activity.Name == PaymentLotteryName {
+		return paymentLotteryView(activity, *version, prizes, userID, now)
+	}
 	consumed := int64(0)
 	qualified := participation.BaseUsed
 	if !participation.BaseUsed {
@@ -737,7 +740,7 @@ func GetLotteryActivityView(activityID, userID int, now time.Time) (*LotteryActi
 
 func GetLotteryActivities(userID int, now time.Time) ([]LotteryActivityView, error) {
 	var activities []LotteryActivity
-	if err := DB.Where("end_at > ? AND status IN ?", now.Unix(), []string{LotteryActivityActive, LotteryActivityPaused}).Order("start_at asc, id asc").Find(&activities).Error; err != nil {
+	if err := DB.Where("name = ? AND status IN ?", PaymentLotteryName, []string{LotteryActivityActive, LotteryActivityPaused}).Find(&activities).Error; err != nil {
 		return nil, err
 	}
 	result := make([]LotteryActivityView, 0, len(activities))
@@ -822,6 +825,7 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 	if err := lockForUpdate(tx).First(&activity, activityID).Error; err != nil {
 		return nil, ErrLotteryNotFound
 	}
+	paymentBased := activity.Name == PaymentLotteryName
 	// Idempotency keys are scoped to a user. The user row lock serializes draws
 	// across activities and business dates, so a key cannot be accepted twice
 	// even when requests arrive concurrently for different activities.
@@ -830,7 +834,7 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		return nil, err
 	}
 	for i := range keyedDraws {
-		if keyedDraws[i].ActivityId != activityID || keyedDraws[i].BusinessDate != date {
+		if keyedDraws[i].ActivityId != activityID || !paymentBased && keyedDraws[i].BusinessDate != date {
 			return nil, ErrLotteryIdempotencyConflict
 		}
 		return lotteryDrawResultTx(tx, &keyedDraws[i], true)
@@ -854,12 +858,33 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		}
 		return nil, ErrLotteryUnavailable
 	}
-	participation, err := getOrCreateLotteryParticipationTx(tx, activityID, userID, date, acceptedAt.Unix())
-	if err != nil {
-		return nil, err
+	var payment TopUp
+	participation := &LotteryParticipation{}
+	if paymentBased {
+		err := paymentLotteryOrders(tx, userID, activity.StartAt, acceptedAt.Unix()).
+			Order("complete_time asc, id asc").First(&payment).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrLotteryNotEligible
+		}
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		var err error
+		participation, err = getOrCreateLotteryParticipationTx(tx, activityID, userID, date, acceptedAt.Unix())
+		if err != nil {
+			return nil, err
+		}
 	}
 	attemptNo := 1
 	usingExtra := false
+	if paymentBased {
+		if err := tx.Model(&LotteryDraw{}).Select("COALESCE(MAX(attempt_no), 0) + 1").
+			Where("activity_id = ? AND user_id = ? AND business_date = ?", activityID, userID, date).
+			Scan(&attemptNo).Error; err != nil {
+			return nil, err
+		}
+	}
 	if participation.BaseUsed {
 		maxExtra := max(0, min(activity.MaxAttempts, LotteryMaxAttempts)-1)
 		if participation.ExtraGranted <= participation.ExtraUsed || participation.ExtraUsed >= maxExtra {
@@ -888,7 +913,7 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 	if err := ValidateLotteryVersion(version, prizes); err != nil {
 		return nil, err
 	}
-	if !usingExtra {
+	if !usingExtra && !paymentBased {
 		if qualification == nil {
 			logDB := LOG_DB
 			if LOG_DB == DB {
@@ -972,8 +997,10 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		participation.ExtraUsed++
 	}
 	participation.UpdatedAt = acceptedAt.Unix()
-	if err := tx.Save(participation).Error; err != nil {
-		return nil, err
+	if !paymentBased {
+		if err := tx.Save(participation).Error; err != nil {
+			return nil, err
+		}
 	}
 	draw := &LotteryDraw{
 		ActivityId: activityID, VersionId: version.Id, UserId: userID, BusinessDate: date,
@@ -990,6 +1017,11 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		// the error rolls the transaction back; the caller can retry and receive
 		// the committed idempotent result.
 		return nil, err
+	}
+	if paymentBased {
+		if err := tx.Create(&LotteryPaymentUsage{TopUpId: payment.Id, UserId: userID, DrawId: draw.Id, CreatedAt: acceptedAt.Unix()}).Error; err != nil {
+			return nil, err
+		}
 	}
 	var award *LotteryAward
 	if final.Prize.Type == LotteryPrizeBalance && final.Prize.BalanceQuota > 0 {
@@ -1203,6 +1235,9 @@ func CreateLotteryActivity(activity *LotteryActivity) error {
 		activity.MaxAttempts = LotteryMaxAttempts
 	}
 	activity.Name = strings.TrimSpace(activity.Name)
+	if activity.Name == PaymentLotteryName {
+		return ErrLotteryInvalidConfig
+	}
 	if err := validateLotteryActivity(activity); err != nil {
 		return err
 	}
@@ -1237,11 +1272,21 @@ func CreateLotteryVersionTx(tx *gorm.DB, version *LotteryVersion, prizes []Lotte
 	// A draft activity has no frozen rules yet. Allow its initial configuration
 	// to be prepared after the wall-clock start; later versions remain frozen.
 	if activity.Status == LotteryActivityEnded || now >= activity.EndAt ||
-		(now >= activity.StartAt && hasPublishedVersion) {
+		(activity.Name != PaymentLotteryName && now >= activity.StartAt && hasPublishedVersion) {
 		return errors.New("lottery configuration is frozen after the activity starts")
 	}
 	if version.QuotaPerUnit == 0 {
 		version.QuotaPerUnit = common.QuotaPerUnit
+	}
+	if activity.Name == PaymentLotteryName {
+		if version.ThresholdQuota != 0 {
+			return ErrLotteryInvalidConfig
+		}
+		for _, item := range prizes {
+			if item.Prize.Type == LotteryPrizeAgain {
+				return ErrLotteryInvalidConfig
+			}
+		}
 	}
 	// Keep the legacy column populated for schema compatibility. Configuration
 	// selection is activity-wide; daily state uses LotteryDraw.BusinessDate.
@@ -1292,54 +1337,62 @@ func ListLotteryVersions(activityID int) ([]LotteryVersion, error) {
 
 func PublishLotteryVersion(versionID, operatorID int) error {
 	return DB.Transaction(func(tx *gorm.DB) error {
-		var version LotteryVersion
-		if err := lockForUpdate(tx).First(&version, versionID).Error; err != nil {
-			return err
+		return PublishLotteryVersionTx(tx, versionID, operatorID)
+	})
+}
+
+func PublishLotteryVersionTx(tx *gorm.DB, versionID, operatorID int) error {
+	var version LotteryVersion
+	if err := lockForUpdate(tx).First(&version, versionID).Error; err != nil {
+		return err
+	}
+	var activity LotteryActivity
+	if err := lockForUpdate(tx).First(&activity, version.ActivityId).Error; err != nil {
+		return err
+	}
+	now := common.GetTimestamp()
+	if version.Status == LotteryVersionPublished {
+		if activity.Status != LotteryActivityDraft {
+			return nil
 		}
-		var activity LotteryActivity
-		if err := lockForUpdate(tx).First(&activity, version.ActivityId).Error; err != nil {
-			return err
-		}
-		now := common.GetTimestamp()
-		if version.Status == LotteryVersionPublished {
-			if activity.Status != LotteryActivityDraft {
-				return nil
-			}
-			if now >= activity.EndAt {
-				return ErrLotteryInvalidConfig
-			}
-			return tx.Model(&activity).Updates(map[string]any{
-				"status": LotteryActivityActive, "updated_by": operatorID, "updated_at": now,
-			}).Error
-		}
-		hasPublishedVersion, err := lotteryHasPublishedVersionTx(tx, version.ActivityId)
-		if err != nil {
-			return err
-		}
-		if activity.Status == LotteryActivityEnded || now >= activity.EndAt ||
-			(now >= activity.StartAt && hasPublishedVersion) {
-			return errors.New("lottery configuration must be published before the activity starts")
-		}
-		prizes, err := loadLotteryVersionPrizesTx(tx, version.Id)
-		if err != nil {
-			return err
-		}
-		if err := ValidateLotteryVersion(&version, prizes); err != nil {
-			return err
-		}
-		if err := tx.Model(&LotteryVersion{}).
-			Where("activity_id = ? AND id <> ? AND status = ?", version.ActivityId, version.Id, LotteryVersionPublished).
-			Update("status", LotteryVersionArchived).Error; err != nil {
-			return err
-		}
-		version.Status, version.PublishedAt, version.PublishedBy = LotteryVersionPublished, now, operatorID
-		if err := tx.Save(&version).Error; err != nil {
-			return err
+		if now >= activity.EndAt {
+			return ErrLotteryInvalidConfig
 		}
 		return tx.Model(&activity).Updates(map[string]any{
 			"status": LotteryActivityActive, "updated_by": operatorID, "updated_at": now,
 		}).Error
-	})
+	}
+	hasPublishedVersion, err := lotteryHasPublishedVersionTx(tx, version.ActivityId)
+	if err != nil {
+		return err
+	}
+	if activity.Status == LotteryActivityEnded || now >= activity.EndAt ||
+		(activity.Name != PaymentLotteryName && now >= activity.StartAt && hasPublishedVersion) {
+		return errors.New("lottery configuration must be published before the activity starts")
+	}
+	prizes, err := loadLotteryVersionPrizesTx(tx, version.Id)
+	if err != nil {
+		return err
+	}
+	if err := ValidateLotteryVersion(&version, prizes); err != nil {
+		return err
+	}
+	if err := tx.Model(&LotteryVersion{}).
+		Where("activity_id = ? AND id <> ? AND status = ?", version.ActivityId, version.Id, LotteryVersionPublished).
+		Update("status", LotteryVersionArchived).Error; err != nil {
+		return err
+	}
+	version.Status, version.PublishedAt, version.PublishedBy = LotteryVersionPublished, now, operatorID
+	if err := tx.Save(&version).Error; err != nil {
+		return err
+	}
+	status := LotteryActivityActive
+	if activity.Name == PaymentLotteryName && activity.Status == LotteryActivityPaused {
+		status = LotteryActivityPaused
+	}
+	return tx.Model(&activity).Updates(map[string]any{
+		"status": status, "updated_by": operatorID, "updated_at": now,
+	}).Error
 }
 
 func SetLotteryActivityStatus(activityID int, status string, operatorID int) error {
@@ -1353,6 +1406,9 @@ func SetLotteryActivityStatus(activityID int, status string, operatorID int) err
 				return ErrLotteryNotFound
 			}
 			return err
+		}
+		if activity.Name == PaymentLotteryName && status == LotteryActivityEnded {
+			return ErrLotteryInvalidConfig
 		}
 		if activity.Status == LotteryActivityEnded && status != LotteryActivityEnded {
 			return ErrLotteryInvalidConfig

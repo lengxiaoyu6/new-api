@@ -19,9 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
-import { parseQuotaFromDollars } from '@/lib/format'
-
-import type { LotteryVersionPayload } from '../types'
+import type { LotteryAdminVersion, LotteryVersionPayload } from '../types'
 
 const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/
 
@@ -124,8 +122,9 @@ export type LotteryStockFormValues = z.infer<
 >
 
 const lotteryPrizeSchema = z.object({
+  prizeId: z.number().int().positive().optional(),
   code: z.string().trim().min(1).max(64),
-  type: z.enum(['balance', 'again', 'thanks']),
+  type: z.enum(['balance', 'thanks']),
   balanceAmount: z.number().finite().min(0),
   totalStock: z.number().int().min(0),
   dailyLimit: z.number().int().min(0),
@@ -137,7 +136,6 @@ const lotteryPrizeSchema = z.object({
 export function getLotteryVersionFormSchema(t: TFunction) {
   return z
     .object({
-      thresholdAmount: z.number().finite().min(0),
       title: z.string().trim().min(1, t('Lottery title is required')).max(128),
       ruleText: z
         .string()
@@ -149,7 +147,6 @@ export function getLotteryVersionFormSchema(t: TFunction) {
     .superRefine((value, context) => {
       const codes = new Set<string>()
       let thanksCount = 0
-      let againCount = 0
       let totalWeight = 0
       value.prizes.forEach((prize, index) => {
         const code = prize.code.trim()
@@ -162,7 +159,6 @@ export function getLotteryVersionFormSchema(t: TFunction) {
         }
         codes.add(code)
         if (prize.type === 'thanks') thanksCount += 1
-        if (prize.type === 'again') againCount += 1
         if (prize.type === 'balance' && prize.balanceAmount <= 0) {
           context.addIssue({
             code: 'custom',
@@ -177,13 +173,6 @@ export function getLotteryVersionFormSchema(t: TFunction) {
           code: 'custom',
           path: ['prizes'],
           message: t('Configure exactly one participation prize'),
-        })
-      }
-      if (againCount > 1) {
-        context.addIssue({
-          code: 'custom',
-          path: ['prizes'],
-          message: t('Configure at most one extra draw prize'),
         })
       }
       if (totalWeight !== 1_000_000) {
@@ -222,22 +211,12 @@ export const DEFAULT_LOTTERY_PRIZES: LotteryVersionFormValues['prizes'] = [
     description: '',
   },
   {
-    code: 'again',
-    type: 'again',
-    balanceAmount: 0,
-    totalStock: 0,
-    dailyLimit: 0,
-    probability: 10,
-    title: '',
-    description: '',
-  },
-  {
     code: 'thanks',
     type: 'thanks',
     balanceAmount: 0,
     totalStock: 0,
     dailyLimit: 0,
-    probability: 40,
+    probability: 50,
     title: '',
     description: '',
   },
@@ -250,22 +229,33 @@ function localizedText(value: string, locale: string): Record<string, string> {
 
 export function lotteryVersionFormToPayload(
   value: LotteryVersionFormValues,
-  locale: string
+  locale: string,
+  previous?: LotteryAdminVersion
 ): LotteryVersionPayload {
   return {
-    threshold_quota: parseQuotaFromDollars(value.thresholdAmount),
-    title: localizedText(value.title, locale),
-    rule_text: localizedText(value.ruleText, locale),
+    threshold_quota: 0,
+    title: { ...previous?.title, ...localizedText(value.title, locale) },
+    rule_text: {
+      ...previous?.rule_text,
+      ...localizedText(value.ruleText, locale),
+    },
     prizes: value.prizes.map((prize, index) => {
       const balance = prize.type === 'balance'
+      const existing = previous?.prizes.find(
+        (item) => item.id === prize.prizeId
+      )
       return {
+        prize_id: prize.prizeId,
         type: prize.type,
         code: prize.code.trim(),
         balance_amount: balance ? prize.balanceAmount : 0,
         balance_quota: 0,
         total_stock: balance ? prize.totalStock : 0,
-        title: localizedText(prize.title, locale),
-        description: localizedText(prize.description, locale),
+        title: { ...existing?.title, [locale]: prize.title.trim() },
+        description: {
+          ...existing?.description,
+          [locale]: prize.description.trim(),
+        },
         weight: Math.round(prize.probability * 10000),
         daily_limit: balance ? prize.dailyLimit : 0,
         sort_order: index,

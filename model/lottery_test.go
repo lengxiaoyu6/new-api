@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,7 +19,7 @@ import (
 
 func lotteryTestUser(t *testing.T, quota int) User {
 	t.Helper()
-	user := User{Username: "lottery-" + common.GetRandomString(8), Password: "unused", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, Quota: quota}
+	user := User{Username: "lottery-" + common.GetRandomString(8), AffCode: common.GetRandomString(12), Password: "unused", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1, Quota: quota}
 	require.NoError(t, DB.Create(&user).Error)
 	return user
 }
@@ -576,6 +577,13 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			require.NoError(t, err)
 			sqlDB.SetMaxOpenConns(1)
 			t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+			var databaseVersion string
+			versionQuery := "SELECT VERSION()"
+			if test.database == common.DatabaseTypeSQLite {
+				versionQuery = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&databaseVersion).Error)
+			t.Logf("database version: %s", databaseVersion)
 
 			oldDB, oldLogDB := DB, LOG_DB
 			oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
@@ -589,6 +597,7 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			})
 
 			lotteryTables := []any{
+				&LotteryPaymentUsage{},
 				&LotteryStockAdjustment{}, &LotteryAward{}, &LotteryDraw{},
 				&LotteryPrizeDailyStock{}, &LotteryParticipation{},
 				&LotteryVersionPrize{}, &LotteryVersion{}, &LotteryPrize{},
@@ -600,7 +609,7 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 
 			// Representative latest-release structure: users and subscription
 			// orders already exist while lottery tables and ChargedQuota do not.
-			require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionOrder{}, &Log{}))
+			require.NoError(t, db.AutoMigrate(&User{}, &SubscriptionOrder{}, &TopUp{}, &Log{}))
 			if db.Migrator().HasColumn(&SubscriptionOrder{}, "charged_quota") {
 				require.NoError(t, db.Migrator().DropColumn(&SubscriptionOrder{}, "charged_quota"))
 			}
@@ -688,6 +697,190 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			assert.Equal(t, prize.BalanceAmount, preservedPrize.BalanceAmount)
 			assert.Equal(t, prize.BalanceQuota, preservedPrize.BalanceQuota)
 			assert.Equal(t, prize.Code, preservedPrize.Code)
+
+			// Upgrade the prior lottery schema with existing draw history.
+			require.NoError(t, db.Migrator().DropTable(&LotteryPaymentUsage{}))
+			require.NoError(t, db.AutoMigrate(&LotteryPaymentUsage{}))
+			require.NoError(t, db.AutoMigrate(&LotteryPaymentUsage{}))
+			var keptDraw LotteryDraw
+			require.NoError(t, db.First(&keptDraw, draw.Id).Error)
+			assert.Equal(t, draw.IdempotencyKey, keptDraw.IdempotencyKey)
+			t.Run("payment_lottery", testPaymentLottery)
 		})
 	}
+}
+
+func TestPaymentLottery(t *testing.T) {
+	truncateTables(t)
+	testPaymentLottery(t)
+}
+
+func testPaymentLottery(t *testing.T) {
+	t.Helper()
+	now := time.Now()
+	var activity *LotteryActivity
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		activity, err = EnsurePaymentLotteryTx(tx, 1)
+		return err
+	}))
+	now = time.Unix(activity.StartAt, 0)
+	user := lotteryTestUser(t, 10)
+	prizes := []LotteryPrize{
+		{ActivityId: activity.Id, Code: "balance", Type: LotteryPrizeBalance, BalanceAmount: 2, BalanceQuota: 2, TotalStock: 2},
+		{ActivityId: activity.Id, Code: "thanks", Type: LotteryPrizeThanks},
+	}
+	for i := range prizes {
+		require.NoError(t, DB.Create(&prizes[i]).Error)
+	}
+	items := []LotteryVersionPrizeView{
+		{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, Enabled: true}, Prize: prizes[0]},
+		{LotteryVersionPrize: LotteryVersionPrize{Weight: 500_000, Enabled: true}, Prize: prizes[1]},
+	}
+	version := LotteryVersion{ActivityId: activity.Id, QuotaPerUnit: 1}
+	require.NoError(t, CreateLotteryVersion(&version, items))
+	require.NoError(t, PublishLotteryVersion(version.Id, 1))
+
+	// Successful online subscriptions are mirrored in top_ups with an empty
+	// provider. The subscription and its mirror must grant one chance together.
+	subscription := SubscriptionOrder{
+		UserId: user.Id, TradeNo: "payment-lottery-subscription", Money: 1,
+		PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe,
+		Status: common.TopUpStatusSuccess, CompleteTime: now.Unix(),
+	}
+	require.NoError(t, DB.Create(&subscription).Error)
+	payments := []TopUp{
+		{PaymentProvider: PaymentProviderEpay, PaymentMethod: "alipay", Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentMethod: PaymentMethodStripe, Money: 1, TradeNo: subscription.TradeNo, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderCreem, PaymentMethod: PaymentMethodCreem, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderEpay, PaymentMethod: "alipay", Money: 1, CompleteTime: now.Unix() - 1, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, Status: common.TopUpStatusPending},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusExpired},
+		{PaymentProvider: PaymentProviderStripe, Money: 0, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderBalance, PaymentMethod: PaymentMethodBalance, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Add(time.Hour).Unix(), Status: common.TopUpStatusSuccess},
+	}
+	for i := range payments {
+		payments[i].UserId = user.Id
+		if payments[i].TradeNo == "" {
+			payments[i].TradeNo = fmt.Sprintf("payment-lottery-%d", i)
+		}
+		require.NoError(t, DB.Create(&payments[i]).Error)
+	}
+	view, err := GetLotteryActivityView(activity.Id, user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 4, view.RemainingAttempts)
+	assert.True(t, view.Qualification.Eligible)
+	otherUser := lotteryTestUser(t, 0)
+	_, err = DrawLottery(activity.Id, otherUser.Id, "other-user", now)
+	assert.ErrorIs(t, err, ErrLotteryNotEligible)
+
+	oldRandom := lotteryRandomSource
+	t.Cleanup(func() { lotteryRandomSource = oldRandom })
+	lotteryRandomSource = func() (int64, error) { return 0, nil }
+	first, err := DrawLottery(activity.Id, user.Id, "payment-first", now)
+	require.NoError(t, err)
+	require.NotNil(t, first.Award)
+	for i := range 2 {
+		result, err := DrawLottery(activity.Id, user.Id, fmt.Sprintf("payment-next-%d", i), now)
+		require.NoError(t, err)
+		assert.Equal(t, i+2, result.Draw.AttemptNo)
+		if i == 1 {
+			assert.Equal(t, LotteryPrizeThanks, result.Prize.Type)
+			assert.Equal(t, "stock_unavailable", result.Draw.ConversionReason)
+		}
+	}
+	retry, err := DrawLottery(activity.Id, user.Id, "payment-first", now.Add(24*time.Hour))
+	require.NoError(t, err)
+	assert.True(t, retry.Reused)
+	assert.Equal(t, first.Draw.Id, retry.Draw.Id)
+	// Future-completed orders must not affect the current view.
+	view, err = GetLotteryActivityView(activity.Id, user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, view.RemainingAttempts)
+	require.NoError(t, DB.Delete(&payments[len(payments)-1]).Error)
+	nextDay, err := DrawLottery(activity.Id, user.Id, "payment-tomorrow", now.Add(24*time.Hour))
+	require.NoError(t, err)
+	assert.False(t, nextDay.Reused)
+	_, err = DrawLottery(activity.Id, user.Id, "payment-exhausted", now.Add(24*time.Hour))
+	assert.ErrorIs(t, err, ErrLotteryNotEligible)
+	require.NoError(t, DB.First(&user, user.Id).Error)
+	assert.Equal(t, 14, user.Quota)
+	require.NoError(t, DB.First(&prizes[0], prizes[0].Id).Error)
+	assert.EqualValues(t, 2, prizes[0].IssuedStock)
+
+	// Configuration changes preserve outstanding chances and inventory.
+	require.NoError(t, SetLotteryActivityStatus(activity.Id, LotteryActivityPaused, 1))
+	updatedVersion := LotteryVersion{ActivityId: activity.Id, QuotaPerUnit: 1}
+	items[0].Prize = prizes[0]
+	require.NoError(t, CreateLotteryVersion(&updatedVersion, items))
+	require.NoError(t, PublishLotteryVersion(updatedVersion.Id, 1))
+	require.NoError(t, DB.First(activity, activity.Id).Error)
+	assert.Equal(t, LotteryActivityPaused, activity.Status)
+	assert.Equal(t, now.Unix(), activity.StartAt)
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		existing, err := EnsurePaymentLotteryTx(tx, 1)
+		if err == nil {
+			assert.Equal(t, activity.Id, existing.Id)
+			assert.Equal(t, activity.StartAt, existing.StartAt)
+		}
+		return err
+	}))
+	require.NoError(t, SetLotteryActivityStatus(activity.Id, LotteryActivityActive, 1))
+
+	additional := TopUp{UserId: user.Id, TradeNo: "payment-rollback", PaymentProvider: PaymentProviderStripe,
+		PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(&additional).Error)
+	_, err = AdjustLotteryStock(activity.Id, prizes[0].Id, 1, "payment-stock", 1, "restock")
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", common.MaxWalletQuota).Error)
+	_, err = DrawLottery(activity.Id, user.Id, "payment-rollback", now)
+	assert.ErrorIs(t, err, ErrLotteryWalletLimit)
+	view, err = GetLotteryActivityView(activity.Id, user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 1, view.RemainingAttempts)
+	require.NoError(t, DB.First(&prizes[0], prizes[0].Id).Error)
+	assert.EqualValues(t, 2, prizes[0].IssuedStock)
+
+	// Two different requests compete for the same remaining order.
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", 0).Error)
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		sqlDB, err := DB.DB()
+		require.NoError(t, err)
+		sqlDB.SetMaxOpenConns(4)
+		t.Cleanup(func() { sqlDB.SetMaxOpenConns(1) })
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var group sync.WaitGroup
+	for i := range 2 {
+		group.Go(func() {
+			<-start
+			_, err := DrawLottery(activity.Id, user.Id, fmt.Sprintf("payment-concurrent-%d", i), now)
+			results <- err
+		})
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else {
+			assert.ErrorIs(t, err, ErrLotteryNotEligible)
+		}
+	}
+	assert.Equal(t, 1, successes)
+	var usages int64
+	require.NoError(t, DB.Model(&LotteryPaymentUsage{}).Where("user_id = ?", user.Id).Count(&usages).Error)
+	assert.EqualValues(t, 5, usages)
+	require.NoError(t, DB.AutoMigrate(&LotteryPaymentUsage{}))
+	var keptUsages int64
+	require.NoError(t, DB.Model(&LotteryPaymentUsage{}).Where("user_id = ?", user.Id).Count(&keptUsages).Error)
+	assert.Equal(t, usages, keptUsages)
+	duplicate := LotteryPaymentUsage{TopUpId: payments[0].Id, UserId: user.Id, DrawId: first.Draw.Id + 10000, CreatedAt: now.Unix()}
+	assert.Error(t, DB.Create(&duplicate).Error)
 }

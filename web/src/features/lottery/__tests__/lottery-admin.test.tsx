@@ -45,7 +45,7 @@ const publishedVersion: LotteryAdminVersion = {
   status: 'published',
   threshold_quota: 0,
   quota_per_unit: 500_000,
-  title: { en: activity.name },
+  title: { en: activity.name, fr: 'Tirage' },
   rule_text: { en: 'Spend and draw.' },
   published_at: 1,
   prizes: [
@@ -82,12 +82,16 @@ const publishedVersion: LotteryAdminVersion = {
   ],
 }
 
-function renderLotteryAdmin(initialVersions: LotteryAdminVersion[]) {
+function renderLotteryAdmin(
+  initialVersions: LotteryAdminVersion[],
+  initialActivities: LotteryAdminActivity[] = [activity]
+) {
   useAuthStore.getState().auth.setUser({ id: 1, username: 'root', role: 100 })
   let versions = initialVersions
+  let activities = initialActivities
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     if (url === '/api/lottery/admin/activities') {
-      return { data: { success: true, data: [activity] } } as never
+      return { data: { success: true, data: activities } } as never
     }
     if (url === `/api/lottery/admin/activities/${activity.id}/versions`) {
       return { data: { success: true, data: versions } } as never
@@ -110,6 +114,7 @@ function renderLotteryAdmin(initialVersions: LotteryAdminVersion[]) {
   return {
     client,
     setVersions: (value: LotteryAdminVersion[]) => (versions = value),
+    setActivities: (value: LotteryAdminActivity[]) => (activities = value),
   }
 }
 
@@ -118,23 +123,84 @@ afterEach(() => {
   useAuthStore.getState().auth.reset()
 })
 
-it('keeps the initial prize configuration available after the activity start time', async () => {
-  const { client, setVersions } = renderLotteryAdmin([])
+it('creates an active prize pool on the first configuration save without creating an activity', async () => {
+  const { client, setVersions, setActivities } = renderLotteryAdmin([], [])
   const post = vi.spyOn(api, 'post').mockImplementation(async (url) => {
-    if (url === `/api/lottery/admin/activities/${activity.id}/versions`) {
-      setVersions([{ ...publishedVersion, id: 4, status: 'draft' }])
+    if (url === '/api/lottery/admin/settings') {
+      setVersions([publishedVersion])
+      setActivities([{ ...activity, status: 'active' }])
     }
     return { data: { success: true } } as never
   })
   const user = userEvent.setup()
 
   expect(await screen.findByText('Configure prizes')).toBeVisible()
+  expect(screen.queryByText('Create activity')).not.toBeInTheDocument()
+  expect(screen.queryByLabelText('Required spend')).not.toBeInTheDocument()
   await user.click(screen.getByRole('button', { name: 'Save configuration' }))
-  await waitFor(() => expect(post).toHaveBeenCalled())
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/lottery/admin/settings',
+      expect.objectContaining({ threshold_quota: 0 })
+    )
+  )
   const select = await screen.findByRole('combobox', { name: 'Balance prize' })
   await user.click(select)
   await user.click(await screen.findByRole('option', { name: /balance-2/ }))
   expect(select).toHaveTextContent('balance-2')
+
+  client.clear()
+})
+
+it('keeps published prizes editable and preserves their identity and inventory when saving', async () => {
+  const { client } = renderLotteryAdmin([publishedVersion])
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+
+  const title = await screen.findByLabelText('Lottery title')
+  await user.clear(title)
+  await user.type(title, 'Payment rewards')
+  expect(
+    screen.getByLabelText('Prize code', { selector: '#lottery-prize-0-code' })
+  ).toHaveAttribute('readonly')
+  await user.click(screen.getByRole('button', { name: 'Save configuration' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith(
+      '/api/lottery/admin/settings',
+      expect.objectContaining({
+        title: { en: 'Payment rewards', fr: 'Tirage' },
+        prizes: expect.arrayContaining([
+          expect.objectContaining({ prize_id: 11, total_stock: 10 }),
+        ]),
+      })
+    )
+  )
+
+  client.clear()
+})
+
+it('preserves the edited configuration after a failed save and allows retrying', async () => {
+  const { client } = renderLotteryAdmin([publishedVersion])
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValueOnce({
+      data: { success: false, message: 'Unable to save lottery configuration' },
+    })
+    .mockResolvedValueOnce({ data: { success: true } })
+  const user = userEvent.setup()
+  const title = await screen.findByLabelText('Lottery title')
+  await user.clear(title)
+  await user.type(title, 'Payment rewards')
+
+  const save = screen.getByRole('button', { name: 'Save configuration' })
+  await user.click(save)
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(save).toBeEnabled())
+  expect(title).toHaveValue('Payment rewards')
+  await user.click(save)
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(2))
 
   client.clear()
 })

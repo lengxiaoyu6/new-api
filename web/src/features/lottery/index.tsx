@@ -25,7 +25,7 @@ import {
   RotateCcw,
   WalletCards,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Dialog } from '@/components/dialog'
@@ -49,6 +49,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useMediaQuery } from '@/hooks/use-media-query'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
@@ -135,7 +136,7 @@ function HistoryRows(props: { rows: LotteryDraw[] }) {
   )
 }
 
-function ActivityCard(props: { activity: LotteryActivity }) {
+function ActivityCard(props: { activity: LotteryActivity; active: boolean }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const shouldReduceMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
@@ -148,6 +149,14 @@ function ActivityCard(props: { activity: LotteryActivity }) {
   const [pendingIdempotencyKey, setPendingIdempotencyKey] = useState<
     string | null
   >(null)
+  useEffect(() => {
+    // Hidden panels cannot finish CSS transitions; retain the result for return.
+    if (!props.active && pendingResult) {
+      setDrawResult(pendingResult)
+      setPendingResult(null)
+      setIsSpinning(false)
+    }
+  }, [props.active, pendingResult])
   const drawMutation = useMutation({
     mutationFn: (idempotencyKey: string) =>
       drawLottery(props.activity.id, idempotencyKey),
@@ -224,10 +233,6 @@ function ActivityCard(props: { activity: LotteryActivity }) {
         </div>
         <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
           <span>
-            {t('Required spend')}:{' '}
-            {formatQuota(props.activity.qualification.threshold_quota)}
-          </span>
-          <span>
             {t('Remaining')}: {props.activity.remaining_attempts}
           </span>
         </div>
@@ -249,7 +254,7 @@ function ActivityCard(props: { activity: LotteryActivity }) {
           </p>
         )}
         <Dialog
-          open={drawResult !== null}
+          open={props.active && drawResult !== null}
           onOpenChange={(open) => {
             if (!open) setDrawResult(null)
           }}
@@ -294,11 +299,12 @@ function ActivityCard(props: { activity: LotteryActivity }) {
   )
 }
 
-function LotteryHistorySection() {
+function LotteryHistorySection(props: { active: boolean }) {
   const { t } = useTranslation()
   const [historyPage, setHistoryPage] = useState(1)
   const historyQuery = useQuery({
     queryKey: ['lottery-history', 'all', historyPage],
+    enabled: props.active,
     queryFn: async () => {
       const response = await getLotteryHistory(
         undefined,
@@ -324,7 +330,7 @@ function LotteryHistorySection() {
       <CardHeader className='border-b'>
         <CardTitle className='flex items-center gap-2'>
           <History className='size-4' aria-hidden='true' />
-          {t('History')}
+          {t('Draw history')}
         </CardTitle>
       </CardHeader>
       <CardContent className='pt-4'>
@@ -384,6 +390,7 @@ function LotteryHistorySection() {
 
 export function Lottery() {
   const { t } = useTranslation()
+  const [activeTab, setActiveTab] = useState('draw')
   const activitiesQuery = useQuery({
     queryKey: ['lottery-activities'],
     queryFn: async () => {
@@ -401,23 +408,47 @@ export function Lottery() {
     <SectionPageLayout>
       <SectionPageLayout.Title>{t('Lottery')}</SectionPageLayout.Title>
       <SectionPageLayout.Content>
-        {activitiesQuery.isPending && (
-          <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
-        )}
-        {activitiesQuery.isError && (
-          <ErrorState description={t('Unable to load lottery activities')} />
-        )}
-        {activitiesQuery.data && activitiesQuery.data.length === 0 && (
-          <p className='text-muted-foreground text-sm'>
-            {t('No active lottery activities')}
-          </p>
-        )}
-        <div className='space-y-4'>
-          {activitiesQuery.data?.map((activity) => (
-            <ActivityCard key={activity.id} activity={activity} />
-          ))}
-        </div>
-        <LotteryHistorySection />
+        <Tabs
+          value={activeTab}
+          onValueChange={setActiveTab}
+          className='min-w-0 gap-4'
+        >
+          <TabsList aria-label={t('Lottery')} className='h-10 w-full sm:w-fit'>
+            <TabsTrigger value='draw' className='px-4'>
+              <Gift aria-hidden='true' />
+              {t('Lottery')}
+            </TabsTrigger>
+            <TabsTrigger value='history' className='px-4'>
+              <History aria-hidden='true' />
+              {t('Draw history')}
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value='draw' keepMounted className='min-w-0 space-y-4'>
+            {activitiesQuery.isPending && (
+              <p className='text-muted-foreground text-sm'>{t('Loading...')}</p>
+            )}
+            {activitiesQuery.isError && (
+              <ErrorState
+                description={t('Unable to load lottery activities')}
+              />
+            )}
+            {activitiesQuery.data && activitiesQuery.data.length === 0 && (
+              <p className='text-muted-foreground text-sm'>
+                {t('No lottery prize pool configured')}
+              </p>
+            )}
+            {activitiesQuery.data?.map((activity) => (
+              <ActivityCard
+                key={activity.id}
+                activity={activity}
+                active={activeTab === 'draw'}
+              />
+            ))}
+          </TabsContent>
+          <TabsContent value='history' keepMounted className='min-w-0'>
+            <LotteryHistorySection active={activeTab === 'history'} />
+          </TabsContent>
+        </Tabs>
       </SectionPageLayout.Content>
     </SectionPageLayout>
   )
