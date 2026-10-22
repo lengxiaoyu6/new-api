@@ -25,6 +25,7 @@ import { formatNumber } from '@/lib/format'
 
 import { formatCreemPrice } from '../../lib/format'
 import type { CreemProduct } from '../../types'
+import { PaymentTermsNotice } from '../payment-terms-notice'
 
 interface CreemConfirmDialogProps {
   open: boolean
@@ -51,7 +52,7 @@ export function CreemConfirmDialog({
       onOpenChange={onOpenChange}
       title={t('Confirm Creem Purchase')}
       description={t('Review your purchase details before proceeding.')}
-      contentClassName='max-sm:w-[calc(100vw-1.5rem)] sm:max-w-[425px]'
+      contentClassName='w-[calc(100vw-1.5rem)] !max-w-[600px]'
       footerClassName='grid grid-cols-2 gap-2 sm:flex'
       contentHeight='auto'
       bodyClassName='space-y-4'
@@ -71,6 +72,7 @@ export function CreemConfirmDialog({
         </>
       }
     >
+      <PaymentTermsNotice />
       <div className='space-y-3 py-3 sm:space-y-4 sm:py-4'>
         <div className='flex items-center justify-between'>
           <span className='text-muted-foreground'>{t('Product')}</span>

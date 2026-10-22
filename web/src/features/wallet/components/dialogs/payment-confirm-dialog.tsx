@@ -35,6 +35,7 @@ import { formatLocalCurrencyAmount } from '@/lib/currency'
 import { DEFAULT_DISCOUNT_RATE } from '../../constants'
 import { formatCurrency, getPaymentIcon } from '../../lib'
 import type { PaymentMethod } from '../../types'
+import { PaymentTermsNotice } from '../payment-terms-notice'
 
 interface PaymentConfirmDialogProps {
   open: boolean
@@ -68,7 +69,7 @@ export function PaymentConfirmDialog({
 
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent className='max-sm:w-[calc(100vw-1.5rem)] sm:max-w-md'>
+      <AlertDialogContent className='w-[calc(100vw-1.5rem)] !max-w-[600px]'>
         <AlertDialogHeader>
           <AlertDialogTitle className='text-xl font-semibold'>
             {t('Confirm Payment')}
@@ -77,6 +78,8 @@ export function PaymentConfirmDialog({
             {t('Review your payment details')}
           </AlertDialogDescription>
         </AlertDialogHeader>
+
+        <PaymentTermsNotice />
 
         <div className='space-y-3 py-3 sm:space-y-4 sm:py-4'>
           <div className='flex items-center justify-between'>
