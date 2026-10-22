@@ -95,19 +95,20 @@ func TestAuditLogSortIndexDatabaseMatrix(t *testing.T) {
 					}
 					index, ok := byName["idx_audit_time_event"]
 					require.True(t, ok, "migration must create the audit ordering index")
-					columns := index.Columns()
+					var columns []string
 					if dialect == "postgres" {
-						// The driver's GetIndexes query returns physical table order,
-						// so read the index positions from PostgreSQL itself.
-						columns = nil
+						// GORM's PostgreSQL GetIndexes does not preserve index key order.
 						require.NoError(t, db.Raw(`
-							SELECT pg_get_indexdef(i.indexrelid, p.n, true)
-							FROM pg_index i
-							JOIN pg_class idx ON idx.oid = i.indexrelid
-							JOIN pg_namespace ns ON ns.oid = idx.relnamespace
-							CROSS JOIN LATERAL generate_series(1, i.indnatts::int) p(n)
-							WHERE idx.relname = ? AND ns.nspname = current_schema()
-							ORDER BY p.n`, index.Name()).Scan(&columns).Error)
+SELECT attribute.attname
+FROM pg_catalog.pg_index AS index_meta
+CROSS JOIN LATERAL unnest(index_meta.indkey) WITH ORDINALITY AS index_column(attnum, ordinal_position)
+JOIN pg_catalog.pg_attribute AS attribute
+  ON attribute.attrelid = index_meta.indrelid AND attribute.attnum = index_column.attnum
+WHERE index_meta.indexrelid = to_regclass(?)
+ORDER BY index_column.ordinal_position
+`, index.Name()).Scan(&columns).Error)
+					} else {
+						columns = index.Columns()
 					}
 					assert.Equal(t, []string{"created_at", "event_id"}, columns)
 					for _, original := range originalIndexes {
