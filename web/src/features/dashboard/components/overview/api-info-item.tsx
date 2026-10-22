@@ -42,8 +42,8 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
   const status = props.status
 
   return (
-    <div className='group hover:bg-muted/40 flex items-center justify-between gap-2 px-3 py-2.5 transition-colors sm:gap-3 sm:px-5 sm:py-3'>
-      <div className='flex min-w-0 flex-1 items-center gap-2 sm:gap-3'>
+    <div className='group hover:bg-muted/40 @container/api-row flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 transition-colors sm:gap-3 sm:px-5 sm:py-3'>
+      <div className='flex min-w-0 flex-1 basis-full items-center gap-2 sm:gap-3 @lg/api-row:basis-0'>
         <span
           className={cn(
             'inline-block size-2 shrink-0 rounded-full',
@@ -52,11 +52,11 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
         />
 
         <div className='flex min-w-0 flex-1 flex-col gap-0.5'>
-          <div className='flex items-baseline gap-2'>
-            <span className='font-mono text-sm font-semibold'>
+          <div className='flex min-w-0 flex-col gap-0.5 @lg/api-row:flex-row @lg/api-row:items-baseline @lg/api-row:gap-2'>
+            <span className='min-w-0 font-mono text-sm font-semibold wrap-anywhere'>
               {item.route}
             </span>
-            <span className='text-muted-foreground/60 hidden truncate text-xs md:inline'>
+            <span className='text-muted-foreground/60 truncate text-xs'>
               {item.description}
             </span>
           </div>
@@ -66,7 +66,7 @@ export function ApiInfoItemComponent(props: ApiInfoItemProps) {
         </div>
       </div>
 
-      <div className='flex shrink-0 items-center gap-2'>
+      <div className='ml-auto flex shrink-0 items-center gap-2'>
         <div className='flex items-center'>
           {status.testing && (
             <StatusBadge

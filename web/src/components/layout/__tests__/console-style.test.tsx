@@ -148,6 +148,23 @@ it.each(['light', 'dark'])(
   }
 )
 
+it.each(['light', 'dark'])(
+  'gives the entire %s sidebar a card surface and a visible frame',
+  async (theme) => {
+    document.documentElement.classList.toggle('dark', theme === 'dark')
+    await renderConsole()
+    const sidebar = document.querySelector('[data-slot="sidebar-inner"]')
+    expect(sidebar).toBeInTheDocument()
+    if (!sidebar) throw new Error('The sidebar surface is missing')
+
+    const surface = getComputedStyle(sidebar)
+    expect(surface.background).toBe('var(--card)')
+    expect(surface.borderRadius).toBe('1.25rem')
+    expect(surface.boxShadow).toContain('inset')
+    expect(surface.boxShadow).toContain('var(--border)')
+  }
+)
+
 it('preserves page spacing, heading size, and navigation dimensions when applying the console skin', async () => {
   await renderConsole()
   const header = screen.getByRole('banner')

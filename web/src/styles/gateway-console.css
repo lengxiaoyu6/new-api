@@ -2,7 +2,7 @@
 body:has(.gateway-console) {
   --popover: var(--card);
   --popover-foreground: var(--foreground);
-  --sidebar: var(--background);
+  --sidebar: var(--card);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -48,7 +48,16 @@ body:has(.gateway-console):where(
 }
 
 .gateway-console [data-slot='sidebar-inner'] {
-  background: transparent;
+  background: var(--card);
+}
+
+.gateway-console
+  [data-slot='sidebar']:is([data-variant='inset'], [data-variant='floating'])
+  [data-slot='sidebar-inner'] {
+  border-radius: 1.25rem;
+  box-shadow:
+    inset 0 0 0 1px var(--border),
+    0 3px 16px color-mix(in srgb, var(--foreground) 3%, transparent);
 }
 
 body:has(.gateway-console) [data-slot='sidebar-menu-button'] {

@@ -50,7 +50,7 @@ function PanelHeader(props: {
   )
 
   return (
-    <div className='gateway-console-panel-header border-b px-4 py-3 sm:px-5'>
+    <div className='gateway-console-panel-header shrink-0 border-b px-4 py-3 sm:px-5'>
       {props.actions != null ? (
         <div className='flex items-start justify-between gap-2'>
           {heading}
@@ -68,16 +68,21 @@ export function PanelWrapper(props: PanelWrapperProps) {
   const resolvedEmptyMessage = props.emptyMessage ?? t('No data available')
   const height = props.height ?? 'h-64'
   const frameClassName = cn(
-    'gateway-console-panel overflow-hidden rounded-2xl border bg-card shadow-xs',
+    'gateway-console-panel bg-card flex h-full min-w-0 flex-col overflow-hidden rounded-2xl border shadow-xs',
     props.className
+  )
+  const contentClassName = cn(
+    'min-h-0 flex-auto p-4 sm:p-5',
+    height,
+    props.contentClassName
   )
 
   if (props.loading) {
     return (
       <div className={frameClassName}>
         <PanelHeader title={props.title} description={props.description} />
-        <div className={cn('p-4 sm:p-5', props.contentClassName)}>
-          <Skeleton className={`w-full ${height}`} />
+        <div className={contentClassName}>
+          <Skeleton className='size-full' />
         </div>
       </div>
     )
@@ -90,8 +95,7 @@ export function PanelWrapper(props: PanelWrapperProps) {
         <div
           className={cn(
             'text-muted-foreground flex items-center justify-center px-4 text-sm',
-            height,
-            props.contentClassName
+            contentClassName
           )}
         >
           {resolvedEmptyMessage}
@@ -107,9 +111,7 @@ export function PanelWrapper(props: PanelWrapperProps) {
         description={props.description}
         actions={props.headerActions}
       />
-      <div className={cn('p-4 sm:p-5', props.contentClassName)}>
-        {props.children}
-      </div>
+      <div className={contentClassName}>{props.children}</div>
     </div>
   )
 }

@@ -38,13 +38,25 @@ import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth-store'
 import { useSystemConfigStore } from '@/stores/system-config-store'
 
+import { PanelWrapper } from '../../ui/panel-wrapper'
+import { ApiInfoItemComponent } from '../api-info-item'
 import { OverviewDashboard } from '../overview-dashboard'
 
 const storageKey = 'dashboard_overview_setup_guide_expanded'
+const getAnimationsDescriptor = Object.getOwnPropertyDescriptor(
+  HTMLElement.prototype,
+  'getAnimations'
+)
 let client: QueryClient
 let keyLookupError: Error | null
+let contentVisibility: Record<string, boolean>
+let contentData: Record<string, unknown>
 
 beforeEach(() => {
+  Object.defineProperty(HTMLElement.prototype, 'getAnimations', {
+    configurable: true,
+    value: () => [],
+  })
   window.localStorage.clear()
   useSystemConfigStore.setState(useSystemConfigStore.getInitialState(), true)
   useAuthStore.getState().auth.setUser({
@@ -59,6 +71,13 @@ beforeEach(() => {
     defaultOptions: { queries: { retry: false } },
   })
   keyLookupError = null
+  contentVisibility = {
+    api_info_enabled: false,
+    announcements_enabled: false,
+    faq_enabled: false,
+    uptime_kuma_enabled: false,
+  }
+  contentData = {}
   vi.spyOn(api, 'get').mockImplementation(async (url) => {
     switch (url) {
       case '/api/token/?p=1&size=10':
@@ -74,14 +93,13 @@ beforeEach(() => {
       case '/api/status':
         return {
           data: {
-            data: {
-              api_info_enabled: false,
-              announcements_enabled: false,
-              faq_enabled: false,
-              uptime_kuma_enabled: false,
-            },
+            data: { ...contentVisibility, ...contentData },
           },
         }
+      case '/api/uptime/status':
+        return { data: { success: true, data: [] } }
+      case '/api/perf-metrics/summary':
+        return { data: { success: true, data: { models: [] } } }
       case '/api/user/models':
         return { data: { success: true, data: ['gpt-4o-mini'] } }
       case '/api/data/self':
@@ -94,6 +112,15 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  if (getAnimationsDescriptor) {
+    Object.defineProperty(
+      HTMLElement.prototype,
+      'getAnimations',
+      getAnimationsDescriptor
+    )
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, 'getAnimations')
+  }
   client.clear()
   useAuthStore.setState(useAuthStore.getInitialState(), true)
   useSystemConfigStore.setState(useSystemConfigStore.getInitialState(), true)
@@ -112,6 +139,204 @@ async function renderOverview() {
     </QueryClientProvider>
   )
 }
+
+describe('overview content layout', () => {
+  it('reserves the same content height while an information panel is loading', () => {
+    render(
+      <PanelWrapper
+        title='API Info'
+        loading
+        height='h-72'
+        contentClassName='p-0 sm:p-0'
+      />
+    )
+
+    const panel = screen.getByText('API Info').closest('.gateway-console-panel')
+    expect(panel).toHaveClass('flex', 'h-full', 'flex-col')
+    expect(panel?.lastElementChild).toHaveClass('h-72', 'flex-auto')
+    expect(panel?.querySelector('[data-slot="skeleton"]')).toHaveClass(
+      'size-full'
+    )
+  })
+
+  it('keeps long API details above the actions in narrow panels', async () => {
+    const user = userEvent.setup()
+    const onTest = vi.fn()
+    const item = {
+      route: 'Global application endpoint with a long display name',
+      url: 'https://api.example.com/compatible/very-long-application-endpoint',
+      description: 'OpenAI-compatible endpoint for application requests',
+      color: 'blue',
+    }
+    const { container } = render(
+      <ApiInfoItemComponent
+        item={item}
+        status={{ latency: 125, testing: false, error: false }}
+        onTest={onTest}
+      />
+    )
+
+    expect(container.firstElementChild).toHaveClass('flex-wrap')
+    expect(container.firstElementChild?.firstElementChild).toHaveClass(
+      'basis-full',
+      '@lg/api-row:basis-0'
+    )
+    expect(screen.getByText(item.route)).toHaveClass('wrap-anywhere')
+    expect(screen.getByText(item.url)).toHaveClass('truncate')
+    expect(screen.getByRole('button', { name: 'Copy URL' })).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: 'External Speed Test' })
+    ).toBeEnabled()
+    expect(
+      screen.getByRole('button', { name: 'Open in New Tab' })
+    ).toHaveAttribute('href', item.url)
+    await user.click(screen.getByRole('button', { name: 'Test Latency' }))
+    expect(onTest).toHaveBeenCalledWith(item.url)
+  })
+
+  it.each(['empty', 'populated'])(
+    'keeps the three information panels equally sized with %s content',
+    async (state) => {
+      contentVisibility.api_info_enabled = true
+      contentVisibility.announcements_enabled = true
+      contentVisibility.faq_enabled = true
+      if (state === 'populated') {
+        contentData = {
+          api_info: [
+            {
+              route: 'Public API',
+              url: 'https://api.example.com/v1',
+              description: 'Application endpoint',
+              color: 'blue',
+            },
+          ],
+          announcements: [{ id: 1, content: 'Service update' }],
+          faq: [
+            {
+              id: 1,
+              question: 'How can applications connect?',
+              answer: 'Create an API key and configure the endpoint.',
+            },
+          ],
+        }
+      }
+      await renderOverview()
+
+      for (const title of ['API Info', 'Announcements', 'FAQ']) {
+        const panel = (await screen.findByText(title)).closest(
+          '.gateway-console-panel'
+        )
+        expect(panel).toHaveClass('flex', 'h-full', 'flex-col')
+        expect(panel?.lastElementChild).toHaveClass(
+          'min-h-0',
+          'flex-auto',
+          'h-72',
+          'p-0',
+          'sm:p-0'
+        )
+
+        if (state === 'populated') {
+          expect(panel?.querySelector('[data-slot="scroll-area"]')).toHaveClass(
+            'h-full'
+          )
+        }
+      }
+
+      if (state === 'populated') {
+        const user = userEvent.setup()
+        await user.click(
+          screen.getByRole('button', {
+            name: 'How can applications connect?',
+          })
+        )
+        expect(
+          screen.getByText('Create an API key and configure the endpoint.')
+        ).toBeVisible()
+      }
+    }
+  )
+
+  it.each([
+    {
+      enabled: ['api_info_enabled', 'announcements_enabled', 'faq_enabled'],
+      titles: ['API Info', 'Announcements', 'FAQ'],
+      columns: 'lg:grid-cols-3',
+    },
+    {
+      enabled: ['api_info_enabled', 'faq_enabled'],
+      titles: ['API Info', 'FAQ'],
+      columns: 'lg:grid-cols-2',
+    },
+    {
+      enabled: ['announcements_enabled'],
+      titles: ['Announcements'],
+      columns: 'grid-cols-1',
+    },
+  ])(
+    'places $titles in one desktop row and stacks them on mobile',
+    async ({ enabled, titles, columns }) => {
+      for (const key of enabled) contentVisibility[key] = true
+      contentVisibility.uptime_kuma_enabled = true
+      await renderOverview()
+
+      const firstTitle = await screen.findByText(titles[0])
+      const grid = firstTitle.closest('.grid')
+      expect(grid).toHaveClass('grid-cols-1', columns)
+      expect(
+        titles.map((title) => screen.getByText(title).closest('.grid'))
+      ).toEqual(titles.map(() => grid))
+      for (const title of ['API Info', 'Announcements', 'FAQ']) {
+        if (!titles.includes(title)) {
+          expect(screen.queryByText(title)).not.toBeInTheDocument()
+        }
+      }
+      expect(screen.queryByText('Uptime')).not.toBeInTheDocument()
+      expect(api.get).not.toHaveBeenCalledWith('/api/uptime/status')
+    }
+  )
+
+  it('keeps administrator performance health above the three information panels', async () => {
+    useAuthStore.getState().auth.setUser({
+      id: 1,
+      username: 'dashboard-admin',
+      role: 10,
+      quota: 1000000,
+      request_count: 1,
+    })
+    for (const key of Object.keys(contentVisibility)) {
+      contentVisibility[key] = true
+    }
+    await renderOverview()
+
+    const apiInfo = await screen.findByText('API Info')
+    const performance = await screen.findByRole('heading', {
+      name: 'Performance health',
+    })
+    const grid = apiInfo.closest('.grid')
+    expect(grid).toHaveClass('lg:grid-cols-3')
+    expect(performance.closest('.grid')).toBe(grid)
+    expect(performance.closest('section')?.parentElement).toHaveClass(
+      'lg:col-span-full'
+    )
+    expect(
+      performance.compareDocumentPosition(apiInfo) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+  })
+
+  it('omits uptime when it is enabled and all information panels are disabled', async () => {
+    contentVisibility.uptime_kuma_enabled = true
+    await renderOverview()
+
+    await screen.findByRole('button', { name: 'Setup guide' })
+    await waitFor(() => expect(client.isFetching()).toBe(0))
+    expect(screen.queryByText('Uptime')).not.toBeInTheDocument()
+    expect(api.get).not.toHaveBeenCalledWith('/api/uptime/status')
+    for (const title of ['API Info', 'Announcements', 'FAQ']) {
+      expect(screen.queryByText(title)).not.toBeInTheDocument()
+    }
+  })
+})
 
 describe('overview setup guide', () => {
   it('keeps usage before balance in the original combined summary panel', async () => {
