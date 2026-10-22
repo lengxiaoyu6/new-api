@@ -89,6 +89,10 @@ func lotteryError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, "LOTTERY_WALLET_LIMIT"
 	case errors.Is(err, model.ErrLotteryAccountUnavailable):
 		status, code = http.StatusForbidden, "LOTTERY_ACCOUNT_UNAVAILABLE"
+	case errors.Is(err, model.ErrLotteryGrantPermission):
+		status, code = http.StatusForbidden, "LOTTERY_GRANT_FORBIDDEN"
+	case errors.Is(err, model.ErrLotteryPoolMissing):
+		status, code = http.StatusConflict, "LOTTERY_POOL_MISSING"
 	case errors.Is(err, model.ErrLotteryQualification):
 		status, code = http.StatusServiceUnavailable, "LOTTERY_QUALIFICATION_UNAVAILABLE"
 	case errors.Is(err, gorm.ErrRecordNotFound):
@@ -672,4 +676,27 @@ func AdminAdjustLotteryStock(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": adjustment})
+}
+
+func AdminGrantLotteryAttempts(c *gin.Context) {
+	userID, err := strconv.Atoi(c.Param("id"))
+	if err != nil || userID <= 0 {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	var request struct {
+		Count     int    `json:"count"`
+		RequestID string `json:"request_id"`
+		Reason    string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	grant, err := model.GrantLotteryAttempts(userID, c.GetInt("id"), c.GetInt("role"), request.Count, request.RequestID, request.Reason)
+	if err != nil {
+		lotteryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": grant})
 }

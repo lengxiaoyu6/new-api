@@ -18,7 +18,7 @@ func init() {
 			{Action: ActionRead, LabelKey: "View lottery activities", DescriptionKey: "View lottery activities, versions, prizes, and audit records."},
 			{Action: ActionWrite, LabelKey: "Configure lottery activities", DescriptionKey: "Create lottery activities and configure their prizes."},
 			{Action: "publish", LabelKey: "Publish lottery activities", DescriptionKey: "Publish lottery activities before they begin."},
-			{Action: ActionOperate, LabelKey: "Operate lottery activities", DescriptionKey: "Pause, resume, or end lottery activities."},
+			{Action: ActionOperate, LabelKey: "Operate lottery activities", DescriptionKey: "Pause, resume, or end lottery activities and grant draw attempts to users."},
 			{Action: "stock", LabelKey: "Adjust lottery stock", DescriptionKey: "Add inventory to lottery balance prizes."},
 		},
 	})

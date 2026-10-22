@@ -69,6 +69,7 @@ func TestMain(m *testing.M) {
 		&LotteryAward{},
 		&LotteryStockAdjustment{},
 		&LotteryPaymentUsage{},
+		&LotteryAttemptGrant{},
 		&UserAccessToken{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
@@ -105,6 +106,7 @@ func truncateTables(t *testing.T) {
 		DB.Exec("DELETE FROM system_tasks")
 		DB.Exec("DELETE FROM lottery_stock_adjustments")
 		DB.Exec("DELETE FROM lottery_payment_usages")
+		DB.Exec("DELETE FROM lottery_attempt_grants")
 		DB.Exec("DELETE FROM lottery_awards")
 		DB.Exec("DELETE FROM lottery_draws")
 		DB.Exec("DELETE FROM lottery_prize_daily_stocks")

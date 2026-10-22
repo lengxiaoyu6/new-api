@@ -2,7 +2,9 @@ package model
 
 import (
 	"errors"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -10,6 +12,85 @@ import (
 )
 
 const PaymentLotteryName = "online-payment-lottery"
+
+const LotteryMaxGrantedAttempts = 1_000_000
+
+var (
+	ErrLotteryGrantInvalid    = errors.New("Draw attempts must be an integer between 1 and 1000000")
+	ErrLotteryGrantLimit      = errors.New("The user has too many unused granted draw attempts")
+	ErrLotteryGrantPermission = errors.New("No permission to update users of same or higher permission level")
+	ErrLotteryPoolMissing     = errors.New("No lottery prize pool configured")
+)
+
+// LotteryAttemptGrant retains the operator and original count after consumption.
+type LotteryAttemptGrant struct {
+	Id         int    `json:"id" gorm:"primaryKey"`
+	UserId     int    `json:"user_id" gorm:"not null;index"`
+	Count      int    `json:"count" gorm:"not null"`
+	Remaining  int    `json:"remaining" gorm:"not null"`
+	RequestId  string `json:"request_id" gorm:"type:varchar(128);not null;uniqueIndex"`
+	OperatorId int    `json:"operator_id" gorm:"not null;index"`
+	Reason     string `json:"reason" gorm:"type:varchar(255);not null"`
+	CreatedAt  int64  `json:"created_at" gorm:"bigint;not null"`
+}
+
+func GrantLotteryAttempts(userID, operatorID, operatorRole, count int, requestID, reason string) (*LotteryAttemptGrant, error) {
+	requestID, reason = strings.TrimSpace(requestID), strings.TrimSpace(reason)
+	if userID <= 0 || operatorID <= 0 || count <= 0 || count > LotteryMaxGrantedAttempts {
+		return nil, ErrLotteryGrantInvalid
+	}
+	if len(requestID) == 0 || len(requestID) > 128 || utf8.RuneCountInString(reason) > 255 {
+		return nil, ErrLotteryInvalidConfig
+	}
+	if operatorRole < common.RoleAdminUser {
+		return nil, ErrLotteryGrantPermission
+	}
+	var grant LotteryAttemptGrant
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Draws take the same user lock, serializing grants and consumption.
+		var user User
+		if err := lockForUpdate(tx).Select("id, role").First(&user, userID).Error; err != nil {
+			return err
+		}
+		if operatorRole != common.RoleRootUser && operatorRole <= user.Role {
+			return ErrLotteryGrantPermission
+		}
+		err := tx.Where("request_id = ?", requestID).First(&grant).Error
+		if err == nil {
+			if grant.UserId != userID || grant.OperatorId != operatorID || grant.Count != count || grant.Reason != reason {
+				return ErrLotteryIdempotencyConflict
+			}
+			return nil
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		var activity LotteryActivity
+		if err := tx.Select("id").Where("name = ?", PaymentLotteryName).First(&activity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrLotteryPoolMissing
+			}
+			return err
+		}
+		var remaining int64
+		if err := tx.Model(&LotteryAttemptGrant{}).Where("user_id = ?", userID).
+			Select("COALESCE(SUM(remaining), 0)").Scan(&remaining).Error; err != nil {
+			return err
+		}
+		if remaining > int64(LotteryMaxGrantedAttempts-count) {
+			return ErrLotteryGrantLimit
+		}
+		grant = LotteryAttemptGrant{
+			UserId: userID, Count: count, Remaining: count, RequestId: requestID,
+			OperatorId: operatorID, Reason: reason, CreatedAt: common.GetTimestamp(),
+		}
+		return tx.Create(&grant).Error
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &grant, nil
+}
 
 // LotteryPaymentUsage binds a completed online payment to exactly one draw.
 // Subscription payments already have a unique mirrored TopUp trade number.
@@ -69,6 +150,12 @@ func paymentLotteryView(activity LotteryActivity, version LotteryVersion, prizes
 	if err := paymentLotteryOrders(DB, userID, activity.StartAt, now.Unix()).Count(&remaining).Error; err != nil {
 		return nil, err
 	}
+	var granted int64
+	if err := DB.Model(&LotteryAttemptGrant{}).Where("user_id = ?", userID).
+		Select("COALESCE(SUM(remaining), 0)").Scan(&granted).Error; err != nil {
+		return nil, err
+	}
+	remaining += granted
 	status, reason := "ineligible", "payment_required"
 	if remaining > 0 {
 		status, reason = "eligible", "eligible"

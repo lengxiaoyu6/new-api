@@ -859,12 +859,17 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		return nil, ErrLotteryUnavailable
 	}
 	var payment TopUp
+	var grant LotteryAttemptGrant
 	participation := &LotteryParticipation{}
 	if paymentBased {
 		err := paymentLotteryOrders(tx, userID, activity.StartAt, acceptedAt.Unix()).
 			Order("complete_time asc, id asc").First(&payment).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, ErrLotteryNotEligible
+			err = lockForUpdate(tx).Where("user_id = ? AND remaining > 0", userID).
+				Order("id asc").First(&grant).Error
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return nil, ErrLotteryNotEligible
+			}
 		}
 		if err != nil {
 			return nil, err
@@ -1018,9 +1023,19 @@ func drawLotteryTx(tx *gorm.DB, activityID, userID int, idempotencyKey string, a
 		// the committed idempotent result.
 		return nil, err
 	}
-	if paymentBased {
+	if paymentBased && payment.Id != 0 {
 		if err := tx.Create(&LotteryPaymentUsage{TopUpId: payment.Id, UserId: userID, DrawId: draw.Id, CreatedAt: acceptedAt.Unix()}).Error; err != nil {
 			return nil, err
+		}
+	}
+	if grant.Id != 0 {
+		update := tx.Model(&LotteryAttemptGrant{}).Where("id = ? AND remaining > 0", grant.Id).
+			Update("remaining", gorm.Expr("remaining - 1"))
+		if update.Error != nil {
+			return nil, update.Error
+		}
+		if update.RowsAffected != 1 {
+			return nil, ErrLotteryNotEligible
 		}
 	}
 	var award *LotteryAward

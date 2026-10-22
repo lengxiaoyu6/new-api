@@ -394,6 +394,7 @@ func migrateDB() error {
 		&LotteryAward{},
 		&LotteryStockAdjustment{},
 		&LotteryPaymentUsage{},
+		&LotteryAttemptGrant{},
 		&UserAccessToken{},
 	)
 	if err != nil {
@@ -476,6 +477,7 @@ func migrateDBFast() error {
 		{&LotteryAward{}, "LotteryAward"},
 		{&LotteryStockAdjustment{}, "LotteryStockAdjustment"},
 		{&LotteryPaymentUsage{}, "LotteryPaymentUsage"},
+		{&LotteryAttemptGrant{}, "LotteryAttemptGrant"},
 	}
 	// 动态计算migration数量，确保errChan缓冲区足够大
 	errChan := make(chan error, len(migrations))

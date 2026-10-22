@@ -77,6 +77,7 @@ var accessTokenExemptRoutes = []string{
 var accessTokenHelperRoutes = map[string]authz.Permission{
 	"GET /api/lottery/admin/activities":               authz.LotteryRead,
 	"POST /api/lottery/admin/settings":                authz.LotteryWrite,
+	"POST /api/lottery/admin/users/:id/attempts":      authz.LotteryOperate,
 	"POST /api/lottery/admin/activities":              authz.LotteryWrite,
 	"POST /api/lottery/admin/activities/:id/versions": authz.LotteryWrite,
 	"GET /api/lottery/admin/activities/:id/versions":  authz.LotteryRead,

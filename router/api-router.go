@@ -78,6 +78,7 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			handlePermissionRoute(lotteryAdminRoute, "GET", "/activities", authz.LotteryRead, controller.AdminListLotteryActivities)
 			handlePermissionRoute(lotteryAdminRoute, "POST", "/settings", authz.LotteryWrite, middleware.RequirePermission(authz.LotteryPublish), controller.AdminSavePaymentLottery)
+			handlePermissionRoute(lotteryAdminRoute, "POST", "/users/:id/attempts", authz.LotteryOperate, middleware.SessionCookieOriginGuard(), middleware.UserCriticalRateLimit("lottery-grant"), controller.AdminGrantLotteryAttempts)
 			handlePermissionRoute(lotteryAdminRoute, "POST", "/activities", authz.LotteryWrite, controller.AdminCreateLotteryActivity)
 			handlePermissionRoute(lotteryAdminRoute, "POST", "/activities/:id/versions", authz.LotteryWrite, controller.AdminCreateLotteryVersion)
 			handlePermissionRoute(lotteryAdminRoute, "GET", "/activities/:id/versions", authz.LotteryRead, controller.AdminListLotteryVersions)

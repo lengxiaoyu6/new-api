@@ -28,6 +28,7 @@ import {
   ShieldAlert,
   Link2,
   CreditCard,
+  Gift,
 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -48,8 +49,14 @@ import {
 } from '@/components/ui/tooltip'
 import type { AdminUserManageAction } from '@/features/auth/secure-verification'
 import { UserSubscriptionsDialog } from '@/features/subscriptions/components/dialogs/user-subscriptions-dialog'
+import {
+  hasPermission,
+  ADMIN_PERMISSION_RESOURCES,
+  ADMIN_PERMISSION_ACTIONS,
+} from '@/lib/admin-permissions'
 import { handleServerError } from '@/lib/handle-server-error'
 import { AuthOperationError } from '@/lib/secure-verification'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { manageUser, resetUserPasskey, resetUserTwoFA } from '../api'
 import {
@@ -61,6 +68,7 @@ import {
 import { getUserActionMessage } from '../lib'
 import type { User } from '../types'
 import { UserBindingDialog } from './dialogs/user-binding-dialog'
+import { UserLotteryAttemptsDialog } from './user-lottery-attempts-dialog'
 import { useUsers } from './users-provider'
 
 const MANAGE_ACTION_TITLES: Record<AdminUserManageAction, string> = {
@@ -88,6 +96,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const [resetTwoFAOpen, setResetTwoFAOpen] = useState(false)
   const [bindingDialogOpen, setBindingDialogOpen] = useState(false)
   const [subscriptionsDialogOpen, setSubscriptionsDialogOpen] = useState(false)
+  const [lotteryDialogOpen, setLotteryDialogOpen] = useState(false)
+  const operator = useAuthStore((state) => state.auth.user)
+  const canGrantLotteryAttempts =
+    hasPermission(
+      operator,
+      ADMIN_PERMISSION_RESOURCES.LOTTERY,
+      ADMIN_PERMISSION_ACTIONS.OPERATE
+    ) &&
+    (operator?.role === USER_ROLE.ROOT || (operator?.role ?? 0) > user.role)
 
   const handleEdit = () => {
     setCurrentRow(user)
@@ -275,6 +292,20 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
           </DropdownMenuShortcut>
         </DropdownMenuItem>
 
+        {canGrantLotteryAttempts && (
+          <DropdownMenuItem
+            onSelect={(event) => {
+              event.preventDefault()
+              setLotteryDialogOpen(true)
+            }}
+          >
+            {t('Add draw attempts')}
+            <DropdownMenuShortcut>
+              <Gift size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
+        )}
+
         <DropdownMenuSeparator />
 
         <DropdownMenuItem
@@ -354,6 +385,14 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
         user={{ id: user.id, username: user.username }}
         onSuccess={triggerRefresh}
       />
+      {canGrantLotteryAttempts && (
+        <UserLotteryAttemptsDialog
+          key={user.id}
+          open={lotteryDialogOpen}
+          onOpenChange={setLotteryDialogOpen}
+          user={{ id: user.id, username: user.username }}
+        />
+      )}
     </div>
   )
 }

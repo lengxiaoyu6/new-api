@@ -27,7 +27,7 @@ import { quotaUnitsToDollars } from '@/lib/format'
 import { ROLE } from '@/lib/roles'
 
 import { DEFAULT_GROUP } from '../constants'
-import { type UserFormData, type User } from '../types'
+import type { UserFormData, User } from '../types'
 
 // ============================================================================
 // Form Schema
@@ -47,6 +47,22 @@ export const userFormSchema = z.object({
 })
 
 export type UserFormValues = z.infer<typeof userFormSchema>
+
+export const lotteryAttemptsFormSchema = z.object({
+  count: z
+    .string()
+    .trim()
+    .refine(
+      (value) =>
+        /^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 1_000_000,
+      'Draw attempts must be an integer between 1 and 1000000'
+    ),
+  reason: z.string().trim().max(255, 'Reason must be 255 characters or fewer'),
+})
+
+export type LotteryAttemptsFormValues = z.infer<
+  typeof lotteryAttemptsFormSchema
+>
 
 // ============================================================================
 // Form Defaults

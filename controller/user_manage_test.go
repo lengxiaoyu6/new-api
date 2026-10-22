@@ -238,6 +238,81 @@ func createQuotaTestOperator(t *testing.T, db *gorm.DB, role int) model.User {
 	return operator
 }
 
+func TestAdminGrantLotteryAttemptsAuthorizationAndValidation(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.LotteryActivity{}, &model.LotteryAttemptGrant{}))
+	previousMaster, previousSecure := common.IsMasterNode, common.SessionCookieSecure
+	common.IsMasterNode, common.SessionCookieSecure = true, true
+	t.Cleanup(func() {
+		common.IsMasterNode, common.SessionCookieSecure = previousMaster, previousSecure
+	})
+	require.NoError(t, authz.Init(db))
+	require.NoError(t, db.Create(&model.LotteryActivity{Name: model.PaymentLotteryName}).Error)
+	operator := createQuotaTestOperator(t, db, common.RoleRootUser)
+	target := model.User{Username: "grant-target", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "grant-target"}
+	admin := model.User{Username: "grant-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "grant-admin"}
+	require.NoError(t, db.Create(&target).Error)
+	require.NoError(t, db.Create(&admin).Error)
+	require.NoError(t, authz.SetUserPermissions(admin.Id, authz.PermissionsMap{authz.ResourceLottery: {authz.ActionOperate: true}}))
+	tokens := map[int]string{}
+	for _, user := range []model.User{operator, admin, target} {
+		require.NoError(t, model.PublishUserAuthCache(user.Id))
+		bundle, err := service.CreateLoginSession(user.Id, "password", "127.0.0.1", "grant-test")
+		require.NoError(t, err)
+		tokens[user.Id] = bundle.AccessToken
+	}
+
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/api/lottery/admin/users/:id/attempts", middleware.AdminAuth(),
+		middleware.RequirePermission(authz.LotteryOperate), middleware.SessionCookieOriginGuard(), AdminGrantLotteryAttempts)
+	for _, test := range []struct {
+		name, count, requestID, origin string
+		operatorID, targetID, status   int
+	}{
+		{"root grant", "2", "root-grant", "https://panel.example.com", operator.Id, target.Id, http.StatusOK},
+		{"identical retry", "2", "root-grant", "https://panel.example.com", operator.Id, target.Id, http.StatusOK},
+		{"changed retry", "3", "root-grant", "https://panel.example.com", operator.Id, target.Id, http.StatusConflict},
+		{"zero", "0", "invalid", "https://panel.example.com", operator.Id, target.Id, http.StatusBadRequest},
+		{"fraction", "1.5", "invalid", "https://panel.example.com", operator.Id, target.Id, http.StatusOK},
+		{"common user", "1", "denied", "https://panel.example.com", target.Id, target.Id, http.StatusForbidden},
+		{"anonymous", "1", "denied", "https://panel.example.com", 0, target.Id, http.StatusUnauthorized},
+		{"foreign origin", "1", "denied", "https://foreign.example.com", operator.Id, target.Id, http.StatusForbidden},
+		{"admin grant", "1", "admin-grant", "https://panel.example.com", admin.Id, target.Id, http.StatusOK},
+		{"same role", "1", "denied-role", "https://panel.example.com", admin.Id, admin.Id, http.StatusForbidden},
+		{"higher role", "1", "denied-role", "https://panel.example.com", admin.Id, operator.Id, http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"count":%s,"request_id":%q,"reason":"Support"}`, test.count, test.requestID)
+			request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("https://panel.example.com/api/lottery/admin/users/%d/attempts", test.targetID), strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Origin", test.origin)
+			if token := tokens[test.operatorID]; token != "" {
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			assert.Equal(t, test.status, response.Code, response.Body.String())
+			success := test.name == "root grant" || test.name == "identical retry" || test.name == "admin grant"
+			assert.Contains(t, response.Body.String(), fmt.Sprintf(`"success":%t`, success))
+		})
+	}
+	require.NoError(t, authz.SetUserPermissions(admin.Id, authz.PermissionsMap{authz.ResourceLottery: {authz.ActionOperate: false}}))
+	request := httptest.NewRequest(http.MethodPost, fmt.Sprintf("https://panel.example.com/api/lottery/admin/users/%d/attempts", target.Id),
+		strings.NewReader(`{"count":1,"request_id":"revoked-permission"}`))
+	request.Header.Set("Authorization", "Bearer "+tokens[admin.Id])
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Origin", "https://panel.example.com")
+	response := httptest.NewRecorder()
+	engine.ServeHTTP(response, request)
+	assert.Equal(t, http.StatusForbidden, response.Code, response.Body.String())
+	var grants []model.LotteryAttemptGrant
+	require.NoError(t, db.Where("user_id = ?", target.Id).Order("id asc").Find(&grants).Error)
+	require.Len(t, grants, 2)
+	assert.Equal(t, 2, grants[0].Remaining)
+	assert.Equal(t, 1, grants[1].Remaining)
+}
+
 func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, action, content string

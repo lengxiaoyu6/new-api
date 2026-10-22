@@ -597,6 +597,7 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			})
 
 			lotteryTables := []any{
+				&LotteryAttemptGrant{},
 				&LotteryPaymentUsage{},
 				&LotteryStockAdjustment{}, &LotteryAward{}, &LotteryDraw{},
 				&LotteryPrizeDailyStock{}, &LotteryParticipation{},
@@ -706,6 +707,16 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			require.NoError(t, db.First(&keptDraw, draw.Id).Error)
 			assert.Equal(t, draw.IdempotencyKey, keptDraw.IdempotencyKey)
 			t.Run("payment_lottery", testPaymentLottery)
+
+			// Upgrade an existing payment pool without losing history or usage.
+			require.NoError(t, db.Migrator().DropTable(&LotteryAttemptGrant{}))
+			require.NoError(t, db.AutoMigrate(&LotteryAttemptGrant{}))
+			recorder = &migrationSQLRecorder{}
+			require.NoError(t, db.Session(&gorm.Session{Logger: recorder}).AutoMigrate(&LotteryAttemptGrant{}))
+			assert.Empty(t, recorder.schemaMutations())
+			require.NoError(t, db.First(&keptDraw, draw.Id).Error)
+			assert.Equal(t, draw.IdempotencyKey, keptDraw.IdempotencyKey)
+			t.Run("granted_attempts", testGrantedLotteryAttempts)
 		})
 	}
 }
@@ -713,6 +724,145 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 func TestPaymentLottery(t *testing.T) {
 	truncateTables(t)
 	testPaymentLottery(t)
+}
+
+func TestGrantedLotteryAttempts(t *testing.T) {
+	truncateTables(t)
+	user := lotteryTestUser(t, 0)
+	_, err := GrantLotteryAttempts(user.Id, user.Id, common.RoleRootUser, 1, "missing-pool", "")
+	require.ErrorIs(t, err, ErrLotteryPoolMissing)
+	testPaymentLottery(t)
+	testGrantedLotteryAttempts(t)
+}
+
+func testGrantedLotteryAttempts(t *testing.T) {
+	t.Helper()
+	var activity LotteryActivity
+	require.NoError(t, DB.Where("name = ?", PaymentLotteryName).First(&activity).Error)
+	now := time.Unix(activity.StartAt, 0).Add(time.Hour)
+	operator := lotteryTestUser(t, 0)
+	require.NoError(t, DB.Model(&operator).Update("role", common.RoleRootUser).Error)
+	user := lotteryTestUser(t, 0)
+
+	grant, err := GrantLotteryAttempts(user.Id, operator.Id, common.RoleRootUser, 2, "manual-grant", "support")
+	require.NoError(t, err)
+	assert.Equal(t, 2, grant.Remaining)
+	assert.Equal(t, operator.Id, grant.OperatorId)
+	retried, err := GrantLotteryAttempts(user.Id, operator.Id, common.RoleRootUser, 2, "manual-grant", "support")
+	require.NoError(t, err)
+	assert.Equal(t, grant.Id, retried.Id)
+	_, err = GrantLotteryAttempts(user.Id, operator.Id, common.RoleRootUser, 3, "manual-grant", "support")
+	assert.ErrorIs(t, err, ErrLotteryIdempotencyConflict)
+
+	for _, count := range []int{0, -1, LotteryMaxGrantedAttempts + 1} {
+		_, err := GrantLotteryAttempts(user.Id, operator.Id, common.RoleRootUser, count, "invalid-grant", "")
+		assert.ErrorIs(t, err, ErrLotteryGrantInvalid)
+	}
+	_, err = GrantLotteryAttempts(operator.Id, user.Id, common.RoleAdminUser, 1, "denied-role", "")
+	assert.ErrorIs(t, err, ErrLotteryGrantPermission)
+	_, err = GrantLotteryAttempts(user.Id, operator.Id, common.RoleCommonUser, 1, "denied-user", "")
+	assert.ErrorIs(t, err, ErrLotteryGrantPermission)
+	_, err = GrantLotteryAttempts(user.Id, operator.Id, common.RoleRootUser, LotteryMaxGrantedAttempts, "too-many", "")
+	assert.ErrorIs(t, err, ErrLotteryGrantLimit)
+	_, err = GrantLotteryAttempts(0, operator.Id, common.RoleRootUser, 1, "invalid-user", "")
+	assert.ErrorIs(t, err, ErrLotteryGrantInvalid)
+
+	duplicate := *grant
+	duplicate.Id = 0
+	assert.Error(t, DB.Create(&duplicate).Error, "request identifiers are unique at the database level")
+
+	view, err := GetLotteryActivityView(activity.Id, user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 2, view.RemainingAttempts)
+	assert.True(t, view.Qualification.Eligible)
+	otherUser := lotteryTestUser(t, 0)
+	view, err = GetLotteryActivityView(activity.Id, otherUser.Id, now)
+	require.NoError(t, err)
+	assert.Zero(t, view.RemainingAttempts)
+	require.NoError(t, SetLotteryActivityStatus(activity.Id, LotteryActivityPaused, operator.Id))
+	_, err = DrawLottery(activity.Id, user.Id, "grant-paused", now)
+	assert.ErrorIs(t, err, ErrLotteryUnavailable)
+	require.NoError(t, DB.First(grant, grant.Id).Error)
+	assert.Equal(t, 2, grant.Remaining)
+	require.NoError(t, SetLotteryActivityStatus(activity.Id, LotteryActivityActive, operator.Id))
+
+	payment := TopUp{UserId: user.Id, TradeNo: "grant-with-payment", PaymentProvider: PaymentProviderStripe,
+		PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess}
+	require.NoError(t, DB.Create(&payment).Error)
+	view, err = GetLotteryActivityView(activity.Id, user.Id, now)
+	require.NoError(t, err)
+	assert.Equal(t, 3, view.RemainingAttempts)
+	_, err = DrawLottery(activity.Id, user.Id, "grant-payment-first", now)
+	require.NoError(t, err)
+	require.NoError(t, DB.First(grant, grant.Id).Error)
+	assert.Equal(t, 2, grant.Remaining, "payment attempts are consumed first")
+
+	// Failed awards and repeated draw requests must preserve the grant balance.
+	var balancePrize LotteryPrize
+	require.NoError(t, DB.Where("activity_id = ? AND type = ?", activity.Id, LotteryPrizeBalance).First(&balancePrize).Error)
+	_, err = AdjustLotteryStock(activity.Id, balancePrize.Id, operator.Id, "grant-stock", 2, "test")
+	require.NoError(t, err)
+	oldRandom := lotteryRandomSource
+	t.Cleanup(func() { lotteryRandomSource = oldRandom })
+	lotteryRandomSource = func() (int64, error) { return 0, nil }
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", common.MaxWalletQuota).Error)
+	_, err = DrawLottery(activity.Id, user.Id, "grant-wallet-full", now)
+	assert.ErrorIs(t, err, ErrLotteryWalletLimit)
+	require.NoError(t, DB.First(grant, grant.Id).Error)
+	assert.Equal(t, 2, grant.Remaining)
+	require.NoError(t, DB.Model(&User{}).Where("id = ?", user.Id).Update("quota", 0).Error)
+
+	result, err := DrawLottery(activity.Id, user.Id, "grant-draw", now.Add(24*time.Hour))
+	require.NoError(t, err)
+	require.NotNil(t, result.Award)
+	retry, err := DrawLottery(activity.Id, user.Id, "grant-draw", now.Add(48*time.Hour))
+	require.NoError(t, err)
+	assert.Equal(t, result.Draw.Id, retry.Draw.Id)
+	require.NoError(t, DB.First(grant, grant.Id).Error)
+	assert.Equal(t, 1, grant.Remaining)
+
+	// Real row locks serialize two draws competing for the last granted attempt.
+	if !common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+		sqlDB, err := DB.DB()
+		require.NoError(t, err)
+		sqlDB.SetMaxOpenConns(4)
+		t.Cleanup(func() { sqlDB.SetMaxOpenConns(1) })
+	}
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	var group sync.WaitGroup
+	for i := range 2 {
+		group.Go(func() {
+			<-start
+			_, err := DrawLottery(activity.Id, user.Id, fmt.Sprintf("grant-concurrent-%d", i), now.Add(48*time.Hour))
+			results <- err
+		})
+	}
+	close(start)
+	group.Wait()
+	close(results)
+	successes := 0
+	for err := range results {
+		if err == nil {
+			successes++
+		} else {
+			assert.ErrorIs(t, err, ErrLotteryNotEligible)
+		}
+	}
+	assert.Equal(t, 1, successes)
+	require.NoError(t, DB.First(grant, grant.Id).Error)
+	assert.Zero(t, grant.Remaining)
+	assert.Equal(t, 2, grant.Count)
+	require.NoError(t, DB.AutoMigrate(&LotteryAttemptGrant{}))
+	require.NoError(t, DB.First(grant, grant.Id).Error)
+	assert.Zero(t, grant.Remaining)
+	assert.Equal(t, "support", grant.Reason)
+	var usageCount int64
+	require.NoError(t, DB.Model(&LotteryPaymentUsage{}).Where("user_id = ?", user.Id).Count(&usageCount).Error)
+	assert.EqualValues(t, 1, usageCount, "manual attempts must not consume a payment twice")
+	view, err = GetLotteryActivityView(activity.Id, user.Id, now.Add(48*time.Hour))
+	require.NoError(t, err)
+	assert.Zero(t, view.RemainingAttempts)
 }
 
 func testPaymentLottery(t *testing.T) {
