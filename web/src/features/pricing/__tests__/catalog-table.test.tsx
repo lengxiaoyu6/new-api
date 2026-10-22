@@ -53,6 +53,12 @@ const tieredModel: PricingModel = {
   billing_expr:
     'len <= 272000 ? tier("standard", p * 2 + c * 12 + cc * 2.5 + cc1h * 4 + cr * 0) : tier("long", p * 4 + c * 18 + cc * 5 + cc1h * 8)',
 }
+const timeModel: PricingModel = {
+  ...model,
+  billing_mode: 'tiered_expr',
+  billing_expr:
+    'weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") <= 5 && hour("Asia/Shanghai") >= 8 && hour("Asia/Shanghai") < 12 ? tier("morning", p * 1 + c * 4) : weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") <= 5 && hour("Asia/Shanghai") >= 12 && hour("Asia/Shanghai") < 18 ? tier("afternoon", p * 2 + c * 8) : weekday("Asia/Shanghai") >= 1 && weekday("Asia/Shanghai") <= 5 && hour("Asia/Shanghai") >= 18 && hour("Asia/Shanghai") < 23 ? tier("evening", p * 3 + c * 12) : tier("default", p * 4 + c * 16)',
+}
 const conditionalModel: PricingModel = {
   ...model,
   billing_mode: 'tiered_expr',
@@ -420,7 +426,7 @@ describe('responsive catalog table', () => {
       const toggle = screen.getByRole('button', {
         name: 'Pricing rules · example-model',
       })
-      if (view === 'table') expect(toggle).toHaveTextContent('Pricing rules')
+      if (view === 'table') expect(toggle).toHaveTextContent('Conditions')
       await user.click(toggle)
 
       const details = screen.getByRole('region')
@@ -473,6 +479,119 @@ describe('responsive catalog table', () => {
       expect(within(details).getByText('2x')).toBeVisible()
     }
   )
+
+  it.each(['table', 'mobile', 'card'] as const)(
+    'labels weekday time prices as time periods and expands all periods in the %s view',
+    async (view) => {
+      if (view === 'mobile') {
+        const original = window.matchMedia
+        vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+          ...original(query),
+          matches: query === '(max-width: 767px)' || original(query).matches,
+        }))
+      }
+      const user = userEvent.setup()
+      renderCatalog([timeModel], {
+        viewMode: view === 'card' ? 'card' : 'table',
+      })
+      await screen.findByText('98.5%')
+      const toggle = screen.getByRole('button', {
+        name: 'Time-based pricing · example-model',
+      })
+      if (view === 'mobile') {
+        expect(toggle).not.toHaveTextContent(/\S/)
+      } else {
+        expect(toggle).toHaveTextContent('Time periods')
+      }
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      toggle.focus()
+      await user.keyboard('{Enter}')
+
+      const details = screen.getByRole('region', {
+        name: 'example-model · Time-based price table',
+      })
+      expect(toggle).toHaveAttribute('aria-expanded', 'true')
+      expect(details.id).toBe(toggle.getAttribute('aria-controls'))
+      for (const price of ['$1', '$2', '$3', '$4', '$8', '$12', '$16']) {
+        expect(
+          within(details).getAllByText(price, { exact: true }).length
+        ).toBeGreaterThan(0)
+      }
+      expect(details).toHaveTextContent(/Mon.*Fri.*08:00.*12:00/)
+      expect(details).toHaveTextContent(/12:00.*18:00/)
+      expect(details).toHaveTextContent(/18:00.*23:00/)
+      if (view === 'table') {
+        expect(
+          within(details).getByRole('table', {
+            name: 'Time-based price table',
+          })
+        ).toBeVisible()
+      }
+      await user.keyboard(' ')
+      expect(toggle).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.queryByRole('region')).not.toBeInTheDocument()
+    }
+  )
+
+  it.each([
+    {
+      name: 'time periods with token thresholds',
+      expression: `hour("UTC") < 12 ? (${tieredModel.billing_expr}) : tier("night", p * 1 + c * 4)`,
+    },
+    {
+      name: 'time periods with request multipliers',
+      expression: `(${timeModel.billing_expr}) * (header("x-priority") == "high" ? 2 : 1)`,
+    },
+  ])('labels $name as conditions', async ({ expression }) => {
+    const user = userEvent.setup()
+    renderCatalog([{ ...timeModel, billing_expr: expression }])
+    await screen.findByText('98.5%')
+    const toggle = screen.getByRole('button', {
+      name: 'Pricing rules · example-model',
+    })
+    expect(toggle).toHaveTextContent('Conditions')
+    await user.click(toggle)
+    expect(
+      screen.getByRole('region', {
+        name: 'example-model · Pricing rules',
+      })
+    ).toBeVisible()
+  })
+
+  it('updates time-period labels when switching between Chinese locales', async () => {
+    const i18n = createInstance()
+    await i18n.init({
+      lng: 'zh',
+      fallbackLng: false,
+      resources: { zh, 'zh-TW': zhTW },
+    })
+    const user = userEvent.setup()
+    render(
+      <I18nextProvider i18n={i18n}>
+        <QueryClientProvider client={client}>
+          <PricingTable models={[timeModel]} />
+        </QueryClientProvider>
+      </I18nextProvider>
+    )
+    await screen.findByText('98.5%')
+    const toggle = screen.getByRole('button', {
+      name: '时段定价 · example-model',
+    })
+    expect(toggle).toHaveTextContent('时段')
+    await user.click(toggle)
+    expect(
+      screen.getByRole('region', { name: 'example-model · 时段价格表' })
+    ).toBeVisible()
+
+    await act(() => i18n.changeLanguage('zh-TW'))
+
+    expect(
+      screen.getByRole('button', { name: '時段定價 · example-model' })
+    ).toHaveTextContent('時段')
+    expect(
+      screen.getByRole('region', { name: 'example-model · 時段價格表' })
+    ).toBeVisible()
+  })
 
   it.each(['table', 'mobile', 'card'] as const)(
     'expands and collapses tier prices with the keyboard in the %s view',

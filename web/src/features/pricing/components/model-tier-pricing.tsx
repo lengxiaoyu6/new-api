@@ -39,6 +39,7 @@ import {
 export type ModelPricingDetails = {
   tiers: DynamicPricingTier[]
   hasRequestRules: boolean
+  kind: 'time' | 'tiered' | 'rules'
 }
 
 export function ModelTierPricing(props: {
@@ -49,6 +50,10 @@ export function ModelTierPricing(props: {
   cardView?: boolean
 }) {
   const { t, i18n } = useTranslation()
+  const priceTableLabel =
+    props.details.kind === 'time'
+      ? t('Time-based price table')
+      : t('Tiered price table')
   const unit =
     (props.options.tokenUnit ?? DEFAULT_TOKEN_UNIT) === 'K' ? '1K' : '1M'
   const prices: Array<{ type: CatalogPriceType; label: string }> = [
@@ -123,7 +128,7 @@ export function ModelTierPricing(props: {
     content = (
       <StaticDataTable
         className='gateway-catalog-tier-table'
-        tableProps={{ 'aria-label': t('Tiered price table') }}
+        tableProps={{ 'aria-label': priceTableLabel }}
         data={tokenTiers}
         columns={[
           {
@@ -160,7 +165,7 @@ export function ModelTierPricing(props: {
     <section
       id={props.id}
       role='region'
-      aria-label={`${props.model.model_name} · ${t(props.details.hasRequestRules ? 'Pricing rules' : 'Tiered price table')}`}
+      aria-label={`${props.model.model_name} · ${props.details.kind === 'rules' ? t('Pricing rules') : priceTableLabel}`}
       className='gateway-catalog-tier-details'
     >
       {content}

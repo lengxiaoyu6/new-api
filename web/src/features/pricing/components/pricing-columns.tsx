@@ -73,10 +73,12 @@ export function usePricingColumns(
           const details = options.pricingDetails?.get(model.model_name)
           let expansionLabel = t('Tiered pricing')
           let expansionText = t('Tiered')
-          if (details?.hasRequestRules) {
+          if (details?.kind === 'time') {
+            expansionLabel = t('Time-based pricing')
+            expansionText = t('Time periods')
+          } else if (details?.kind === 'rules') {
             expansionLabel = t('Pricing rules')
-            expansionText =
-              details.tiers.length > 1 ? t('Pricing rules') : t('Conditions')
+            expansionText = t('Conditions')
           }
           return (
             <div className='gateway-catalog-model-name'>

@@ -48,6 +48,8 @@ import {
   FILTER_ALL,
   type ViewMode,
 } from '../constants'
+import { splitBillingExprAndRequestRules } from '../lib/billing-expr'
+import { readTimeTokenPricing } from '../lib/billing-expression/display'
 import {
   getDynamicPricingTiers,
   hasDynamicRequestRules,
@@ -137,8 +139,24 @@ export function PricingTable(props: PricingTableProps) {
           ) {
             return []
           }
+          const { billingExpr } = splitBillingExprAndRequestRules(
+            model.billing_expr || ''
+          )
+          const timePricing = readTimeTokenPricing(billingExpr)
+          let kind: ModelPricingDetails['kind'] = 'tiered'
+          if (
+            hasRequestRules ||
+            timePricing?.tiers.some((tier) => tier.conditions.length > 0)
+          ) {
+            kind = 'rules'
+          } else if (timePricing) {
+            kind = 'time'
+          }
           return [
-            [model.model_name, { tiers: modelTiers, hasRequestRules }] as const,
+            [
+              model.model_name,
+              { tiers: modelTiers, hasRequestRules, kind },
+            ] as const,
           ]
         })
       ),
