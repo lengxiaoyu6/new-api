@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
@@ -16,6 +17,20 @@ const (
 	BillingSourceWallet       = "wallet"
 	BillingSourceSubscription = "subscription"
 )
+
+// channelUsageQuota keeps channel accounting independent of subscription funding.
+// A nil ratio preserves accounting for wallets and tasks created before this split.
+func channelUsageQuota(quota int, groupRatio *float64) (int, *common.QuotaClamp) {
+	if groupRatio == nil || quota == 0 || *groupRatio == 1 {
+		return quota, nil
+	}
+	multiplier := max(0, *groupRatio)
+	if quota > 0 && multiplier > math.MaxFloat64/float64(quota) {
+		// Keep the saturation marker JSON-serializable even if the product overflows.
+		return common.QuotaRoundChecked(math.MaxFloat64)
+	}
+	return common.QuotaRoundChecked(float64(quota) * multiplier)
+}
 
 // PreConsumeBilling 根据用户计费偏好创建 BillingSession 并执行预扣费。
 // 会话存储在 relayInfo.Billing 上，供后续 Settle / Refund 使用。

@@ -1,13 +1,18 @@
 package helper
 
 import (
+	"context"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -18,9 +23,14 @@ import (
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
+	hosttypes "github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/mysql"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 func TestModelPriceHelperTieredUsesPreloadedRequestInput(t *testing.T) {
@@ -802,3 +812,254 @@ func (s *priceTestReservation) GetPreConsumedQuota() int { return s.held }
 func (s *priceTestReservation) Reserve(quota int) error  { s.held = max(s.held, quota); return nil }
 
 func (s *priceTestReservation) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }
+
+func TestSubscriptionChannelAccounting(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	require.NoError(t, i18n.Init())
+	oldRedis, oldBatch, oldConsumeLog := common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled
+	common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = false, false, true
+	t.Cleanup(func() {
+		common.RedisEnabled, common.BatchUpdateEnabled, common.LogConsumeEnabled = oldRedis, oldBatch, oldConsumeLog
+	})
+	oldGroupRatios := ratio_setting.GroupRatio2JSONString()
+	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(oldGroupRatios)) })
+	require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(`{"subscription-channel-retry":0.5}`))
+
+	for _, dialect := range []struct {
+		name   common.DatabaseType
+		env    string
+		logEnv string
+	}{
+		{common.DatabaseTypeSQLite, "", ""},
+		{common.DatabaseTypeMySQL, "TEST_SUBSCRIPTION_MYSQL_DSN", "TEST_SUBSCRIPTION_MYSQL_LOG_DSN"},
+		{common.DatabaseTypePostgreSQL, "TEST_SUBSCRIPTION_POSTGRES_DSN", "TEST_SUBSCRIPTION_POSTGRES_LOG_DSN"},
+	} {
+		t.Run(string(dialect.name), func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip(dialect.env + " is not configured")
+			}
+			openDB := func(dsn string) *gorm.DB {
+				var driver gorm.Dialector = sqlite.Open(":memory:")
+				switch dialect.name {
+				case common.DatabaseTypeMySQL:
+					driver = mysql.Open(dsn)
+				case common.DatabaseTypePostgreSQL:
+					driver = postgres.New(postgres.Config{DSN: dsn, PreferSimpleProtocol: true})
+				}
+				db, err := gorm.Open(driver, &gorm.Config{})
+				require.NoError(t, err)
+				sqlDB, err := db.DB()
+				require.NoError(t, err)
+				sqlDB.SetMaxOpenConns(1)
+				t.Cleanup(func() { require.NoError(t, sqlDB.Close()) })
+				return db
+			}
+			db := openDB(os.Getenv(dialect.env))
+			logDB := db
+			if dialect.name == common.DatabaseTypeSQLite || os.Getenv(dialect.logEnv) != "" {
+				logDB = openDB(os.Getenv(dialect.logEnv))
+			}
+			oldDB, oldLogDB := model.DB, model.LOG_DB
+			oldMainType, oldLogType := common.MainDatabaseType(), common.LogDatabaseType()
+			model.DB, model.LOG_DB = db, logDB
+			common.SetDatabaseTypes(dialect.name, dialect.name)
+			t.Cleanup(func() {
+				model.DB, model.LOG_DB = oldDB, oldLogDB
+				common.SetDatabaseTypes(oldMainType, oldLogType)
+			})
+			require.NoError(t, db.AutoMigrate(&model.User{}, &model.Token{}, &model.Channel{}, &model.Task{},
+				&model.SubscriptionPlan{}, &model.UserSubscription{}, &model.SubscriptionPreConsumeRecord{}))
+			require.NoError(t, logDB.AutoMigrate(&model.Log{}))
+			var version string
+			versionQuery := "select version()"
+			if dialect.name == common.DatabaseTypeSQLite {
+				versionQuery = "select sqlite_version()"
+			}
+			require.NoError(t, db.Raw(versionQuery).Scan(&version).Error)
+			t.Logf("database: %s; separate log database: %t", version, db != logDB)
+			runSubscriptionChannelAccountingCases(t, db, logDB)
+		})
+	}
+}
+
+func runSubscriptionChannelAccountingCases(t *testing.T, db, logDB *gorm.DB) {
+	t.Helper()
+	for index, tc := range []struct {
+		name, flow, expression                          string
+		groupRatio                                      float64
+		wallet, fallback, special, legacy, empty, retry bool
+	}{
+		{name: "text markup", groupRatio: 2},
+		{name: "text discount", groupRatio: 0.25},
+		{name: "special group discount", groupRatio: 0.4, special: true},
+		{name: "zero group ratio", groupRatio: 0},
+		{name: "no usage", groupRatio: 2, empty: true},
+		{name: "audio", flow: "audio", groupRatio: 2},
+		{name: "realtime", flow: "realtime", groupRatio: 2},
+		{name: "token expression", groupRatio: 2, expression: `tier("base", p * 2)`},
+		{name: "group retry preserves subscription base rate", groupRatio: 2, expression: `tier("base", p * 2)`, retry: true},
+		{name: "fixed price zero usage", groupRatio: 2, expression: `tier("request", fixed(0.0002))`, empty: true},
+		{name: "wallet", groupRatio: 2, wallet: true},
+		{name: "subscription falls back to wallet", groupRatio: 2, fallback: true},
+		{name: "task settlement and refund", flow: "task", groupRatio: 2},
+		{name: "task discount rounding and refund", flow: "task", groupRatio: 0.25},
+		{name: "task zero group ratio survives persistence", flow: "task", groupRatio: 0},
+		{name: "historical task retains recorded accounting", flow: "task", groupRatio: 2, legacy: true},
+		{name: "channel saturation stays positive and audited", groupRatio: math.MaxFloat64},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const startingQuota = 10_000
+			user := model.User{Username: fmt.Sprintf("subscription_channel_%d", index), Quota: startingQuota, Status: common.UserStatusEnabled}
+			require.NoError(t, db.Create(&user).Error)
+			token := model.Token{UserId: user.Id, Key: fmt.Sprintf("subscription-channel-%d", index), RemainQuota: startingQuota, Status: common.TokenStatusEnabled}
+			require.NoError(t, db.Create(&token).Error)
+			channel := model.Channel{Name: "subscription-channel", Key: "unused", Status: common.ChannelStatusEnabled}
+			require.NoError(t, db.Create(&channel).Error)
+			plan := model.SubscriptionPlan{Title: "subscription-channel", QuotaResetPeriod: model.SubscriptionResetNever}
+			require.NoError(t, db.Create(&plan).Error)
+			sub := model.UserSubscription{
+				UserId: user.Id, PlanId: plan.Id, AmountTotal: startingQuota,
+				Status: "active", StartTime: time.Now().Unix(), EndTime: time.Now().Add(time.Hour).Unix(),
+				AllowWalletOverflow: true,
+			}
+			if tc.fallback {
+				sub.AmountTotal = 1
+			}
+			require.NoError(t, db.Create(&sub).Error)
+			t.Cleanup(func() {
+				model.InvalidateSubscriptionPlanCache(plan.Id)
+				require.NoError(t, logDB.Where("user_id = ?", user.Id).Delete(&model.Log{}).Error)
+				require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.SubscriptionPreConsumeRecord{}).Error)
+				require.NoError(t, db.Where("user_id = ?", user.Id).Delete(&model.Task{}).Error)
+				require.NoError(t, db.Delete(&sub).Error)
+				require.NoError(t, db.Delete(&plan).Error)
+				require.NoError(t, db.Unscoped().Delete(&token).Error)
+				require.NoError(t, db.Unscoped().Delete(&user).Error)
+				require.NoError(t, db.Delete(&channel).Error)
+			})
+			ratio := tc.groupRatio
+			reservation := common.QuotaRound(100 * ratio)
+			if ratio == math.MaxFloat64 {
+				// Exercise settlement saturation without reserving an oversized charge.
+				reservation = 100
+			}
+			info := &relaycommon.RelayInfo{
+				UserId: user.Id, TokenId: token.Id, TokenKey: token.Key,
+				ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: channel.Id},
+				TaskRelayInfo:   &relaycommon.TaskRelayInfo{Action: "test"},
+				OriginModelName: "subscription-channel-test", UsingGroup: "default", UserGroup: "default",
+				RequestId: fmt.Sprintf("subscription-channel-%d-%d", index, user.Id),
+				StartTime: time.Now(), ForcePreConsume: true,
+				UserSetting: dto.UserSetting{BillingPreference: "subscription_first"},
+				PriceData: hosttypes.PriceData{
+					ModelRatio: 1, CompletionRatio: 1, Quota: reservation, QuotaToPreConsume: reservation,
+					GroupRatioInfo: hosttypes.GroupRatioInfo{GroupRatio: ratio, HasSpecialRatio: tc.special, GroupSpecialRatio: ratio},
+				},
+			}
+			if tc.wallet {
+				info.UserSetting.BillingPreference = "wallet_only"
+			}
+			if tc.expression != "" {
+				info.TieredBillingSnapshot = &billingexpr.BillingSnapshot{
+					BillingMode: "tiered_expr", ExprString: tc.expression, ExprHash: billingexpr.ExprHashString(tc.expression),
+					GroupRatio: ratio, QuotaPerUnit: common.QuotaPerUnit, EstimatedQuotaAfterGroup: reservation,
+				}
+			}
+			ctx, _ := gin.CreateTestContext(httptest.NewRecorder())
+			ctx.Request = httptest.NewRequest("POST", "/v1/chat/completions", nil)
+			require.Nil(t, service.PreConsumeBilling(ctx, reservation, info))
+			wantFunding := 100
+			wantSubscription := int64(100)
+			wantChannel := common.QuotaRound(100 * ratio)
+			if tc.wallet || tc.fallback {
+				wantFunding = reservation
+				wantSubscription = 0
+				assert.Equal(t, service.BillingSourceWallet, info.BillingSource)
+				assert.Nil(t, info.PriceData.GroupRatioInfo.ChannelGroupRatio)
+			} else {
+				assert.Equal(t, service.BillingSourceSubscription, info.BillingSource)
+			}
+			if tc.retry {
+				ctx.Set("auto_group", "subscription-channel-retry")
+				info.PriceData.GroupRatioInfo = HandleGroupRatio(ctx, info)
+				require.Nil(t, service.PrepareTieredBillingForSelectedGroup(ctx, info))
+				assert.Equal(t, 100, info.Billing.GetPreConsumedQuota())
+				wantChannel = 50
+			}
+			usage := &dto.Usage{PromptTokens: 100, TotalTokens: 100, PromptTokensDetails: dto.InputTokenDetails{TextTokens: 100}}
+			if tc.empty {
+				usage = &dto.Usage{}
+				if tc.expression == "" {
+					wantFunding, wantSubscription, wantChannel = 0, 0, 0
+				}
+			}
+			switch tc.flow {
+			case "audio":
+				service.PostAudioConsumeQuota(ctx, info, usage, nil)
+			case "realtime":
+				service.PostWssConsumeQuota(ctx, info, info.OriginModelName, &dto.RealtimeUsage{
+					InputTokens: 100, TotalTokens: 100, InputTokenDetails: dto.InputTokenDetails{TextTokens: 100},
+				}, nil)
+			case "task":
+				require.NoError(t, service.SettleBilling(ctx, info, 100))
+				info.PriceData.Quota = 100
+				task := &model.Task{
+					TaskID: fmt.Sprintf("subscription-channel-task-%d", user.Id),
+					UserId: user.Id, ChannelId: channel.Id, Group: "default", Quota: 100,
+					PrivateData: model.TaskPrivateData{
+						BillingSource: info.BillingSource, SubscriptionId: info.SubscriptionId, TokenId: token.Id,
+						BillingContext: &model.TaskBillingContext{
+							GroupRatio: 1, ChannelGroupRatio: info.PriceData.GroupRatioInfo.ChannelGroupRatio,
+						},
+					},
+				}
+				if tc.legacy {
+					task.PrivateData.BillingContext.ChannelGroupRatio = nil
+					info.PriceData.GroupRatioInfo.ChannelGroupRatio = nil
+					wantChannel = 100
+				}
+				require.NoError(t, db.Create(task).Error)
+				require.NoError(t, db.First(task, task.ID).Error)
+				service.LogTaskConsumption(ctx, info, task)
+				require.NoError(t, db.First(&channel, channel.Id).Error)
+				assert.Equal(t, int64(wantChannel), channel.UsedQuota)
+				service.RecalculateTaskQuota(context.Background(), task, 103, common.NewMessage("test settlement"))
+				service.RecalculateTaskQuota(context.Background(), task, 101, common.NewMessage("test settlement"))
+				service.RecalculateTaskQuota(context.Background(), task, 102, common.NewMessage("test settlement"))
+				expectedChannel := common.QuotaRound(102 * ratio)
+				if tc.legacy {
+					expectedChannel = 102
+				}
+				require.NoError(t, db.First(&channel, channel.Id).Error)
+				assert.Equal(t, int64(expectedChannel), channel.UsedQuota)
+				require.True(t, service.RefundTaskQuota(context.Background(), task, "test refund"))
+				require.True(t, service.RefundTaskQuota(context.Background(), task, "test repeated refund"))
+				wantFunding, wantSubscription, wantChannel = 0, 0, 0
+			default:
+				service.PostTextConsumeQuota(ctx, info, usage, nil)
+			}
+			require.NoError(t, db.First(&sub, sub.Id).Error)
+			require.NoError(t, db.First(&channel, channel.Id).Error)
+			require.NoError(t, db.First(&user, user.Id).Error)
+			require.NoError(t, db.First(&token, token.Id).Error)
+			assert.Equal(t, wantSubscription, sub.AmountUsed)
+			assert.Equal(t, int64(wantChannel), channel.UsedQuota, "channel accounting must retain the configured group multiplier")
+			assert.Equal(t, wantFunding, user.UsedQuota)
+			assert.Equal(t, startingQuota-wantFunding, token.RemainQuota)
+			assert.Equal(t, wantFunding, token.UsedQuota)
+			walletQuota := startingQuota
+			if tc.wallet || tc.fallback {
+				walletQuota -= wantFunding
+			}
+			assert.Equal(t, walletQuota, user.Quota)
+			var log model.Log
+			require.NoError(t, logDB.Where("user_id = ?", user.Id).Order("id").First(&log).Error)
+			if tc.flow != "task" {
+				assert.Equal(t, wantFunding, log.Quota)
+			}
+			if ratio == math.MaxFloat64 {
+				assert.Contains(t, log.Other, "quota_saturation")
+			}
+		})
+	}
+}

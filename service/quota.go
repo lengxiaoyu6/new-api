@@ -236,7 +236,9 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 			relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, modelName, relayInfo.FinalPreConsumedQuota))
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
+		channelQuota, clamp := channelUsageQuota(quota, relayInfo.PriceData.GroupRatioInfo.ChannelGroupRatio)
+		noteQuotaClamp(relayInfo, clamp)
+		model.UpdateChannelUsedQuota(relayInfo.ChannelId, channelQuota)
 	}
 
 	settlementErr := SettleBilling(ctx, relayInfo, quota)
@@ -379,7 +381,9 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 			relayInfo.UserId, relayInfo.ChannelId, relayInfo.TokenId, billingModelName, relayInfo.FinalPreConsumedQuota))
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
-		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
+		channelQuota, clamp := channelUsageQuota(quota, relayInfo.PriceData.GroupRatioInfo.ChannelGroupRatio)
+		noteQuotaClamp(relayInfo, clamp)
+		model.UpdateChannelUsedQuota(relayInfo.ChannelId, channelQuota)
 	}
 
 	settlementErr := SettleBilling(ctx, relayInfo, quota)

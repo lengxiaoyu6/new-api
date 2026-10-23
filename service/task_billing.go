@@ -82,6 +82,8 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		setTaskImageCount(other, info.PriceData.OtherRatios()["image_count"])
 	}
 	appendTaskLogInfo(task, other)
+	channelQuota, clamp := channelUsageQuota(info.PriceData.Quota, info.PriceData.GroupRatioInfo.ChannelGroupRatio)
+	noteQuotaClamp(info, clamp)
 	attachQuotaSaturation(c, info, other)
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
@@ -94,7 +96,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo, task *model
 		Other:     other,
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
-	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
+	model.UpdateChannelUsedQuota(info.ChannelId, channelQuota)
 }
 
 // ---------------------------------------------------------------------------
@@ -285,10 +287,16 @@ func RefundTaskQuota(ctx context.Context, task *model.Task, reason string) bool 
 
 	// 3. 回减预扣时累计的用户和渠道用量，请求次数保持不变
 	model.UpdateUserUsedQuota(task.UserId, -quota)
-	model.UpdateChannelUsedQuota(task.ChannelId, -quota)
+	channelQuota := quota
+	var channelClamp *common.QuotaClamp
+	if bc := task.PrivateData.BillingContext; bc != nil {
+		channelQuota, channelClamp = channelUsageQuota(quota, bc.ChannelGroupRatio)
+	}
+	model.UpdateChannelUsedQuota(task.ChannelId, -channelQuota)
 
 	// 4. 记录日志
 	other := taskBillingOther(task)
+	attachQuotaSaturationToOther(other, channelClamp)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("reason", reason)
 	model.RecordTaskBillingLog(model.RecordTaskBillingLogParams{
@@ -352,7 +360,18 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 
 	// 提交阶段已经累计过一次请求；结算阶段只调整最终用量。
 	model.UpdateUserUsedQuota(task.UserId, quotaDelta)
-	model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
+	channelDelta := quotaDelta
+	var channelClamp *common.QuotaClamp
+	if bc := task.PrivateData.BillingContext; bc != nil {
+		previousChannelQuota, previousClamp := channelUsageQuota(preConsumedQuota, bc.ChannelGroupRatio)
+		actualChannelQuota, actualClamp := channelUsageQuota(actualQuota, bc.ChannelGroupRatio)
+		channelDelta = actualChannelQuota - previousChannelQuota
+		channelClamp = actualClamp
+		if channelClamp == nil {
+			channelClamp = previousClamp
+		}
+	}
+	model.UpdateChannelUsedQuota(task.ChannelId, channelDelta)
 
 	var logType int
 	var logQuota int
@@ -364,6 +383,7 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logQuota = -quotaDelta
 	}
 	other := taskBillingOther(task)
+	attachQuotaSaturationToOther(other, channelClamp)
 	other.SetPublic("task_id", task.TaskID)
 	other.SetPublic("pre_consumed_quota", preConsumedQuota)
 	other.SetPublic("actual_quota", actualQuota)

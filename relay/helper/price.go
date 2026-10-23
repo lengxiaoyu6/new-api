@@ -63,6 +63,13 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) hostty
 		groupRatioInfo.GroupRatio = ratio_setting.GetGroupRatio(relayInfo.UsingGroup)
 	}
 
+	if relayInfo.BillingSource == "subscription" {
+		groupRatioInfo.ChannelGroupRatio = common.GetPointer(groupRatioInfo.GroupRatio)
+		groupRatioInfo.GroupRatio = 1
+		groupRatioInfo.HasSpecialRatio = false
+		groupRatioInfo.GroupSpecialRatio = -1
+	}
+
 	return groupRatioInfo
 }
 

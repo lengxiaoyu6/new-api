@@ -11,6 +11,9 @@ type GroupRatioInfo struct {
 	GroupRatio        float64
 	GroupSpecialRatio float64
 	HasSpecialRatio   bool
+	// ChannelGroupRatio preserves the effective group multiplier when subscription
+	// funding uses the base rate. Nil retains the historical shared accounting.
+	ChannelGroupRatio *float64
 }
 
 type PriceData struct {

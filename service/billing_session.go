@@ -433,6 +433,9 @@ func applySubscriptionBaseGroupRatio(relayInfo *relaycommon.RelayInfo) subscript
 		state.EstimatedQuotaAfterGroup = snap.EstimatedQuotaAfterGroup
 	}
 
+	if relayInfo.PriceData.GroupRatioInfo.ChannelGroupRatio == nil {
+		relayInfo.PriceData.GroupRatioInfo.ChannelGroupRatio = common.GetPointer(state.GroupRatioInfo.GroupRatio)
+	}
 	relayInfo.PriceData.GroupRatioInfo.GroupRatio = subscriptionBillingGroupRatio
 	relayInfo.PriceData.GroupRatioInfo.HasSpecialRatio = false
 	relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio = -1
