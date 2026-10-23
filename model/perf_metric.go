@@ -48,11 +48,11 @@ func UpsertPerfMetric(metric *PerfMetric) error {
 			"ttft_sum_ms":      gorm.Expr("perf_metrics.ttft_sum_ms + ?", metric.TtftSumMs),
 			"ttft_count":       gorm.Expr("perf_metrics.ttft_count + ?", metric.TtftCount),
 			"fastest_ttft_ms": gorm.Expr(
-				"CASE WHEN ? > 0 AND (fastest_ttft_ms = 0 OR fastest_ttft_ms > ?) THEN ? ELSE fastest_ttft_ms END",
+				"CASE WHEN ? > 0 AND (perf_metrics.fastest_ttft_ms = 0 OR perf_metrics.fastest_ttft_ms > ?) THEN ? ELSE perf_metrics.fastest_ttft_ms END",
 				metric.TtftCount, metric.FastestTtftMs, metric.FastestTtftMs,
 			),
 			"slowest_ttft_ms": gorm.Expr(
-				"CASE WHEN ? > 0 AND slowest_ttft_ms < ? THEN ? ELSE slowest_ttft_ms END",
+				"CASE WHEN ? > 0 AND perf_metrics.slowest_ttft_ms < ? THEN ? ELSE perf_metrics.slowest_ttft_ms END",
 				metric.TtftCount, metric.SlowestTtftMs, metric.SlowestTtftMs,
 			),
 			"output_tokens": gorm.Expr("perf_metrics.output_tokens + ?", metric.OutputTokens),

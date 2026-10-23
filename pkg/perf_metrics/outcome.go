@@ -19,7 +19,7 @@ const (
 
 // ClassifyRelayOutcome decides whether one finished relay counts as a health
 // sample. Business rejections and cancellations during generation are not
-// samples; a stream already completed normally without errors remains eligible
+// samples; a relay already completed normally without errors remains eligible
 // after its context is canceled. Classification is independent of retries,
 // channel disabling and billing.
 func ClassifyRelayOutcome(ctx context.Context, info *relaycommon.RelayInfo, apiErr *types.NewAPIError) Outcome {
@@ -27,11 +27,14 @@ func ClassifyRelayOutcome(ctx context.Context, info *relaycommon.RelayInfo, apiE
 		return OutcomeIgnored
 	}
 	stream := info.StreamStatus.OutcomeSnapshot()
-	completedNormally := info.IsStream && info.StreamStatus != nil && apiErr == nil &&
+	// Nonstreaming handlers return nil after processing the complete response.
+	// The client may disconnect after receiving it, before settlement finishes.
+	completedNonstream := !info.IsStream && info.StreamStatus == nil && apiErr == nil
+	completedStream := info.IsStream && info.StreamStatus != nil && apiErr == nil &&
 		stream.Response == relaycommon.ResponseOutcomeCompleted &&
 		(stream.EndReason == relaycommon.StreamEndReasonEOF || stream.EndReason == relaycommon.StreamEndReasonDone) &&
 		!stream.HasErrors && info.StreamStatus.EndError == nil
-	if ctx != nil && ctx.Err() == context.Canceled && !completedNormally {
+	if ctx != nil && ctx.Err() == context.Canceled && !completedNonstream && !completedStream {
 		return OutcomeIgnored
 	}
 	if apiErr != nil && errors.Is(apiErr, context.Canceled) {

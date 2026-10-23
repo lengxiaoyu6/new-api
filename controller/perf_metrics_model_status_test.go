@@ -1,10 +1,13 @@
 package controller
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,6 +16,9 @@ import (
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
+	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -20,6 +26,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+type availabilityResponseWriter struct {
+	*httptest.ResponseRecorder
+	cancel context.CancelFunc
+}
+
+func (w *availabilityResponseWriter) Flush() {
+	w.ResponseRecorder.Flush()
+	w.cancel()
+}
 
 func setupModelStatusControllerTest(t *testing.T) *gorm.DB {
 	t.Helper()
@@ -209,6 +225,94 @@ func TestGetPerfMetricsSummaryFiltersSelectedGroup(t *testing.T) {
 					assert.Equal(t, tc.rate, payload.Data.RecentSuccessSeries["group-model"][0].SuccessRate)
 				})
 			}
+
+			t.Run("successful nonstream request remains available after client disconnects", func(t *testing.T) {
+				require.NoError(t, db.AutoMigrate(&model.User{}, &model.Log{}, &model.Channel{}))
+				model.LOG_DB = db
+				t.Cleanup(func() { model.LOG_DB = previousLogDB })
+				t.Cleanup(perfmetrics.Flush)
+				previousRatios := ratio_setting.ModelRatio2JSONString()
+				previousLogEnabled, previousBatchEnabled := common.LogConsumeEnabled, common.BatchUpdateEnabled
+				previousRedisEnabled := common.RedisEnabled
+				previousCountToken := constant.CountToken
+				quotaSetting := operation_setting.GetQuotaSetting()
+				previousFreePreConsume := quotaSetting.EnableFreeModelPreConsume
+				common.LogConsumeEnabled, common.BatchUpdateEnabled = true, false
+				common.RedisEnabled = false
+				constant.CountToken = false
+				quotaSetting.EnableFreeModelPreConsume = false
+				require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gpt-6-sol":0}`))
+				t.Cleanup(func() {
+					common.LogConsumeEnabled, common.BatchUpdateEnabled = previousLogEnabled, previousBatchEnabled
+					common.RedisEnabled = previousRedisEnabled
+					constant.CountToken = previousCountToken
+					quotaSetting.EnableFreeModelPreConsume = previousFreePreConsume
+					require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(previousRatios))
+				})
+				user := model.User{Username: "availability-test", Group: "a", Status: common.UserStatusEnabled}
+				require.NoError(t, db.Create(&user).Error)
+				service.InitHttpClient()
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "application/json")
+					_, _ = io.WriteString(w, `{"id":"resp_test","object":"response","status":"completed","model":"gpt-6-sol","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":7,"output_tokens":5,"total_tokens":12}}`)
+				}))
+				t.Cleanup(upstream.Close)
+				channel := model.Channel{
+					Name: "availability-test", Type: constant.ChannelTypeOpenAI, Key: "test-key",
+					BaseURL: &upstream.URL, Status: common.ChannelStatusEnabled,
+				}
+				require.NoError(t, db.Create(&channel).Error)
+				ctx, cancel := context.WithCancel(context.Background())
+				t.Cleanup(cancel)
+				writer := &availabilityResponseWriter{ResponseRecorder: httptest.NewRecorder(), cancel: cancel}
+				c, _ := gin.CreateTestContext(writer)
+				c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, "/v1/responses",
+					strings.NewReader(`{"model":"gpt-6-sol","input":"Hello","stream":false}`))
+				c.Request.Header.Set("Content-Type", "application/json")
+				common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt-6-sol")
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, "a")
+				common.SetContextKey(c, constant.ContextKeyUserId, user.Id)
+				common.SetContextKey(c, constant.ContextKeyUserGroup, "a")
+				require.Nil(t, middleware.SetupContextForSelectedChannel(c, &channel, "gpt-6-sol"))
+
+				Relay(c, types.RelayFormatOpenAIResponses)
+
+				require.Equal(t, http.StatusOK, writer.Code, writer.Body.String())
+				require.Contains(t, writer.Body.String(), `"status":"completed"`)
+				require.ErrorIs(t, ctx.Err(), context.Canceled)
+				var log model.Log
+				require.NoError(t, db.Where("model_name = ? AND type = ?", "gpt-6-sol", model.LogTypeConsume).First(&log).Error)
+				assert.Equal(t, "a", log.Group)
+				assert.Equal(t, 5, log.CompletionTokens)
+				assert.False(t, log.IsStream)
+
+				response := httptest.NewRecorder()
+				router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/perf-metrics/summary?hours=24&group=a", nil))
+				require.Equal(t, http.StatusOK, response.Code)
+				var payload struct {
+					Success bool                         `json:"success"`
+					Data    perfmetrics.SummaryAllResult `json:"data"`
+				}
+				require.NoError(t, common.Unmarshal(response.Body.Bytes(), &payload))
+				require.True(t, payload.Success)
+				var found bool
+				for _, item := range payload.Data.Models {
+					if item.ModelName == "gpt-6-sol" {
+						found = true
+						assert.Equal(t, 100.0, item.SuccessRate)
+						assert.NotEmpty(t, item.RecentSuccessSeries)
+					}
+				}
+				require.True(t, found, "a completed nonstream request with a consumption log must appear in marketplace availability")
+
+				perfmetrics.Flush()
+				var metric model.PerfMetric
+				require.NoError(t, db.Where("model_name = ?", "gpt-6-sol").First(&metric).Error)
+				assert.Equal(t, "a", metric.Group)
+				assert.Equal(t, int64(1), metric.RequestCount)
+				assert.Equal(t, int64(1), metric.SuccessCount)
+				assert.Equal(t, int64(5), metric.OutputTokens)
+			})
 		})
 	}
 }
