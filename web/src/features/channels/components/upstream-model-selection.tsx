@@ -59,6 +59,7 @@ type ModelCategoryProps = {
   onChange: (models: string[]) => void
   onRedirectModel?: (model: string) => void
   aliases?: Record<string, string>
+  disabled?: boolean
 }
 
 function ModelCategory(props: ModelCategoryProps) {
@@ -79,6 +80,7 @@ function ModelCategory(props: ModelCategoryProps) {
             category: categoryName,
           })}
           checked={allSelected}
+          disabled={props.disabled}
           indeterminate={selectedCount > 0 && !allSelected}
           onCheckedChange={(checked) => {
             if (checked) {
@@ -116,6 +118,7 @@ function ModelCategory(props: ModelCategoryProps) {
                 id={`${id}-${model}`}
                 className='mt-0.5 shrink-0'
                 checked={selected.has(model)}
+                disabled={props.disabled}
                 onCheckedChange={(checked) =>
                   props.onChange(
                     checked
@@ -164,6 +167,7 @@ function ModelCategory(props: ModelCategoryProps) {
                   className='text-muted-foreground hover:text-foreground -my-1 ml-auto shrink-0'
                   aria-label={t('Redirect {{model}}', { model })}
                   title={t('Set up redirect')}
+                  disabled={props.disabled}
                   onClick={() => props.onRedirectModel?.(model)}
                 >
                   <ArrowRightLeft aria-hidden='true' />
@@ -192,6 +196,7 @@ type UpstreamModelSelectionProps = {
   onRedirectModel?: (model: string) => void
   /** Upstream model name to the request name it is published under. */
   aliases?: Record<string, string>
+  disabled?: boolean
 }
 
 export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
@@ -279,6 +284,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
         aria-label={t('Search models...')}
         placeholder={t('Search models...')}
         value={search}
+        disabled={props.disabled}
         onChange={(event) => setSearch(event.target.value)}
       />
       {!showChanges && (
@@ -292,7 +298,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
               type='button'
               variant='outline'
               size='sm'
-              disabled={!categorized.filtered.length}
+              disabled={props.disabled || !categorized.filtered.length}
               onClick={() =>
                 props.onChange([
                   ...new Set([...props.selected, ...categorized.filtered]),
@@ -351,6 +357,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
                 onChange={props.onChange}
                 onRedirectModel={props.onRedirectModel}
                 aliases={props.aliases}
+                disabled={props.disabled}
               />
             ))}
           </TabsContent>
@@ -369,6 +376,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
                   onChange={props.onChange}
                   onRedirectModel={props.onRedirectModel}
                   aliases={props.aliases}
+                  disabled={props.disabled}
                 />
               )
             )}
@@ -391,6 +399,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
                 onChange={props.onChange}
                 onRedirectModel={props.onRedirectModel}
                 aliases={props.aliases}
+                disabled={props.disabled}
               />
             </TabsContent>
           )}
@@ -407,6 +416,7 @@ export function UpstreamModelSelection(props: UpstreamModelSelectionProps) {
               onChange={props.onChange}
               onRedirectModel={props.onRedirectModel}
               aliases={props.aliases}
+              disabled={props.disabled}
             />
           ))}
           {!categorized.filtered.length && (

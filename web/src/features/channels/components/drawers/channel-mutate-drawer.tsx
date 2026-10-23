@@ -207,6 +207,7 @@ import {
   nextTaskPluginBaseUrl,
 } from '../../lib/task-plugin-base-url'
 import type { Channel } from '../../types'
+import { ChannelGroupModels } from '../channel-group-models'
 import { ChannelPluginExtensions } from '../channel-plugin-extensions'
 import { ChannelQuickOptions } from '../channel-quick-options'
 import { ChannelTypeLogo } from '../channel-type-badge'
@@ -290,6 +291,7 @@ const SENSITIVE_FORM_FIELDS = [
   'param_override',
   'header_override',
   'settings',
+  'group_models',
   'billing_profiles',
   'setting',
   'advanced_custom',
@@ -3643,6 +3645,24 @@ export function ChannelMutateDrawer({
                       />
                     )}
                   </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </div>
+          <div className='border-border/60 min-w-0 rounded-lg border p-4'>
+            <FormField
+              control={form.control}
+              name='group_models'
+              render={({ field }) => (
+                <FormItem>
+                  <ChannelGroupModels
+                    groups={currentGroups}
+                    models={currentModelsArray}
+                    value={field.value ?? {}}
+                    onChange={field.onChange}
+                    disabled={sensitiveLocked}
+                  />
                   <FormMessage />
                 </FormItem>
               )}

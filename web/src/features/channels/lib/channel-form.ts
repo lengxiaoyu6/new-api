@@ -253,6 +253,7 @@ export const channelFormSchema = z
     openai_organization: z.string().optional(),
     models: z.string().min(1, ERROR_MESSAGES.REQUIRED_MODELS),
     group: z.array(z.string()).min(1, ERROR_MESSAGES.REQUIRED_GROUP),
+    group_models: z.record(z.string(), z.array(z.string())).optional(),
     model_mapping: z
       .string()
       .optional()
@@ -490,6 +491,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   openai_organization: '',
   models: '',
   group: ['default'],
+  group_models: {},
   model_mapping: '',
   priority: 0,
   weight: 0,
@@ -619,10 +621,22 @@ export function transformChannelToFormDefaults(
   let upstreamModelUpdateIgnoredModels = ''
   let advancedCustom = ''
   let billingProfiles = '{}'
+  let groupModels: Record<string, string[]> = {}
 
   if (channel.settings) {
     try {
       const parsed = JSON.parse(channel.settings)
+      const restrictions = z
+        .record(z.string(), z.array(z.string()).nullable())
+        .safeParse(parsed.group_models)
+      if (restrictions.success) {
+        groupModels = Object.fromEntries(
+          Object.entries(restrictions.data).map(([group, models]) => [
+            group,
+            models ?? [],
+          ])
+        )
+      }
       vertexKeyType = parsed.vertex_key_type || 'json'
       vertexProjectId = parsed.vertex_project_id || ''
       azureResponsesVersion = parsed.azure_responses_version || ''
@@ -650,7 +664,10 @@ export function transformChannelToFormDefaults(
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
-      if (parsed.billing_profiles && isJsonObjectValue(parsed.billing_profiles)) {
+      if (
+        parsed.billing_profiles &&
+        isJsonObjectValue(parsed.billing_profiles)
+      ) {
         billingProfiles = JSON.stringify(parsed.billing_profiles, null, 2)
       }
     } catch (error) {
@@ -667,6 +684,7 @@ export function transformChannelToFormDefaults(
     openai_organization: channel.openai_organization || '',
     models: channel.models || '',
     group: parseGroups(channel.group || 'default'),
+    group_models: groupModels,
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
@@ -772,6 +790,21 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       // eslint-disable-next-line no-console
       console.error('Failed to parse existing settings:', error)
     }
+  }
+
+  const channelModels = new Set(parseModels(formData.models))
+  const groupModels = Object.fromEntries(
+    Object.entries(formData.group_models ?? {})
+      .filter(([group]) => formData.group.includes(group))
+      .map(([group, models]) => [
+        group,
+        [...new Set(models.filter((model) => channelModels.has(model)))],
+      ])
+  )
+  if (Object.keys(groupModels).length > 0) {
+    settingsObj.group_models = groupModels
+  } else {
+    delete settingsObj.group_models
   }
 
   // Add vertex_key_type for Vertex AI channels (type 41)
@@ -955,8 +988,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
     status_code_mapping: formData.status_code_mapping || null,
-    status_code_response_mapping:
-      formData.status_code_response_mapping || null,
+    status_code_response_mapping: formData.status_code_response_mapping || null,
     tag: formData.tag || null,
     remark: formData.remark || '',
     setting: buildSettingJSON(formData),
@@ -1004,8 +1036,7 @@ export function transformFormDataToUpdatePayload(
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status_code_mapping: formData.status_code_mapping || null,
-    status_code_response_mapping:
-      formData.status_code_response_mapping || null,
+    status_code_response_mapping: formData.status_code_response_mapping || null,
     tag: formData.tag || null,
     remark: formData.remark || '',
     setting: buildSettingJSON(formData),

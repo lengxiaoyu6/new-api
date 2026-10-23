@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -121,6 +122,152 @@ func TestChannelValidateSettingsRejectsInvalidBillingProfile(t *testing.T) {
 	err := channel.ValidateSettings()
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "invalid billing profile key")
+}
+
+func TestChannelValidateGroupModels(t *testing.T) {
+	for _, tc := range []struct {
+		name, settings, wantErr string
+	}{
+		{"legacy", `{}`, ""},
+		{"restricted", `{"group_models":{"a":["gpt-4"],"b":["claude-test"]}}`, ""},
+		{"explicit empty", `{"group_models":{"a":[]}}`, ""},
+		{"null restricts all", `{"group_models":{"a":null}}`, ""},
+		{"unbound group", `{"group_models":{"other":["gpt-4"]}}`, "Model restrictions must reference channel groups"},
+		{"unknown model", `{"group_models":{"a":["unknown"]}}`, "Model restrictions must reference channel models"},
+		{"empty model", `{"group_models":{"a":[""]}}`, "Model restrictions must reference channel models"},
+		{"wrong list type", `{"group_models":{"a":"gpt-4"}}`, "cannot unmarshal"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			channel := &Channel{Models: "gpt-4,claude-test", Group: "a,b", OtherSettings: tc.settings}
+			err := channel.ValidateSettings()
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
+}
+
+func TestChannelGroupModelsDatabaseMatrix(t *testing.T) {
+	for _, dialect := range []string{"sqlite", "mysql", "postgres"} {
+		t.Run(dialect, func(t *testing.T) {
+			var driver gorm.Dialector
+			switch dialect {
+			case "sqlite":
+				driver = sqlite.Open(filepath.Join(t.TempDir(), "group-models.db"))
+			case "mysql":
+				dsn := os.Getenv("TEST_MYSQL_DSN")
+				if dsn == "" {
+					t.Skip("TEST_MYSQL_DSN is not configured")
+				}
+				driver = mysql.Open(dsn)
+			case "postgres":
+				dsn := os.Getenv("TEST_POSTGRES_DSN")
+				if dsn == "" {
+					t.Skip("TEST_POSTGRES_DSN is not configured")
+				}
+				driver = postgres.Open(dsn)
+			}
+			db, err := gorm.Open(driver, &gorm.Config{})
+			require.NoError(t, err)
+			sqlDB, err := db.DB()
+			require.NoError(t, err)
+			sqlDB.SetMaxOpenConns(1)
+			previousDB, previousType, previousCache := DB, common.MainDatabaseType(), common.MemoryCacheEnabled
+			DB = db
+			common.SetMainDatabaseType(common.DatabaseType(dialect))
+			initCol()
+			t.Cleanup(func() {
+				require.NoError(t, db.Migrator().DropTable(&Ability{}, &Channel{}, &Model{}, &Vendor{}))
+				DB = previousDB
+				common.SetMainDatabaseType(previousType)
+				common.MemoryCacheEnabled = previousCache
+				initCol()
+				InitChannelCache()
+				require.NoError(t, sqlDB.Close())
+			})
+			require.NoError(t, db.AutoMigrate(&Channel{}, &Ability{}, &Model{}, &Vendor{}))
+			var version string
+			query := "SELECT version()"
+			if dialect == "sqlite" {
+				query = "SELECT sqlite_version()"
+			}
+			require.NoError(t, db.Raw(query).Scan(&version).Error)
+			t.Logf("%s version: %s", dialect, version)
+
+			channel := &Channel{
+				Name: "shared upstream", Type: constant.ChannelTypeOpenAI, Key: "test-only",
+				Status: common.ChannelStatusEnabled, Models: "gpt-4,claude-test", Group: "openai,anthropic,shared,empty",
+				OtherSettings: `{"group_models":{"openai":["gpt-4"],"anthropic":["claude-test"],"empty":[]}}`,
+			}
+			require.NoError(t, channel.Insert())
+			assertChannelGroupModelAvailability(t, channel, map[string][]string{
+				"openai": {"gpt-4"}, "anthropic": {"claude-test"}, "shared": {"gpt-4", "claude-test"}, "empty": {},
+			})
+
+			// A save and repeated ability rebuilds must preserve the explicit restrictions.
+			var loaded Channel
+			require.NoError(t, db.First(&loaded, channel.Id).Error)
+			require.NoError(t, loaded.Update())
+			for range 2 {
+				require.NoError(t, loaded.UpdateAbilities(nil))
+				assertChannelGroupModelAvailability(t, &loaded, map[string][]string{
+					"openai": {"gpt-4"}, "anthropic": {"claude-test"}, "shared": {"gpt-4", "claude-test"}, "empty": {},
+				})
+			}
+
+			// Upstream additions belong only to unrestricted groups until explicitly selected.
+			loaded.Models += ",new-model"
+			require.NoError(t, loaded.Update())
+			assertChannelGroupModelAvailability(t, &loaded, map[string][]string{
+				"openai": {"gpt-4"}, "anthropic": {"claude-test"}, "shared": {"gpt-4", "claude-test", "new-model"}, "empty": {},
+			})
+
+			// Removing a model must leave its restricted group empty, without falling back to all models.
+			loaded.Models = "gpt-4,new-model"
+			require.NoError(t, loaded.Update())
+			assertChannelGroupModelAvailability(t, &loaded, map[string][]string{
+				"openai": {"gpt-4"}, "anthropic": {}, "shared": {"gpt-4", "new-model"}, "empty": {},
+			})
+
+			loaded.OtherSettings = `{"group_models":{"openai":["new-model"],"anthropic":[],"empty":[]}}`
+			require.NoError(t, loaded.Update())
+			assertChannelGroupModelAvailability(t, &loaded, map[string][]string{
+				"openai": {"new-model"}, "anthropic": {}, "shared": {"gpt-4", "new-model"}, "empty": {},
+			})
+			loaded.OtherSettings = "{}"
+			require.NoError(t, loaded.Update())
+			assertChannelGroupModelAvailability(t, &loaded, map[string][]string{
+				"openai": {"gpt-4", "new-model"}, "anthropic": {"gpt-4", "new-model"},
+				"shared": {"gpt-4", "new-model"}, "empty": {"gpt-4", "new-model"},
+			})
+		})
+	}
+}
+
+func assertChannelGroupModelAvailability(t *testing.T, channel *Channel, expected map[string][]string) {
+	t.Helper()
+	for _, cached := range []bool{false, true} {
+		common.MemoryCacheEnabled = cached
+		InitChannelCache()
+		for group, models := range expected {
+			assert.ElementsMatch(t, models, GetGroupEnabledModels(group), "group %s, cache %t", group, cached)
+			for _, name := range []string{"gpt-4", "claude-test", "new-model"} {
+				allowed := slices.Contains(models, name)
+				selected, err := GetRandomSatisfiedChannel(group, name, 0, nil)
+				require.NoError(t, err)
+				assert.Equal(t, allowed, selected != nil, "selection: group %s model %s cache %t", group, name, cached)
+				assert.Equal(t, allowed, IsChannelEnabledForGroupModel(group, name, channel.Id), "affinity: group %s model %s cache %t", group, name, cached)
+			}
+		}
+		for _, pricing := range GetPricing() {
+			for group, models := range expected {
+				allowed := slices.Contains(models, pricing.ModelName)
+				assert.Equal(t, allowed, common.StringsContains(pricing.EnableGroup, group), "catalog: group %s model %s", group, pricing.ModelName)
+			}
+		}
+	}
 }
 
 func TestInferencePresetSettingsAndDatabaseRoundTrip(t *testing.T) {

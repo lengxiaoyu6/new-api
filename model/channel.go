@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"sync"
 
@@ -316,6 +317,37 @@ func (channel *Channel) GetGroups() []string {
 		groups[i] = strings.TrimSpace(group)
 	}
 	return groups
+}
+
+// GetGroupModels resolves published models for each bound group. Restrictions
+// are intersected with the channel model list, including after upstream sync.
+func (channel *Channel) GetGroupModels() (map[string][]string, error) {
+	var settings struct {
+		GroupModels map[string][]string `json:"group_models"`
+	}
+	if channel.OtherSettings != "" {
+		if err := common.UnmarshalJsonStr(channel.OtherSettings, &settings); err != nil {
+			return nil, err
+		}
+	}
+	groupModels := make(map[string][]string)
+	models := channel.GetModels()
+	for _, group := range channel.GetGroups() {
+		if group == "" {
+			continue
+		}
+		allowed, restricted := settings.GroupModels[group]
+		groupModels[group] = []string{}
+		seen := make(map[string]bool, len(models))
+		for _, model := range models {
+			if model == "" || seen[model] || (restricted && !slices.Contains(allowed, model)) {
+				continue
+			}
+			seen[model] = true
+			groupModels[group] = append(groupModels[group], model)
+		}
+	}
+	return groupModels, nil
 }
 
 func (channel *Channel) GetOtherInfo() map[string]any {
@@ -1021,6 +1053,16 @@ func (channel *Channel) ValidateSettings() error {
 		err := common.UnmarshalJsonStr(channel.OtherSettings, channelOtherSettings)
 		if err != nil {
 			return err
+		}
+	}
+	for group, models := range channelOtherSettings.GroupModels {
+		if !slices.Contains(channel.GetGroups(), group) || group == "" {
+			return errors.New("Model restrictions must reference channel groups")
+		}
+		for _, model := range models {
+			if model == "" || !slices.Contains(channel.GetModels(), model) {
+				return errors.New("Model restrictions must reference channel models")
+			}
 		}
 	}
 	if err := channelOtherSettings.ValidateToolLossPolicy(); err != nil {

@@ -204,6 +204,50 @@ afterEach(() => {
   })
 })
 
+test('group model restrictions select provider models independently and persist in one channel', async () => {
+  Object.assign(editingChannel, {
+    models: 'gpt-4,claude-test',
+    group: 'default,premium',
+  })
+  const put = vi
+    .spyOn(api, 'put')
+    .mockResolvedValue({ data: { success: true } })
+  const user = userEvent.setup()
+  render(<ConfigurationHarness currentRow={editingChannel} />)
+  await screen.findByDisplayValue('Existing channel')
+  const defaultSwitch = screen.getByRole('switch', {
+    name: 'Limit models for default',
+  })
+  expect(defaultSwitch).not.toBeChecked()
+  await user.click(defaultSwitch)
+  const defaultGroup = screen.getByRole('group', {
+    name: 'Models for default',
+  })
+  await user.click(
+    within(defaultGroup).getByRole('checkbox', {
+      name: 'Select all models in OpenAI',
+    })
+  )
+  await user.click(
+    screen.getByRole('switch', { name: 'Limit models for premium' })
+  )
+  const premiumGroup = screen.getByRole('group', {
+    name: 'Models for premium',
+  })
+  await user.click(
+    within(premiumGroup).getByRole('checkbox', {
+      name: 'Select all models in Anthropic',
+    })
+  )
+  await user.click(screen.getByRole('button', { name: 'Update Channel' }))
+  await waitFor(() => expect(put).toHaveBeenCalled())
+  const payload = put.mock.calls[0]?.[1] as { settings: string }
+  expect(JSON.parse(payload.settings).group_models).toEqual({
+    default: ['gpt-4'],
+    premium: ['claude-test'],
+  })
+})
+
 test.each([
   {
     kind: 'billing profile',
