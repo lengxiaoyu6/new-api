@@ -1174,23 +1174,26 @@ func GetLotteryHistory(activityID, userID int, businessDate string) ([]LotteryDr
 }
 
 type LotteryAuditRecord struct {
-	DrawID           int    `json:"draw_id"`
-	UserID           int    `json:"user_id"`
-	BusinessDate     string `json:"business_date"`
-	AttemptNo        int    `json:"attempt_no"`
-	IdempotencyKey   string `json:"idempotency_key"`
-	VersionID        int    `json:"version_id"`
-	RawPrizeID       int    `json:"raw_prize_id"`
-	FinalPrizeID     int    `json:"final_prize_id"`
-	RandomValue      int64  `json:"random_value"`
-	RangeStart       int64  `json:"range_start"`
-	RangeEnd         int64  `json:"range_end"`
-	RandomAlgorithm  string `json:"random_algorithm"`
-	ConversionReason string `json:"conversion_reason"`
-	Status           string `json:"status"`
-	AwardID          int    `json:"award_id"`
-	AwardStatus      string `json:"award_status"`
-	CreatedAt        int64  `json:"created_at"`
+	DrawID           int                     `json:"draw_id"`
+	UserID           int                     `json:"user_id"`
+	Username         string                  `json:"username"`
+	BusinessDate     string                  `json:"business_date"`
+	AttemptNo        int                     `json:"attempt_no"`
+	IdempotencyKey   string                  `json:"idempotency_key"`
+	VersionID        int                     `json:"version_id"`
+	RawPrizeID       int                     `json:"raw_prize_id"`
+	FinalPrizeID     int                     `json:"final_prize_id"`
+	RandomValue      int64                   `json:"random_value"`
+	RangeStart       int64                   `json:"range_start"`
+	RangeEnd         int64                   `json:"range_end"`
+	RandomAlgorithm  string                  `json:"random_algorithm"`
+	ConversionReason string                  `json:"conversion_reason"`
+	Status           string                  `json:"status"`
+	AwardID          int                     `json:"award_id"`
+	AwardStatus      string                  `json:"award_status"`
+	CreatedAt        int64                   `json:"created_at"`
+	RawPrize         LotteryVersionPrizeView `json:"-"`
+	FinalPrize       LotteryVersionPrizeView `json:"-"`
 }
 
 type LotteryAuditPage struct {
@@ -1222,19 +1225,66 @@ func GetLotteryAuditPage(activityID int, businessDate string, page, pageSize int
 		return nil, err
 	}
 	items := make([]LotteryAuditRecord, 0, len(draws))
+	if len(draws) == 0 {
+		return &LotteryAuditPage{Items: items, Total: total, Page: page, PageSize: pageSize}, nil
+	}
+	userIDs := make([]int, 0, len(draws))
+	versionIDs := make([]int, 0, len(draws))
+	prizeIDs := make([]int, 0, len(draws)*2)
+	drawIDs := make([]int, 0, len(draws))
+	for _, draw := range draws {
+		userIDs = append(userIDs, draw.UserId)
+		versionIDs = append(versionIDs, draw.VersionId)
+		prizeIDs = append(prizeIDs, draw.RawPrizeId, draw.FinalPrizeId)
+		drawIDs = append(drawIDs, draw.Id)
+	}
+	var users []User
+	if err := DB.Unscoped().Select("id", "username").Where("id IN ?", userIDs).Find(&users).Error; err != nil {
+		return nil, err
+	}
+	usernames := make(map[int]string, len(users))
+	for _, user := range users {
+		usernames[user.Id] = user.Username
+	}
+	var prizes []LotteryPrize
+	if err := DB.Select("id", "type").Where("id IN ?", prizeIDs).Find(&prizes).Error; err != nil {
+		return nil, err
+	}
+	prizesByID := make(map[int]LotteryPrize, len(prizes))
+	for _, prize := range prizes {
+		prizesByID[prize.Id] = prize
+	}
+	var versionPrizes []LotteryVersionPrize
+	if err := DB.Where("version_id IN ? AND prize_id IN ?", versionIDs, prizeIDs).Find(&versionPrizes).Error; err != nil {
+		return nil, err
+	}
+	prizeViews := make(map[[2]int]LotteryVersionPrizeView, len(versionPrizes))
+	for _, prize := range versionPrizes {
+		prizeViews[[2]int{prize.VersionId, prize.PrizeId}] = LotteryVersionPrizeView{
+			LotteryVersionPrize: prize,
+			Prize:               prizesByID[prize.PrizeId],
+		}
+	}
+	var awards []LotteryAward
+	if err := DB.Where("draw_id IN ?", drawIDs).Find(&awards).Error; err != nil {
+		return nil, err
+	}
+	awardsByDraw := make(map[int]LotteryAward, len(awards))
+	for _, award := range awards {
+		awardsByDraw[award.DrawId] = award
+	}
 	for i := range draws {
 		item := LotteryAuditRecord{
 			DrawID: draws[i].Id, UserID: draws[i].UserId, BusinessDate: draws[i].BusinessDate,
+			Username:  usernames[draws[i].UserId],
 			AttemptNo: draws[i].AttemptNo, IdempotencyKey: draws[i].IdempotencyKey, VersionID: draws[i].VersionId, RawPrizeID: draws[i].RawPrizeId,
 			FinalPrizeID: draws[i].FinalPrizeId, RandomValue: draws[i].RandomValue, RangeStart: draws[i].RangeStart,
 			RangeEnd: draws[i].RangeEnd, RandomAlgorithm: draws[i].RandomAlgorithm,
 			ConversionReason: draws[i].ConversionReason, Status: draws[i].Status, CreatedAt: draws[i].CreatedAt,
+			RawPrize:   prizeViews[[2]int{draws[i].VersionId, draws[i].RawPrizeId}],
+			FinalPrize: prizeViews[[2]int{draws[i].VersionId, draws[i].FinalPrizeId}],
 		}
-		var award LotteryAward
-		if err := DB.Where("draw_id = ?", draws[i].Id).First(&award).Error; err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		if award.Id != 0 {
+		if award, ok := awardsByDraw[draws[i].Id]; ok {
 			item.AwardID, item.AwardStatus = award.Id, award.Status
 		}
 		items = append(items, item)

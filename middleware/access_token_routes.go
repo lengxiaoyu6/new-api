@@ -48,6 +48,7 @@ var accessTokenRouteRules = map[string]accessTokenRouteRule{
 	"GET /api/lottery/activities/:id":         accessTokenSessionRule,
 	"GET /api/lottery/activities/:id/history": accessTokenSessionRule,
 	"GET /api/lottery/history":                accessTokenSessionRule,
+	"GET /api/lottery/attempts/history":       accessTokenSessionRule,
 	"GET /api/model-status":                   accessTokenAnyRule,
 	"GET /api/user/aff/invited":               accessTokenScopeRule("wallet:read"),
 	"GET /api/user/aff/logs":                  accessTokenScopeRule("wallet:read"),

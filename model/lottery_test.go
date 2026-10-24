@@ -717,8 +717,106 @@ func TestLotteryMigrationMatrix(t *testing.T) {
 			require.NoError(t, db.First(&keptDraw, draw.Id).Error)
 			assert.Equal(t, draw.IdempotencyKey, keptDraw.IdempotencyKey)
 			t.Run("granted_attempts", testGrantedLotteryAttempts)
+			t.Run("attempt_history", testLotteryAttemptHistory)
 		})
 	}
+}
+
+func TestLotteryAttemptHistory(t *testing.T) {
+	truncateTables(t)
+	testLotteryAttemptHistory(t)
+}
+
+func testLotteryAttemptHistory(t *testing.T) {
+	t.Helper()
+	var activity *LotteryActivity
+	require.NoError(t, DB.Transaction(func(tx *gorm.DB) error {
+		var err error
+		activity, err = EnsurePaymentLotteryTx(tx, 1)
+		return err
+	}))
+	now := time.Unix(activity.StartAt, 0).Add(time.Hour)
+	user, otherUser := lotteryTestUser(t, 0), lotteryTestUser(t, 0)
+	empty, err := GetLotteryAttemptHistoryPage(user.Id, 0, 0, now)
+	require.NoError(t, err)
+	assert.Equal(t, &LotteryAttemptHistoryPage{
+		Items: []LotteryAttemptHistoryItem{}, Page: 1, PageSize: 20,
+	}, empty)
+
+	payments := []TopUp{
+		{PaymentProvider: PaymentProviderStripe, PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix() - 20, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderEpay, PaymentMethod: "alipay", Money: 1, CompleteTime: now.Unix() - 10, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderCreem, PaymentMethod: PaymentMethodCreem, Money: 1, CompleteTime: now.Unix() - 15, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderWaffo, PaymentMethod: PaymentMethodWaffo, Money: 1, CompleteTime: now.Unix() - 16, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderWaffoPancake, PaymentMethod: PaymentMethodWaffoPancake, Money: 1, CompleteTime: now.Unix() - 17, Status: common.TopUpStatusSuccess},
+		{PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix() - 18, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusPending},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusExpired},
+		{PaymentProvider: PaymentProviderStripe, Money: 0, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, PaymentMethod: PaymentMethodBalance, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderBalance, PaymentMethod: PaymentMethodBalance, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: activity.StartAt - 1, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Unix() + 1, Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess, UserId: otherUser.Id},
+		{PaymentMethod: PaymentMethodBalance, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+	}
+	for i := range payments {
+		if payments[i].UserId == 0 {
+			payments[i].UserId = user.Id
+		}
+		payments[i].TradeNo = fmt.Sprintf("attempt-history-%d-%d", user.Id, i)
+		require.NoError(t, DB.Create(&payments[i]).Error)
+	}
+	subscriptions := []SubscriptionOrder{
+		{UserId: user.Id, TradeNo: payments[5].TradeNo, Money: 1, PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess},
+		{UserId: user.Id, TradeNo: payments[15].TradeNo, Money: 1, PaymentMethod: PaymentMethodBalance, PaymentProvider: PaymentProviderBalance, Status: common.TopUpStatusSuccess},
+		{UserId: otherUser.Id, TradeNo: payments[16].TradeNo, Money: 1, PaymentMethod: PaymentMethodStripe, PaymentProvider: PaymentProviderStripe, Status: common.TopUpStatusSuccess},
+	}
+	require.NoError(t, DB.Create(&subscriptions).Error)
+	require.NoError(t, DB.Create(&LotteryPaymentUsage{
+		TopUpId: payments[0].Id, UserId: user.Id, DrawId: payments[0].Id,
+	}).Error)
+	grants := []LotteryAttemptGrant{
+		{UserId: user.Id, Count: 3, Remaining: 0, RequestId: fmt.Sprintf("history-grant-%d", user.Id), OperatorId: otherUser.Id, Reason: "Support gift", CreatedAt: now.Unix() - 10},
+		{UserId: user.Id, Count: 1, Remaining: 1, RequestId: fmt.Sprintf("lottery-gift-20261024-user-%d", user.Id), OperatorId: otherUser.Id, Reason: "全员赠送一次抽奖机会", CreatedAt: now.Unix() - 10},
+		{UserId: otherUser.Id, Count: 2, Remaining: 2, RequestId: fmt.Sprintf("other-history-grant-%d", user.Id), OperatorId: otherUser.Id, CreatedAt: now.Unix()},
+	}
+	require.NoError(t, DB.Create(&grants).Error)
+	expected := []LotteryAttemptHistoryItem{
+		{Id: grants[1].Id, Source: "admin_grant", Count: 1, Reason: grants[1].Reason, CreatedAt: grants[1].CreatedAt},
+		{Id: grants[0].Id, Source: "admin_grant", Count: 3, Reason: grants[0].Reason, CreatedAt: grants[0].CreatedAt},
+	}
+	for _, index := range []int{1, 2, 3, 4, 5, 0} {
+		expected = append(expected, LotteryAttemptHistoryItem{
+			Id: payments[index].Id, Source: "payment", Count: 1, CreatedAt: payments[index].CompleteTime,
+		})
+	}
+	page, err := GetLotteryAttemptHistoryPage(user.Id, 1, 1000, now)
+	require.NoError(t, err)
+	assert.EqualValues(t, len(expected), page.Total)
+	assert.Equal(t, 100, page.PageSize)
+	assert.Equal(t, expected, page.Items)
+	for _, number := range []int{1, 2, 3} {
+		page, err = GetLotteryAttemptHistoryPage(user.Id, number, 3, now)
+		require.NoError(t, err)
+		assert.EqualValues(t, len(expected), page.Total)
+		assert.Equal(t, expected[(number-1)*3:min(number*3, len(expected))], page.Items)
+	}
+	page, err = GetLotteryAttemptHistoryPage(user.Id, 999999999, 100, now)
+	require.NoError(t, err)
+	assert.Empty(t, page.Items)
+	assert.EqualValues(t, len(expected), page.Total)
+
+	require.NoError(t, DB.Model(&LotteryActivity{}).Where("id = ?", activity.Id).Update("status", LotteryActivityPaused).Error)
+	page, err = GetLotteryAttemptHistoryPage(user.Id, 1, 20, now)
+	require.NoError(t, err)
+	assert.Equal(t, expected, page.Items, "pausing the pool preserves acquisition history")
+	require.NoError(t, DB.Delete(activity).Error)
+	page, err = GetLotteryAttemptHistoryPage(user.Id, 1, 20, now)
+	require.NoError(t, err)
+	assert.Equal(t, expected[:2], page.Items, "manual gift history remains available without a pool")
 }
 
 func TestPaymentLottery(t *testing.T) {

@@ -101,17 +101,63 @@ type LotteryPaymentUsage struct {
 	CreatedAt int64 `json:"created_at" gorm:"bigint;not null"`
 }
 
-func paymentLotteryOrders(tx *gorm.DB, userID int, startAt, acceptedAt int64) *gorm.DB {
+func lotteryOnlinePayments(tx *gorm.DB, userID int) *gorm.DB {
 	providers := []string{PaymentProviderEpay, PaymentProviderStripe, PaymentProviderCreem, PaymentProviderWaffo, PaymentProviderWaffoPancake}
 	subscriptions := tx.Model(&SubscriptionOrder{}).Select("trade_no").
 		Where("user_id = ? AND status = ? AND money > 0 AND payment_provider IN ? AND payment_method <> ?",
 			userID, common.TopUpStatusSuccess, providers, PaymentMethodBalance)
-	used := tx.Model(&LotteryPaymentUsage{}).Select("top_up_id").Where("user_id = ?", userID)
 	return tx.Model(&TopUp{}).
-		Where("user_id = ? AND status = ? AND money > 0 AND complete_time >= ? AND complete_time <= ?",
-			userID, common.TopUpStatusSuccess, startAt, acceptedAt).
-		Where("payment_method <> ? AND (payment_provider IN ? OR trade_no IN (?))", PaymentMethodBalance, providers, subscriptions).
+		Where("user_id = ? AND status = ? AND money > 0", userID, common.TopUpStatusSuccess).
+		Where("payment_method <> ? AND (payment_provider IN ? OR trade_no IN (?))", PaymentMethodBalance, providers, subscriptions)
+}
+
+func paymentLotteryOrders(tx *gorm.DB, userID int, startAt, acceptedAt int64) *gorm.DB {
+	used := tx.Model(&LotteryPaymentUsage{}).Select("top_up_id").Where("user_id = ?", userID)
+	return lotteryOnlinePayments(tx, userID).
+		Where("complete_time >= ? AND complete_time <= ?", startAt, acceptedAt).
 		Where("id NOT IN (?)", used)
+}
+
+type LotteryAttemptHistoryItem struct {
+	Id        int    `json:"id"`
+	Source    string `json:"source"`
+	Count     int    `json:"count"`
+	Reason    string `json:"reason"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+type LotteryAttemptHistoryPage struct {
+	Items    []LotteryAttemptHistoryItem `json:"items"`
+	Total    int64                       `json:"total"`
+	Page     int                         `json:"page"`
+	PageSize int                         `json:"page_size"`
+}
+
+func GetLotteryAttemptHistoryPage(userID, page, pageSize int, now time.Time) (*LotteryAttemptHistoryPage, error) {
+	page, pageSize = normalizeLotteryHistoryPage(page, pageSize)
+	poolStart := DB.Model(&LotteryActivity{}).Select("start_at").Where("name = ?", PaymentLotteryName)
+	// Acquisition history retains payments and grants after their attempts are used.
+	payments := lotteryOnlinePayments(DB, userID).
+		Where("complete_time >= (?) AND complete_time <= ?", poolStart, now.Unix()).
+		Select("id, ? AS source, 1 AS count, ? AS reason, complete_time AS created_at", "payment", "")
+	grants := DB.Model(&LotteryAttemptGrant{}).Where("user_id = ?", userID).
+		Select("id, ? AS source, count, reason, created_at", "admin_grant")
+	// GORM has no UNION builder; both subqueries retain parameter binding.
+	query := DB.Table("(? UNION ALL ?) AS attempt_history", payments, grants)
+	result := &LotteryAttemptHistoryPage{
+		Items: make([]LotteryAttemptHistoryItem, 0), Page: page, PageSize: pageSize,
+	}
+	if err := query.Count(&result.Total).Error; err != nil {
+		return nil, err
+	}
+	if int64(page-1) > result.Total/int64(pageSize) {
+		return result, nil
+	}
+	if err := query.Order("created_at DESC, source ASC, id DESC").
+		Offset((page - 1) * pageSize).Limit(pageSize).Scan(&result.Items).Error; err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // EnsurePaymentLotteryTx creates the permanent pool as part of its first

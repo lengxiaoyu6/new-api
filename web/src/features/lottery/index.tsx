@@ -22,6 +22,7 @@ import {
   ChevronRight,
   Gift,
   History,
+  ListPlus,
   RotateCcw,
   WalletCards,
 } from 'lucide-react'
@@ -55,6 +56,7 @@ import { formatQuota, formatTimestampToDate } from '@/lib/format'
 import { handleServerError } from '@/lib/handle-server-error'
 
 import { drawLottery, getLotteryActivities, getLotteryHistory } from './api'
+import { LotteryAttemptHistory } from './components/lottery-attempt-history'
 import { LotteryWheel } from './components/lottery-wheel'
 import { getLotteryWheelRotation } from './lib/wheel'
 import type {
@@ -413,14 +415,21 @@ export function Lottery() {
           onValueChange={setActiveTab}
           className='min-w-0 gap-4'
         >
-          <TabsList aria-label={t('Lottery')} className='h-10 w-full sm:w-fit'>
-            <TabsTrigger value='draw' className='px-4'>
+          <TabsList
+            aria-label={t('Lottery')}
+            className='min-h-10 w-full flex-wrap group-data-horizontal/tabs:h-auto sm:w-fit'
+          >
+            <TabsTrigger value='draw' className='px-3 py-2 sm:px-4'>
               <Gift aria-hidden='true' />
               {t('Lottery')}
             </TabsTrigger>
-            <TabsTrigger value='history' className='px-4'>
+            <TabsTrigger value='history' className='px-3 py-2 sm:px-4'>
               <History aria-hidden='true' />
               {t('Draw history')}
+            </TabsTrigger>
+            <TabsTrigger value='attempts' className='px-3 py-2 sm:px-4'>
+              <ListPlus aria-hidden='true' />
+              {t('Attempt history')}
             </TabsTrigger>
           </TabsList>
           <TabsContent value='draw' keepMounted className='min-w-0 space-y-4'>
@@ -447,6 +456,9 @@ export function Lottery() {
           </TabsContent>
           <TabsContent value='history' keepMounted className='min-w-0'>
             <LotteryHistorySection active={activeTab === 'history'} />
+          </TabsContent>
+          <TabsContent value='attempts' keepMounted className='min-w-0'>
+            <LotteryAttemptHistory active={activeTab === 'attempts'} />
           </TabsContent>
         </Tabs>
       </SectionPageLayout.Content>

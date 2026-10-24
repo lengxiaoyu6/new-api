@@ -188,7 +188,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className='border-b'>
         <div className='flex flex-wrap items-center justify-between gap-2'>
           <CardTitle>{t('Configure prizes')}</CardTitle>
           <Badge
@@ -205,37 +205,43 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
       <CardContent>
         <form onSubmit={form.handleSubmit((value) => mutation.mutate(value))}>
           <FieldGroup>
-            <p className='text-muted-foreground text-sm'>
-              {t(
-                'Existing prize amounts and initial stock are fixed. Add stock below or create a new prize to change the reward.'
-              )}
-            </p>
-            <Field data-invalid={!!form.formState.errors.title}>
-              <FieldLabel htmlFor='lottery-version-title'>
-                {t('Lottery title')}
-              </FieldLabel>
-              <Input
-                id='lottery-version-title'
-                aria-invalid={!!form.formState.errors.title}
-                {...form.register('title')}
-              />
-              <FieldError>{form.formState.errors.title?.message}</FieldError>
-            </Field>
-            <Field data-invalid={!!form.formState.errors.ruleText}>
-              <FieldLabel htmlFor='lottery-rule-text'>
-                {t('Lottery rules')}
-              </FieldLabel>
-              <Textarea
-                id='lottery-rule-text'
-                aria-invalid={!!form.formState.errors.ruleText}
-                {...form.register('ruleText')}
-              />
-              <FieldError>{form.formState.errors.ruleText?.message}</FieldError>
-            </Field>
+            <div className='grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]'>
+              <Field data-invalid={!!form.formState.errors.title}>
+                <FieldLabel htmlFor='lottery-version-title'>
+                  {t('Lottery title')}
+                </FieldLabel>
+                <Input
+                  id='lottery-version-title'
+                  aria-invalid={!!form.formState.errors.title}
+                  {...form.register('title')}
+                />
+                <FieldError>{form.formState.errors.title?.message}</FieldError>
+              </Field>
+              <Field data-invalid={!!form.formState.errors.ruleText}>
+                <FieldLabel htmlFor='lottery-rule-text'>
+                  {t('Lottery rules')}
+                </FieldLabel>
+                <Textarea
+                  id='lottery-rule-text'
+                  aria-invalid={!!form.formState.errors.ruleText}
+                  {...form.register('ruleText')}
+                />
+                <FieldError>
+                  {form.formState.errors.ruleText?.message}
+                </FieldError>
+              </Field>
+            </div>
 
             <FieldSet>
               <div className='flex flex-wrap items-center justify-between gap-2'>
-                <FieldLabel>{t('Prizes')}</FieldLabel>
+                <div className='min-w-0 space-y-1'>
+                  <FieldLabel>{t('Prizes')}</FieldLabel>
+                  <p className='text-muted-foreground text-sm'>
+                    {t(
+                      'Existing prize amounts and initial stock are fixed. Use Current configuration to add stock, or add a new prize to change the reward.'
+                    )}
+                  </p>
+                </div>
                 <Button
                   type='button'
                   size='sm'
@@ -258,19 +264,36 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                 </Button>
               </div>
               <FieldError>{prizesError}</FieldError>
-              <div className='space-y-3'>
+              <div className='grid items-start gap-4 2xl:grid-cols-2'>
                 {prizeFields.fields.map((prizeField, index) => {
                   const prizeType = prizes[index]?.type
                   return (
                     <fieldset
-                      className='border-border rounded-md border p-3'
+                      className='border-border @container/prize min-w-0 rounded-lg border p-4'
                       key={prizeField.id}
                     >
-                      <legend className='px-1 text-sm font-medium'>
+                      <legend className='sr-only'>
                         {t('Prize {{number}}', { number: index + 1 })}
                       </legend>
+                      <div className='mb-4 flex items-center justify-between gap-2 border-b pb-3'>
+                        <span className='font-medium' aria-hidden='true'>
+                          {t('Prize {{number}}', { number: index + 1 })}
+                        </span>
+                        <Button
+                          type='button'
+                          size='icon'
+                          variant='ghost'
+                          disabled={prizeFields.fields.length <= 2}
+                          aria-label={t('Remove prize {{number}}', {
+                            number: index + 1,
+                          })}
+                          onClick={() => prizeFields.remove(index)}
+                        >
+                          <Trash2 aria-hidden='true' />
+                        </Button>
+                      </div>
                       <FieldGroup className='gap-3'>
-                        <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+                        <div className='grid gap-4 @sm/prize:grid-cols-2 @xl/prize:grid-cols-3'>
                           <Field
                             data-invalid={
                               !!form.formState.errors.prizes?.[index]?.code
@@ -503,7 +526,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                               </FieldError>
                             </Field>
                           )}
-                          <Field>
+                          <Field className='@sm/prize:col-span-2 @xl/prize:col-span-3'>
                             <FieldLabel
                               htmlFor={`lottery-prize-${index}-title`}
                             >
@@ -514,7 +537,7 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                               {...form.register(`prizes.${index}.title`)}
                             />
                           </Field>
-                          <Field>
+                          <Field className='@sm/prize:col-span-2 @xl/prize:col-span-3'>
                             <FieldLabel
                               htmlFor={`lottery-prize-${index}-description`}
                             >
@@ -526,32 +549,26 @@ export function LotteryVersionForm(props: LotteryVersionFormProps) {
                             />
                           </Field>
                         </div>
-                        <Button
-                          type='button'
-                          size='icon'
-                          variant='ghost'
-                          disabled={prizeFields.fields.length <= 2}
-                          aria-label={t('Remove prize {{number}}', {
-                            number: index + 1,
-                          })}
-                          onClick={() => prizeFields.remove(index)}
-                        >
-                          <Trash2 aria-hidden='true' />
-                        </Button>
                       </FieldGroup>
                     </fieldset>
                   )
                 })}
               </div>
             </FieldSet>
-            <Button type='submit' disabled={mutation.isPending}>
-              {mutation.isPending ? (
-                <Spinner aria-hidden='true' />
-              ) : (
-                <Send aria-hidden='true' />
-              )}
-              {t('Save configuration')}
-            </Button>
+            <div className='flex justify-end border-t pt-4'>
+              <Button
+                type='submit'
+                className='w-full sm:w-auto'
+                disabled={mutation.isPending}
+              >
+                {mutation.isPending ? (
+                  <Spinner aria-hidden='true' />
+                ) : (
+                  <Send aria-hidden='true' />
+                )}
+                {t('Save configuration')}
+              </Button>
+            </div>
           </FieldGroup>
         </form>
       </CardContent>

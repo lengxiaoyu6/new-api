@@ -398,6 +398,24 @@ func GetLotteryUserHistory(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": lotteryHistoryPublicView(c, historyPage)})
 }
 
+func GetLotteryAttemptHistory(c *gin.Context) {
+	if !lotterySessionOnly(c) {
+		return
+	}
+	pageValue := c.Query("page")
+	if pageValue == "" {
+		pageValue = c.Query("p")
+	}
+	page, _ := strconv.Atoi(pageValue)
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	history, err := model.GetLotteryAttemptHistoryPage(c.GetInt("id"), page, pageSize, time.Now())
+	if err != nil {
+		lotteryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": history})
+}
+
 func lotteryHistoryPublicView(c *gin.Context, historyPage *model.LotteryHistoryPage) gin.H {
 	lang := i18n.StatedLang(c)
 	history := make([]gin.H, 0, len(historyPage.Items))
@@ -625,7 +643,26 @@ func AdminLotteryAudit(c *gin.Context) {
 		lotteryError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "data": audit})
+	lang := c.Query("language")
+	if lang == "" {
+		lang = i18n.StatedLang(c)
+	}
+	type auditRecord struct {
+		model.LotteryAuditRecord
+		RawPrizeTitle   string `json:"raw_prize_title"`
+		FinalPrizeTitle string `json:"final_prize_title"`
+	}
+	items := make([]auditRecord, 0, len(audit.Items))
+	for _, item := range audit.Items {
+		items = append(items, auditRecord{
+			LotteryAuditRecord: item,
+			RawPrizeTitle:      lotteryPrizeTitle(item.RawPrize, lang),
+			FinalPrizeTitle:    lotteryPrizeTitle(item.FinalPrize, lang),
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{
+		"items": items, "total": audit.Total, "page": audit.Page, "page_size": audit.PageSize,
+	}})
 }
 
 func AdminPublishLotteryVersion(c *gin.Context) {

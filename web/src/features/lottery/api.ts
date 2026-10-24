@@ -25,6 +25,7 @@ import type {
   LotteryAuditResponse,
   LotteryAdminVersionsResponse,
   LotteryDrawResponse,
+  LotteryAttemptHistoryResponse,
   LotteryHistoryResponse,
   LotteryVersionPayload,
 } from './types'
@@ -69,6 +70,16 @@ export async function getLotteryHistory(
       page,
       page_size: pageSize,
     },
+  })
+  return response.data
+}
+
+export async function getLotteryAttemptHistory(
+  page = 1,
+  pageSize = 20
+): Promise<LotteryAttemptHistoryResponse> {
+  const response = await api.get('/api/lottery/attempts/history', {
+    params: { page, page_size: pageSize },
   })
   return response.data
 }
@@ -137,7 +148,8 @@ export async function getLotteryAdminAudit(
   activityId: number,
   page = 1,
   pageSize = 20,
-  businessDate?: string
+  businessDate?: string,
+  language?: string
 ): Promise<LotteryAuditResponse> {
   const response = await api.get(
     `/api/lottery/admin/activities/${activityId}/audit`,
@@ -146,6 +158,7 @@ export async function getLotteryAdminAudit(
         page,
         page_size: pageSize,
         ...(businessDate ? { business_date: businessDate } : {}),
+        ...(language ? { language } : {}),
       },
     }
   )

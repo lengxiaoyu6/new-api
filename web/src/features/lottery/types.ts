@@ -121,6 +121,25 @@ export type LotteryDrawResponse = {
   data?: LotteryDrawResult
 }
 
+export type LotteryAttemptHistoryItem = {
+  id: number
+  source: 'payment' | 'admin_grant'
+  count: number
+  reason: string
+  created_at: number
+}
+
+export type LotteryAttemptHistoryResponse = {
+  success: boolean
+  message?: string
+  data?: {
+    items: LotteryAttemptHistoryItem[]
+    total: number
+    page: number
+    page_size: number
+  }
+}
+
 export type LotteryAdminActivity = {
   id: number
   name: string
@@ -198,12 +217,15 @@ export type LotteryAdminVersionsResponse = {
 export type LotteryAuditRecord = {
   draw_id: number
   user_id: number
+  username: string
   business_date: string
   attempt_no: number
   idempotency_key: string
   version_id: number
   raw_prize_id: number
+  raw_prize_title: string
   final_prize_id: number
+  final_prize_title: string
   random_value: number
   range_start: number
   range_end: number

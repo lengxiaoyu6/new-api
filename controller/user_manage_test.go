@@ -313,6 +313,64 @@ func TestAdminGrantLotteryAttemptsAuthorizationAndValidation(t *testing.T) {
 	assert.Equal(t, 1, grants[1].Remaining)
 }
 
+func TestLotteryAttemptHistoryRequiresSessionAndFiltersCurrentUser(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.LotteryActivity{}, &model.LotteryAttemptGrant{}, &model.TopUp{}, &model.SubscriptionOrder{}))
+	user := createQuotaTestOperator(t, db, common.RoleCommonUser)
+	require.NoError(t, model.PublishUserAuthCache(user.Id))
+	_, sessionToken := createAccessTokenTestSession(t, user.Id, "lottery-history-session")
+	scopedToken, _ := createScopedAccessToken(t, user.Id, time.Now().Add(time.Hour).Unix(), "wallet:read")
+	grants := []model.LotteryAttemptGrant{
+		{UserId: user.Id, Count: 1, Remaining: 0, RequestId: "history-private-request", OperatorId: 123, Reason: "Member gift", CreatedAt: 1},
+		{UserId: 123, Count: 5, Remaining: 5, RequestId: "history-other-request", OperatorId: 123, Reason: "Other member gift", CreatedAt: 2},
+	}
+	require.NoError(t, db.Create(&grants).Error)
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.GET("/api/lottery/attempts/history", middleware.UserAuth(), GetLotteryAttemptHistory)
+	for _, test := range []struct {
+		name, token string
+		status      int
+	}{
+		{"anonymous", "", http.StatusUnauthorized},
+		{"access token", scopedToken, http.StatusForbidden},
+		{"browser session", sessionToken, http.StatusOK},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/lottery/attempts/history?user_id=123&p=1&page_size=1", nil)
+			if test.token != "" {
+				request.Header.Set("Authorization", "Bearer "+test.token)
+			}
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			require.Equal(t, test.status, response.Code, response.Body.String())
+			if test.status != http.StatusOK {
+				assert.NotContains(t, response.Body.String(), "Member gift")
+				return
+			}
+			var body struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Items    []map[string]any `json:"items"`
+					Total    int              `json:"total"`
+					Page     int              `json:"page"`
+					PageSize int              `json:"page_size"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+			assert.True(t, body.Success)
+			assert.Equal(t, 1, body.Data.Total)
+			assert.Equal(t, 1, body.Data.Page)
+			assert.Equal(t, 1, body.Data.PageSize)
+			require.Len(t, body.Data.Items, 1)
+			assert.Equal(t, map[string]any{
+				"id": float64(grants[0].Id), "source": "admin_grant", "count": float64(1),
+				"reason": "Member gift", "created_at": float64(1),
+			}, body.Data.Items[0])
+		})
+	}
+}
+
 func TestManageUserQuotaRecordsTopupAndAudit(t *testing.T) {
 	for _, tc := range []struct {
 		name, mode, action, content string

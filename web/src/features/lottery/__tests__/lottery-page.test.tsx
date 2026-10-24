@@ -166,6 +166,10 @@ it('shows an equal-segment prize wheel without exposing probability values', asy
     '/api/lottery/history',
     expect.anything()
   )
+  expect(get).not.toHaveBeenCalledWith(
+    '/api/lottery/attempts/history',
+    expect.anything()
+  )
   expect(screen.getByRole('button', { name: 'Draw now' })).toBeEnabled()
   expect(screen.getAllByText('2 balance')).toHaveLength(1)
   expect(screen.queryByText('Available')).not.toBeInTheDocument()
@@ -210,6 +214,17 @@ it('disables the wheel when the activity qualification is not satisfied', async 
     )
   ).not.toBeInTheDocument()
 
+  client.clear()
+})
+
+it('allows the three tabs to wrap with automatic height on narrow screens', async () => {
+  mockLotteryGet([activity])
+  const client = renderLottery()
+  await screen.findByRole('button', { name: 'Draw now' })
+  expect(screen.getByRole('tablist', { name: 'Lottery' })).toHaveClass(
+    'flex-wrap',
+    'group-data-horizontal/tabs:h-auto'
+  )
   client.clear()
 })
 
@@ -398,5 +413,176 @@ it('retains the prize when switching to history interrupts the wheel animation',
   await user.keyboard('{Escape}')
   expect(await screen.findByRole('button', { name: 'Draw now' })).toBeEnabled()
 
+  client.clear()
+})
+
+it('shows payment and administrator acquisitions with paginated attempt history', async () => {
+  const reason = 'Member appreciation gift '.repeat(20)
+  const get = mockLotteryGet([activity]).mockImplementation(
+    async (url, config) => {
+      if (url === '/api/lottery/activities') {
+        return { data: { success: true, data: [activity] } } as never
+      }
+      const page = config?.params?.page ?? 1
+      const items =
+        page === 1
+          ? [
+              {
+                id: 1,
+                source: 'admin_grant',
+                count: 2,
+                reason,
+                created_at: 1_792_800_000,
+              },
+              {
+                id: 1,
+                source: 'payment',
+                count: 1,
+                reason: '',
+                created_at: 1_792_700_000,
+              },
+            ]
+          : [
+              {
+                id: 2,
+                source: 'admin_grant',
+                count: 1,
+                reason: 'Earlier gift',
+                created_at: 1_792_600_000,
+              },
+            ]
+      return {
+        data: {
+          success: true,
+          data: { items, total: 21, page, page_size: 20 },
+        },
+      } as never
+    }
+  )
+  const client = renderLottery()
+  const user = userEvent.setup()
+
+  await screen.findByRole('button', { name: 'Draw now' })
+  await user.click(screen.getByRole('tab', { name: 'Attempt history' }))
+  const panel = within(
+    screen.getByRole('tabpanel', { name: 'Attempt history' })
+  )
+  expect(await panel.findByText('Administrator gift')).toBeVisible()
+  expect(panel.getByText('Online payment')).toBeVisible()
+  expect(panel.getByText('+2')).toBeVisible()
+  expect(panel.getByText('+1')).toBeVisible()
+  expect(panel.getByText(reason.trim())).toBeVisible()
+  expect(
+    panel.getByRole('button', { name: 'Go to previous page' })
+  ).toBeDisabled()
+  expect(panel.getByText('1 / 2')).toBeVisible()
+
+  await user.click(panel.getByRole('button', { name: 'Go to next page' }))
+  expect(await panel.findByText('Earlier gift')).toBeVisible()
+  expect(panel.getByText('2 / 2')).toBeVisible()
+  expect(panel.getByRole('button', { name: 'Go to next page' })).toBeDisabled()
+  expect(get).toHaveBeenCalledWith('/api/lottery/attempts/history', {
+    params: { page: 2, page_size: 20 },
+  })
+
+  await user.click(screen.getByRole('tab', { name: 'Lottery' }))
+  expect(screen.getByRole('button', { name: 'Draw now' })).toBeVisible()
+  await user.click(screen.getByRole('tab', { name: 'Attempt history' }))
+  expect(await panel.findByText('Earlier gift')).toBeVisible()
+  client.clear()
+})
+
+it('opens empty attempt history with the keyboard when the prize pool is missing', async () => {
+  mockLotteryGet([])
+  const client = renderLottery()
+  const user = userEvent.setup()
+  await screen.findByText('No lottery prize pool configured')
+
+  screen.getByRole('tab', { name: 'Lottery' }).focus()
+  await user.keyboard('{End}{Enter}')
+
+  expect(screen.getByRole('tab', { name: 'Attempt history' })).toHaveFocus()
+  expect(screen.getByRole('tab', { name: 'Attempt history' })).toHaveAttribute(
+    'aria-selected',
+    'true'
+  )
+  expect(await screen.findByText('No attempt history')).toBeVisible()
+  expect(screen.getAllByRole('tabpanel')).toHaveLength(1)
+  expect(
+    screen.queryByRole('navigation', { name: 'Page' })
+  ).not.toBeInTheDocument()
+  client.clear()
+})
+
+it('keeps attempt history available when activity loading fails', async () => {
+  mockLotteryGet([]).mockImplementation(async (url) => {
+    if (url === '/api/lottery/activities') {
+      throw new Error('Pool unavailable')
+    }
+    return {
+      data: {
+        success: true,
+        data: {
+          items: [
+            {
+              id: 1,
+              source: 'admin_grant',
+              count: 1,
+              reason: 'Member gift',
+              created_at: 1,
+            },
+          ],
+          total: 1,
+          page: 1,
+          page_size: 20,
+        },
+      },
+    } as never
+  })
+  const client = renderLottery()
+  await screen.findByText('Unable to load lottery activities')
+  await userEvent.click(screen.getByRole('tab', { name: 'Attempt history' }))
+  expect(await screen.findByText('Member gift')).toBeVisible()
+  expect(
+    screen.getByText('Unable to load lottery activities')
+  ).not.toBeVisible()
+  client.clear()
+})
+
+it('shows attempt loading and a retryable error within the attempts tab', async () => {
+  const response = Promise.withResolvers<void>()
+  let failed = true
+  mockLotteryGet([activity]).mockImplementation(async (url) => {
+    if (url === '/api/lottery/activities') {
+      return { data: { success: true, data: [activity] } } as never
+    }
+    await response.promise
+    if (failed) {
+      return {
+        data: { success: false, message: 'History unavailable' },
+      } as never
+    }
+    return {
+      data: {
+        success: true,
+        data: { items: [], total: 0, page: 1, page_size: 20 },
+      },
+    } as never
+  })
+  const client = renderLottery()
+  await screen.findByRole('button', { name: 'Draw now' })
+  await userEvent.click(screen.getByRole('tab', { name: 'Attempt history' }))
+  const panel = within(
+    screen.getByRole('tabpanel', { name: 'Attempt history' })
+  )
+  expect(panel.getByText('Loading...')).toBeVisible()
+  await act(async () => response.resolve())
+  expect(await panel.findByText('Unable to load attempt history')).toBeVisible()
+  await userEvent.click(screen.getByRole('tab', { name: 'Lottery' }))
+  expect(screen.getByText('Unable to load attempt history')).not.toBeVisible()
+  await userEvent.click(screen.getByRole('tab', { name: 'Attempt history' }))
+  failed = false
+  await userEvent.click(await panel.findByRole('button', { name: 'Retry' }))
+  expect(await panel.findByText('No attempt history')).toBeVisible()
   client.clear()
 })
