@@ -131,6 +131,16 @@ export function usePayment() {
           return false
         }
 
+        if (
+          paymentType === 'perpay' &&
+          response.data &&
+          'checkout_url' in response.data &&
+          typeof response.data?.checkout_url === 'string'
+        ) {
+          window.location.assign(response.data.checkout_url)
+          return true
+        }
+
         // Handle Stripe payment
         if (isStripe && response.data?.pay_link) {
           window.open(response.data.pay_link as string, '_blank')

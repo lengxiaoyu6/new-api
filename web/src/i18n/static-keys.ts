@@ -19,6 +19,10 @@ For commercial licensing, please contact support@quantumnous.com
 // Static translation keys that don't get picked up by the t('...') regex.
 // These cover dynamic labels (e.g. constants, configs) that are passed into t at runtime.
 export const STATIC_I18N_KEYS = [
+  'Alipay (PerPay)',
+  'Disputed',
+  'Invalid PerPay configuration',
+  'Failed to fetch order status',
   'Model restrictions must reference channel groups',
   'Model restrictions must reference channel models',
   // Referral ledger kinds and server validation messages.

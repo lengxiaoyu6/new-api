@@ -98,6 +98,7 @@ export function getPaymentIcon(
   }
 
   switch (paymentType) {
+    case PAYMENT_TYPES.PERPAY:
     case PAYMENT_TYPES.ALIPAY:
       return (
         <IconAlipay

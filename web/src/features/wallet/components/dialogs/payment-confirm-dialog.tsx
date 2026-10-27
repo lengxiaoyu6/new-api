@@ -80,6 +80,13 @@ export function PaymentConfirmDialog({
         </AlertDialogHeader>
 
         <PaymentTermsNotice />
+        {paymentMethod?.type === 'perpay' && (
+          <p className='text-muted-foreground text-sm'>
+            {t(
+              'Pay the exact CNY amount shown at the PerPay checkout. The checkout may add a few cents to identify the payment; wallet credit follows the selected top-up amount.'
+            )}
+          </p>
+        )}
 
         <div className='space-y-3 py-3 sm:space-y-4 sm:py-4'>
           <div className='flex items-center justify-between'>

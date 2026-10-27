@@ -118,6 +118,7 @@ export interface WaffoPayMethod {
  * Topup configuration information
  */
 export interface TopupInfo {
+  enable_perpay_topup?: boolean
   /** Whether online topup is enabled */
   enable_online_topup: boolean
   /** Whether Stripe topup is enabled */
@@ -237,7 +238,7 @@ export interface UserWalletData {
 /**
  * Topup record status
  */
-export type TopupStatus = 'success' | 'pending' | 'expired'
+export type TopupStatus = 'success' | 'pending' | 'expired' | 'disputed'
 
 /**
  * Topup billing record

@@ -34,6 +34,10 @@ interface StatusConfig {
  * Status badge configuration
  */
 export const STATUS_CONFIG: Record<TopupStatus, StatusConfig> = {
+  disputed: {
+    variant: 'danger',
+    label: 'Disputed',
+  },
   success: {
     variant: 'success',
     label: 'Success',
@@ -59,6 +63,7 @@ export function getStatusConfig(status: TopupStatus): StatusConfig {
  * Payment method display names
  */
 export const PAYMENT_METHOD_NAMES: Record<string, string> = {
+  perpay: 'Alipay (PerPay)',
   stripe: 'Stripe',
   alipay: 'Alipay',
   wxpay: 'WeChat Pay',

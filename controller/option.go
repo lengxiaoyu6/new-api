@@ -201,6 +201,17 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
+	case "PerPayEnabled":
+		if option.Value == "true" {
+			if !operation_setting.IsPaymentComplianceConfirmed() {
+				common.ApiErrorT(c, "Payment, redemption, subscription, and invitation reward features are disabled. The administrator must confirm compliance terms before enabling them.")
+				return
+			}
+			if service.GetPerPayConfig().Validate() != nil {
+				common.ApiErrorT(c, "Invalid PerPay configuration")
+				return
+			}
+		}
 	case "QuotaForInviter", "QuotaForInvitee", "InviterTopupRebatePercent":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorT(c, "Payment, redemption, subscription, and invitation reward features are disabled. The administrator must confirm compliance terms before enabling them.")

@@ -122,6 +122,11 @@ func InitOptionMap() {
 	common.OptionMap["WaffoMinTopUp"] = strconv.Itoa(setting.WaffoMinTopUp)
 	common.OptionMap["WaffoPayMethods"] = setting.WaffoPayMethods2JsonString()
 	common.OptionMap["WaffoPancakeMerchantID"] = setting.WaffoPancakeMerchantID
+	common.OptionMap["PerPayEnabled"] = strconv.FormatBool(setting.PerPayEnabled)
+	common.OptionMap["PerPayURL"] = setting.PerPayURL
+	common.OptionMap["PerPayClientID"] = setting.PerPayClientID
+	common.OptionMap["PerPayAPISecret"] = setting.PerPayAPISecret
+	common.OptionMap["PerPayWebhookSecret"] = setting.PerPayWebhookSecret
 	common.OptionMap["WaffoPancakePrivateKey"] = setting.WaffoPancakePrivateKey
 	common.OptionMap["WaffoPancakeReturnURL"] = setting.WaffoPancakeReturnURL
 	common.OptionMap["WaffoPancakeUnitPrice"] = strconv.FormatFloat(setting.WaffoPancakeUnitPrice, 'f', -1, 64)
@@ -592,6 +597,16 @@ func updateOptionMap(key string, value string) (err error) {
 		setting.WaffoMinTopUp, _ = strconv.Atoi(value)
 	case "WaffoPancakeMerchantID":
 		setting.WaffoPancakeMerchantID = value
+	case "PerPayEnabled":
+		setting.PerPayEnabled = value == "true"
+	case "PerPayURL":
+		setting.PerPayURL = value
+	case "PerPayClientID":
+		setting.PerPayClientID = value
+	case "PerPayAPISecret":
+		setting.PerPayAPISecret = value
+	case "PerPayWebhookSecret":
+		setting.PerPayWebhookSecret = value
 	case "WaffoPancakePrivateKey":
 		setting.WaffoPancakePrivateKey = value
 	case "WaffoPancakeReturnURL":

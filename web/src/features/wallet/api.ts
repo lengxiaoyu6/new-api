@@ -109,7 +109,11 @@ export async function calculateWaffoAmount(
 export async function requestPayment(
   request: PaymentRequest
 ): Promise<PaymentResponse> {
-  const res = await api.post('/api/user/pay', request, {
+  const endpoint =
+    request.payment_method === 'perpay'
+      ? '/api/user/perpay/pay'
+      : '/api/user/pay'
+  const res = await api.post(endpoint, request, {
     skipBusinessError: true,
   } as Record<string, unknown>)
   return {

@@ -177,6 +177,25 @@ export function getMinTopupAmount(topupInfo: TopupInfo | null): number {
     return topupInfo.min_topup
   }
 
+  if (topupInfo.enable_perpay_topup) {
+    const perPayMethod = topupInfo.pay_methods.find(
+      (method) => method.type === PAYMENT_TYPES.PERPAY
+    )
+    const minimums = [
+      Math.max(topupInfo.min_topup, perPayMethod?.min_topup || 0),
+    ]
+    if (topupInfo.enable_stripe_topup) {
+      minimums.push(topupInfo.stripe_min_topup)
+    }
+    if (topupInfo.enable_waffo_topup) {
+      minimums.push(topupInfo.waffo_min_topup || DEFAULT_MIN_TOPUP)
+    }
+    if (topupInfo.enable_waffo_pancake_topup) {
+      minimums.push(topupInfo.waffo_pancake_min_topup || DEFAULT_MIN_TOPUP)
+    }
+    return Math.min(...minimums)
+  }
+
   if (topupInfo.enable_stripe_topup) {
     return topupInfo.stripe_min_topup
   }

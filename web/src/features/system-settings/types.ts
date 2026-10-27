@@ -322,6 +322,11 @@ export type BillingSettings = {
   'payment_setting.compliance_confirmed_by': number
   'payment_setting.compliance_confirmed_ip': string
   StripeApiSecret: string
+  PerPayEnabled: boolean
+  PerPayURL: string
+  PerPayClientID: string
+  PerPayAPISecret: string
+  PerPayWebhookSecret: string
   StripeWebhookSecret: string
   StripePriceId: string
   StripeUnitPrice: number

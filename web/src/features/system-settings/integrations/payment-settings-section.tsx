@@ -97,6 +97,11 @@ function isHttpOriginUrl(value: string) {
 }
 
 const paymentSchema = z.object({
+  PerPayEnabled: z.boolean(),
+  PerPayURL: z.string().refine(isHttpOriginUrl, 'Invalid PerPay configuration'),
+  PerPayClientID: z.string(),
+  PerPayAPISecret: z.string(),
+  PerPayWebhookSecret: z.string(),
   PayAddress: z.string().refine((value) => {
     const trimmed = value.trim()
     if (!trimmed) return true
@@ -420,6 +425,11 @@ export function PaymentSettingsSection({
 
   const onSubmit = async (values: PaymentFormValues) => {
     const sanitized = {
+      PerPayEnabled: values.PerPayEnabled,
+      PerPayURL: removeTrailingSlash(values.PerPayURL.trim()),
+      PerPayClientID: values.PerPayClientID.trim(),
+      PerPayAPISecret: values.PerPayAPISecret.trim(),
+      PerPayWebhookSecret: values.PerPayWebhookSecret.trim(),
       PayAddress: removeTrailingSlash(values.PayAddress),
       EpayId: values.EpayId.trim(),
       EpayKey: values.EpayKey.trim(),
@@ -462,6 +472,11 @@ export function PaymentSettingsSection({
     }
 
     const initial = {
+      PerPayEnabled: initialRef.current.PerPayEnabled,
+      PerPayURL: removeTrailingSlash(initialRef.current.PerPayURL.trim()),
+      PerPayClientID: initialRef.current.PerPayClientID.trim(),
+      PerPayAPISecret: initialRef.current.PerPayAPISecret.trim(),
+      PerPayWebhookSecret: initialRef.current.PerPayWebhookSecret.trim(),
       PayAddress: removeTrailingSlash(initialRef.current.PayAddress),
       EpayId: initialRef.current.EpayId.trim(),
       EpayKey: initialRef.current.EpayKey.trim(),
@@ -509,6 +524,14 @@ export function PaymentSettingsSection({
     }
 
     const updates: Array<{ key: string; value: string | number | boolean }> = []
+    for (const key of ['PerPayURL', 'PerPayClientID'] as const) {
+      if (sanitized[key] !== initial[key]) {
+        updates.push({ key, value: sanitized[key] })
+      }
+    }
+    for (const key of ['PerPayAPISecret', 'PerPayWebhookSecret'] as const) {
+      if (sanitized[key]) updates.push({ key, value: sanitized[key] })
+    }
 
     if (sanitized.PayAddress !== initial.PayAddress) {
       updates.push({ key: 'PayAddress', value: sanitized.PayAddress })
@@ -703,6 +726,12 @@ export function PaymentSettingsSection({
       updates.push({ key: 'WaffoPayMethods', value: sanitized.WaffoPayMethods })
     }
 
+    // Enable after credentials are saved so server validation sees the full
+    // configuration. Disabling remains available independently.
+    if (sanitized.PerPayEnabled !== initial.PerPayEnabled) {
+      updates.push({ key: 'PerPayEnabled', value: sanitized.PerPayEnabled })
+    }
+
     const hasWaffoPancakeChanges =
       sanitized.WaffoPancakeMerchantID !== initial.WaffoPancakeMerchantID ||
       sanitized.WaffoPancakePrivateKey.length > 0 ||
@@ -882,9 +911,10 @@ export function PaymentSettingsSection({
           />
           <Tabs defaultValue='general' className='min-w-0'>
             <div className='overflow-x-auto pb-1'>
-              <TabsList className='grid min-w-[44rem] grid-cols-6'>
+              <TabsList className='grid min-w-[50rem] grid-cols-7'>
                 <TabsTrigger value='general'>{t('General')}</TabsTrigger>
                 <TabsTrigger value='epay'>Epay</TabsTrigger>
+                <TabsTrigger value='perpay'>PerPay</TabsTrigger>
                 <TabsTrigger value='stripe'>{t('Stripe')}</TabsTrigger>
                 <TabsTrigger value='creem'>Creem</TabsTrigger>
                 <TabsTrigger value='waffo-pancake'>Waffo Pancake</TabsTrigger>
@@ -1007,7 +1037,7 @@ export function PaymentSettingsSection({
                       </FormControl>
                       <FormDescription>
                         {t(
-                          'Configured as PayMethods JSON. The type value decides which payment flow is used: stripe for Stripe, waffo_pancake for Waffo Pancake, and other values are sent to Epay as the type parameter.'
+                          'Configured as PayMethods JSON. The type value selects the payment provider: perpay for PerPay, stripe for Stripe, waffo_pancake for Waffo Pancake, and other values for Epay.'
                         )}
                       </FormDescription>
                       <FormMessage />
@@ -1245,6 +1275,112 @@ export function PaymentSettingsSection({
                             onChange={(event) =>
                               field.onChange(event.target.value)
                             }
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Leave blank unless rotating the secret')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            <TabsContent value='perpay' className={paymentTabContentClassName}>
+              <div className='space-y-6'>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'Connect a separately deployed PerPay service for Alipay QR payments. Uses the general unit price, minimum top-up, group ratios and discounts.'
+                  )}
+                </p>
+                <p className='text-muted-foreground text-sm'>
+                  {t(
+                    'In PerPay, set notification and return origins to the callback address or server address. Webhook URL: {{path}}',
+                    { path: '/api/perpay/webhook' }
+                  )}
+                </p>
+                <FormField
+                  control={form.control}
+                  name='PerPayEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>{t('Enable PerPay')}</FormLabel>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+                <div className='grid gap-6 md:grid-cols-2'>
+                  <FormField
+                    control={form.control}
+                    name='PerPayURL'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('PerPay endpoint')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            placeholder='https://pay.example.com'
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='PerPayClientID'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('PerPay client ID')}</FormLabel>
+                        <FormControl>
+                          <Input autoComplete='off' {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='PerPayAPISecret'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('PerPay API secret')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='password'
+                            autoComplete='new-password'
+                            placeholder={t('Enter new key to update')}
+                            {...field}
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          {t('Leave blank unless rotating the secret')}
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <FormField
+                    control={form.control}
+                    name='PerPayWebhookSecret'
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>{t('PerPay webhook secret')}</FormLabel>
+                        <FormControl>
+                          <Input
+                            type='password'
+                            autoComplete='new-password'
+                            placeholder={t('Enter new key to update')}
+                            {...field}
                           />
                         </FormControl>
                         <FormDescription>

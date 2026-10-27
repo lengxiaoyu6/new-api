@@ -30,6 +30,7 @@ export const DEFAULT_PRESET_MULTIPLIERS = [1, 5, 10, 30, 50, 100, 300, 500]
  * Payment method types
  */
 export const PAYMENT_TYPES = {
+  PERPAY: 'perpay',
   ALIPAY: 'alipay',
   WECHAT: 'wxpay',
   STRIPE: 'stripe',
