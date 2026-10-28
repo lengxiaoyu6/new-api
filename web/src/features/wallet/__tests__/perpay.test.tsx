@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { render, screen } from '@testing-library/react'
+import { act, render, renderHook, screen } from '@testing-library/react'
 import { afterEach, expect, test, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -24,6 +24,7 @@ import { api } from '@/lib/api'
 import { requestPayment } from '../api'
 import { PaymentConfirmDialog } from '../components/dialogs/payment-confirm-dialog'
 import { RechargeFormCard } from '../components/recharge-form-card'
+import { usePayment } from '../hooks/use-payment'
 import { getMinTopupAmount } from '../lib/payment'
 import type { TopupInfo } from '../types'
 
@@ -57,6 +58,105 @@ test('a PerPay selection creates a hosted checkout using the PerPay endpoint', a
     expect.any(Object)
   )
   expect(result.data?.checkout_url).toBe('https://pay.example/checkout/token')
+})
+
+test('PerPay reserves a new window before requesting checkout and keeps the wallet open', async () => {
+  const popup = {
+    opener: window,
+    closed: false,
+    location: { replace: vi.fn() },
+    close: vi.fn(),
+  }
+  const open = vi
+    .spyOn(window, 'open')
+    .mockReturnValue(popup as unknown as Window)
+  const walletURL = window.location.href
+  vi.spyOn(api, 'post').mockImplementation(async () => {
+    expect(open).toHaveBeenCalledWith('about:blank', '_blank')
+    expect(popup.opener).toBeNull()
+    return {
+      data: {
+        message: 'success',
+        data: { checkout_url: 'https://pay.example/checkout/token' },
+      },
+    }
+  })
+  const { result } = renderHook(() => usePayment())
+
+  await act(async () => {
+    expect(await result.current.processPayment(9.99, 'perpay')).toBe(true)
+  })
+
+  expect(popup.location.replace).toHaveBeenCalledExactlyOnceWith(
+    'https://pay.example/checkout/token'
+  )
+  expect(popup.close).not.toHaveBeenCalled()
+  expect(window.location.href).toBe(walletURL)
+  expect(result.current.processing).toBe(false)
+})
+
+test.each([
+  'request failure',
+  'business failure',
+  'missing checkout',
+  'closed window',
+])('PerPay closes the reserved window after %s', async (failure) => {
+  const popup = {
+    opener: window,
+    closed: false,
+    location: { replace: vi.fn() },
+    close: vi.fn(),
+  }
+  vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+  const post = vi.spyOn(api, 'post')
+  if (failure === 'request failure') {
+    post.mockRejectedValue(new Error('Network unavailable'))
+  } else if (failure === 'business failure') {
+    post.mockResolvedValue({
+      data: { message: 'error', data: 'Failed to start payment' },
+    })
+  } else if (failure === 'closed window') {
+    post.mockImplementation(async () => {
+      popup.closed = true
+      return {
+        data: {
+          message: 'success',
+          data: { checkout_url: 'https://pay.example/checkout/token' },
+        },
+      }
+    })
+  } else {
+    post.mockResolvedValue({ data: { message: 'success', data: {} } })
+  }
+  const { result } = renderHook(() => usePayment())
+
+  await act(async () => {
+    expect(await result.current.processPayment(9.99, 'perpay')).toBe(false)
+  })
+
+  expect(popup.close).toHaveBeenCalledOnce()
+  expect(popup.location.replace).not.toHaveBeenCalled()
+  expect(result.current.processing).toBe(false)
+})
+
+test('PerPay does not create an order when the browser blocks its new window', async () => {
+  vi.spyOn(window, 'open').mockReturnValue(null)
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: {
+      message: 'success',
+      data: { checkout_url: 'https://pay.example/checkout/token' },
+    },
+  })
+  const walletURL = window.location.href
+  const { result } = renderHook(() => usePayment())
+
+  await act(async () => {
+    expect(await result.current.processPayment(9.99, 'perpay')).toBe(false)
+  })
+
+  expect(post).not.toHaveBeenCalled()
+  expect(window.location.href).toBe(walletURL)
+  expect(result.current.processing).toBe(false)
 })
 
 test('a PerPay-only configuration displays recharge amounts and its payment button', () => {

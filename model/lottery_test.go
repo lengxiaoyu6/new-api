@@ -761,6 +761,7 @@ func testLotteryAttemptHistory(t *testing.T) {
 		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess, UserId: otherUser.Id},
 		{PaymentMethod: PaymentMethodBalance, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
 		{PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderPerPay, PaymentMethod: PaymentProviderPerPay, Money: 1, CompleteTime: now.Unix() - 12, Status: common.TopUpStatusSuccess},
 	}
 	for i := range payments {
 		if payments[i].UserId == 0 {
@@ -788,7 +789,7 @@ func testLotteryAttemptHistory(t *testing.T) {
 		{Id: grants[1].Id, Source: "admin_grant", Count: 1, Reason: grants[1].Reason, CreatedAt: grants[1].CreatedAt},
 		{Id: grants[0].Id, Source: "admin_grant", Count: 3, Reason: grants[0].Reason, CreatedAt: grants[0].CreatedAt},
 	}
-	for _, index := range []int{1, 2, 3, 4, 5, 0} {
+	for _, index := range []int{1, 17, 2, 3, 4, 5, 0} {
 		expected = append(expected, LotteryAttemptHistoryItem{
 			Id: payments[index].Id, Source: "payment", Count: 1, CreatedAt: payments[index].CompleteTime,
 		})
@@ -999,7 +1000,7 @@ func testPaymentLottery(t *testing.T) {
 	require.NoError(t, DB.Create(&subscription).Error)
 	payments := []TopUp{
 		{PaymentProvider: PaymentProviderEpay, PaymentMethod: "alipay", Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
-		{PaymentProvider: PaymentProviderStripe, PaymentMethod: PaymentMethodStripe, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderPerPay, PaymentMethod: PaymentProviderPerPay, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
 		{PaymentMethod: PaymentMethodStripe, Money: 1, TradeNo: subscription.TradeNo, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
 		{PaymentProvider: PaymentProviderCreem, PaymentMethod: PaymentMethodCreem, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
 		{PaymentProvider: PaymentProviderEpay, PaymentMethod: "alipay", Money: 1, CompleteTime: now.Unix() - 1, Status: common.TopUpStatusSuccess},
@@ -1008,6 +1009,9 @@ func testPaymentLottery(t *testing.T) {
 		{PaymentProvider: PaymentProviderStripe, Money: 0, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
 		{PaymentProvider: PaymentProviderBalance, PaymentMethod: PaymentMethodBalance, Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
 		{Money: 1, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderPerPay, PaymentMethod: PaymentProviderPerPay, Money: 1, Status: common.TopUpStatusPending},
+		{PaymentProvider: PaymentProviderPerPay, PaymentMethod: PaymentProviderPerPay, Money: 0, CompleteTime: now.Unix(), Status: common.TopUpStatusSuccess},
+		{PaymentProvider: PaymentProviderPerPay, PaymentMethod: PaymentProviderPerPay, Money: 1, CompleteTime: now.Unix() - 1, Status: common.TopUpStatusSuccess},
 		{PaymentProvider: PaymentProviderStripe, Money: 1, CompleteTime: now.Add(time.Hour).Unix(), Status: common.TopUpStatusSuccess},
 	}
 	for i := range payments {
@@ -1129,6 +1133,6 @@ func testPaymentLottery(t *testing.T) {
 	var keptUsages int64
 	require.NoError(t, DB.Model(&LotteryPaymentUsage{}).Where("user_id = ?", user.Id).Count(&keptUsages).Error)
 	assert.Equal(t, usages, keptUsages)
-	duplicate := LotteryPaymentUsage{TopUpId: payments[0].Id, UserId: user.Id, DrawId: first.Draw.Id + 10000, CreatedAt: now.Unix()}
+	duplicate := LotteryPaymentUsage{TopUpId: payments[1].Id, UserId: user.Id, DrawId: first.Draw.Id + 10000, CreatedAt: now.Unix()}
 	assert.Error(t, DB.Create(&duplicate).Error)
 }

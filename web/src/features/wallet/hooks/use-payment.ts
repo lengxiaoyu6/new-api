@@ -110,8 +110,19 @@ export function usePayment() {
   // Process payment
   const processPayment = useCallback(
     async (topupAmount: number, paymentType: string) => {
+      let checkoutWindow: Window | null = null
       try {
         setProcessing(true)
+
+        if (paymentType === 'perpay') {
+          // Reserve the window during the click before awaiting the order.
+          checkoutWindow = window.open('about:blank', '_blank')
+          if (!checkoutWindow) {
+            toast.error(i18next.t('Payment request failed'))
+            return false
+          }
+          checkoutWindow.opener = null
+        }
 
         const isStripe = isStripePayment(paymentType)
         const amount = topupAmount
@@ -131,13 +142,19 @@ export function usePayment() {
           return false
         }
 
-        if (
-          paymentType === 'perpay' &&
-          response.data &&
-          'checkout_url' in response.data &&
-          typeof response.data?.checkout_url === 'string'
-        ) {
-          window.location.assign(response.data.checkout_url)
+        if (paymentType === 'perpay') {
+          if (
+            !checkoutWindow ||
+            checkoutWindow.closed ||
+            !response.data ||
+            !('checkout_url' in response.data) ||
+            typeof response.data.checkout_url !== 'string'
+          ) {
+            return false
+          }
+          checkoutWindow.location.replace(response.data.checkout_url)
+          checkoutWindow = null
+          toast.success(i18next.t('Payment page opened'))
           return true
         }
 
@@ -163,6 +180,7 @@ export function usePayment() {
         handleServerError(error, i18next.t('Payment request failed'))
         return false
       } finally {
+        checkoutWindow?.close()
         setProcessing(false)
       }
     },

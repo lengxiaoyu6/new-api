@@ -102,7 +102,7 @@ type LotteryPaymentUsage struct {
 }
 
 func lotteryOnlinePayments(tx *gorm.DB, userID int) *gorm.DB {
-	providers := []string{PaymentProviderEpay, PaymentProviderStripe, PaymentProviderCreem, PaymentProviderWaffo, PaymentProviderWaffoPancake}
+	providers := []string{PaymentProviderEpay, PaymentProviderStripe, PaymentProviderCreem, PaymentProviderWaffo, PaymentProviderWaffoPancake, PaymentProviderPerPay}
 	subscriptions := tx.Model(&SubscriptionOrder{}).Select("trade_no").
 		Where("user_id = ? AND status = ? AND money > 0 AND payment_provider IN ? AND payment_method <> ?",
 			userID, common.TopUpStatusSuccess, providers, PaymentMethodBalance)
