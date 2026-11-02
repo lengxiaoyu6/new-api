@@ -39,6 +39,15 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type RenameGroupRequest = {
+  old_name: string
+  new_name: string
+}
+
+export type RenameGroupResponse = UpdateOptionResponse & {
+  data: RenameGroupRequest & { updated: Record<string, number> }
+}
+
 export interface PasskeyDomainChange {
   rp_id: string
   legacy_rp_ids: string

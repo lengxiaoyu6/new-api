@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -85,7 +86,19 @@ func updateUserCache(user User) error {
 }
 
 // GetUserCache gets complete user cache from hash
-func GetUserCache(userId int) (*UserBase, error) {
+func GetUserCache(userId int) (result *UserBase, resultErr error) {
+	defer func() {
+		if resultErr != nil {
+			return
+		}
+		if err := SyncGroupNames(context.Background()); err != nil {
+			result, resultErr = nil, err
+			return
+		}
+		if result != nil {
+			result.Group = common.ResolveGroupName(result.Group)
+		}
+	}()
 	// Try getting from Redis first
 	userCache, err := cacheGetUserBase(userId)
 	if err == nil {

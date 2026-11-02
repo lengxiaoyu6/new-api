@@ -42,6 +42,9 @@ func (token *Token) GetAutoGroups() ([]string, error) {
 	if err := common.UnmarshalJsonStr(token.AutoGroups, &groups); err != nil {
 		return nil, err
 	}
+	for i := range groups {
+		groups[i] = common.ResolveGroupName(groups[i])
+	}
 	return groups, nil
 }
 
@@ -280,6 +283,11 @@ func GetTokenById(id int) (*Token, error) {
 }
 
 func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
+	defer func() {
+		if err == nil && token != nil {
+			token.Group = common.ResolveGroupName(token.Group)
+		}
+	}()
 	if !fromDB && common.RedisEnabled {
 		// Try Redis first
 		token, err := cacheGetTokenByKey(key)

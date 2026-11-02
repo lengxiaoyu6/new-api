@@ -1,8 +1,6 @@
 package setting
 
 import (
-	"encoding/json"
-	"maps"
 	"sync"
 
 	"github.com/QuantumNous/new-api/common"
@@ -21,7 +19,12 @@ func GetUserUsableGroupsCopy() map[string]string {
 	defer userUsableGroupsMutex.RUnlock()
 
 	copyUserUsableGroups := make(map[string]string)
-	maps.Copy(copyUserUsableGroups, userUsableGroups)
+	for name, description := range userUsableGroups {
+		canonical := common.ResolveGroupName(name)
+		if _, exists := copyUserUsableGroups[canonical]; !exists || name == canonical {
+			copyUserUsableGroups[canonical] = description
+		}
+	}
 	return copyUserUsableGroups
 }
 
@@ -29,7 +32,7 @@ func UserUsableGroups2JSONString() string {
 	userUsableGroupsMutex.RLock()
 	defer userUsableGroupsMutex.RUnlock()
 
-	jsonBytes, err := json.Marshal(userUsableGroups)
+	jsonBytes, err := common.Marshal(userUsableGroups)
 	if err != nil {
 		common.SysLog(common.LogText("error marshalling user groups: %s", err.Error()))
 	}
@@ -41,15 +44,17 @@ func UpdateUserUsableGroupsByJSONString(jsonStr string) error {
 	defer userUsableGroupsMutex.Unlock()
 
 	userUsableGroups = make(map[string]string)
-	return json.Unmarshal([]byte(jsonStr), &userUsableGroups)
+	return common.Unmarshal([]byte(jsonStr), &userUsableGroups)
 }
 
 func GetUsableGroupDescription(groupName string) string {
 	userUsableGroupsMutex.RLock()
 	defer userUsableGroupsMutex.RUnlock()
 
-	if desc, ok := userUsableGroups[groupName]; ok {
-		return desc
+	for _, candidate := range common.GroupNameCandidates(groupName) {
+		if desc, ok := userUsableGroups[candidate]; ok {
+			return desc
+		}
 	}
 	return groupName
 }

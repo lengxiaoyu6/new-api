@@ -37,8 +37,8 @@ func ModelRequestRateLimitGroup2JSONString() string {
 }
 
 func UpdateModelRequestRateLimitGroupByJSONString(jsonStr string) error {
-	ModelRequestRateLimitMutex.RLock()
-	defer ModelRequestRateLimitMutex.RUnlock()
+	ModelRequestRateLimitMutex.Lock()
+	defer ModelRequestRateLimitMutex.Unlock()
 
 	ModelRequestRateLimitGroup = make(map[string][2]int)
 	return common.Unmarshal([]byte(jsonStr), &ModelRequestRateLimitGroup)
@@ -52,11 +52,12 @@ func GetGroupRateLimit(group string) (totalCount, successCount int, found bool) 
 		return 0, 0, false
 	}
 
-	limits, found := ModelRequestRateLimitGroup[group]
-	if !found {
-		return 0, 0, false
+	for _, candidate := range common.GroupNameCandidates(group) {
+		if limits, found := ModelRequestRateLimitGroup[candidate]; found {
+			return limits[0], limits[1], true
+		}
 	}
-	return limits[0], limits[1], true
+	return 0, 0, false
 }
 
 func CheckModelRequestRateLimitGroup(jsonStr string) error {

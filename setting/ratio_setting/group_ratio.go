@@ -1,10 +1,10 @@
 package ratio_setting
 
 import (
-	"encoding/json"
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/types"
 )
@@ -60,41 +60,65 @@ func GetGroupRatioSetting() *GroupRatioSetting {
 }
 
 func GetGroupRatioCopy() map[string]float64 {
-	return groupRatioMap.ReadAll()
+	groups := groupRatioMap.ReadAll()
+	for name, ratio := range groups {
+		canonical := common.ResolveGroupName(name)
+		if canonical != name {
+			if _, exists := groups[canonical]; !exists {
+				groups[canonical] = ratio
+			}
+			delete(groups, name)
+		}
+	}
+	return groups
 }
 
 func ContainsGroupRatio(name string) bool {
-	_, ok := groupRatioMap.Get(name)
-	return ok
+	for _, candidate := range common.GroupNameCandidates(name) {
+		if _, ok := groupRatioMap.Get(candidate); ok {
+			return true
+		}
+	}
+	return false
 }
 
 func GroupRatio2JSONString() string {
-	return groupRatioMap.MarshalJSONString()
+	data, _ := common.Marshal(GetGroupRatioCopy())
+	return string(data)
 }
 
 func UpdateGroupRatioByJSONString(jsonStr string) error {
+	var err error
+	jsonStr, err = setting.CanonicalGroupOption("GroupRatio", jsonStr, common.GroupRenameSnapshot.Load().Aliases)
+	if err != nil {
+		return err
+	}
 	return types.LoadFromJsonString(groupRatioMap, jsonStr)
 }
 
 func GetGroupRatio(name string) float64 {
-	ratio, ok := groupRatioMap.Get(name)
-	if !ok {
-		common.SysLog(common.LogText("group ratio not found: %s", name))
-		return 1
+	for _, candidate := range common.GroupNameCandidates(name) {
+		if ratio, ok := groupRatioMap.Get(candidate); ok {
+			return ratio
+		}
 	}
-	return ratio
+	common.SysLog(common.LogText("group ratio not found: %s", name))
+	return 1
 }
 
 func GetGroupGroupRatio(userGroup, usingGroup string) (float64, bool) {
-	gp, ok := groupGroupRatioMap.Get(userGroup)
-	if !ok {
-		return -1, false
+	for _, userName := range common.GroupNameCandidates(userGroup) {
+		gp, ok := groupGroupRatioMap.Get(userName)
+		if !ok {
+			continue
+		}
+		for _, group := range common.GroupNameCandidates(usingGroup) {
+			if ratio, ok := gp[group]; ok {
+				return ratio, true
+			}
+		}
 	}
-	ratio, ok := gp[usingGroup]
-	if !ok {
-		return -1, false
-	}
-	return ratio, true
+	return -1, false
 }
 
 func GroupGroupRatio2JSONString() string {
@@ -107,7 +131,7 @@ func UpdateGroupGroupRatioByJSONString(jsonStr string) error {
 
 func CheckGroupRatio(jsonStr string) error {
 	checkGroupRatio := make(map[string]float64)
-	err := json.Unmarshal([]byte(jsonStr), &checkGroupRatio)
+	err := common.UnmarshalJsonStr(jsonStr, &checkGroupRatio)
 	if err != nil {
 		return err
 	}

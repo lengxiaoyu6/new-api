@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"maps"
 	"strconv"
 	"strings"
@@ -31,6 +32,11 @@ func AllOption() ([]*Option, error) {
 }
 
 func InitOptionMap() {
+	if DB.Config.Plugins["group_names"] == nil {
+		if err := DB.Use(groupNames{}); err != nil {
+			common.FatalLog("initialize group names: " + err.Error())
+		}
+	}
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
 
@@ -205,6 +211,9 @@ func InitOptionMap() {
 }
 
 func loadOptionsFromDatabase() {
+	if err := SyncGroupNames(context.Background()); err != nil {
+		common.SysError("refresh group rename state: " + err.Error())
+	}
 	requestPolicyOptionMutex.Lock()
 	defer requestPolicyOptionMutex.Unlock()
 	defer func() {
@@ -238,6 +247,9 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == setting.GroupRenameStateOption {
+		return common.NewMessage("Group rename state is read-only")
+	}
 	if key == legacyAccessTokenRetireAtKey {
 		return errLegacyRetireAtReadOnly
 	}
@@ -299,14 +311,18 @@ func UpdateOption(key string, value string) error {
 		Key: key,
 	}
 	// https://gorm.io/docs/update.html#Save-All-Fields
-	DB.FirstOrCreate(&option, Option{Key: key})
+	if err := DB.FirstOrCreate(&option, Option{Key: key}).Error; err != nil {
+		return err
+	}
 	option.Value = value
 	// Save is a combination function.
 	// If save value does not contain primary key, it will execute Create,
 	// otherwise it will execute Update (with all fields).
-	DB.Save(&option)
+	if err := DB.Save(&option).Error; err != nil {
+		return err
+	}
 	// Update OptionMap
-	return updateOptionMap(key, value)
+	return updateOptionMap(key, option.Value)
 }
 
 // UpdateOptionsBulk persists multiple key/value pairs in a single database
@@ -359,6 +375,7 @@ func UpdateOptionsBulk(values map[string]string) error {
 			if err := tx.Save(&option).Error; err != nil {
 				return err
 			}
+			values[k] = option.Value
 		}
 		return nil
 	})
@@ -377,6 +394,13 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == setting.GroupRenameStateOption {
+		return nil
+	}
+	value, err = setting.CanonicalGroupOption(key, value, common.GroupRenameSnapshot.Load().Aliases)
+	if err != nil {
+		return err
+	}
 	if key == retiredThemeOptionKey || key == legacyAccessTokenRetireAtKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)

@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -37,7 +37,9 @@ import {
 } from '@/features/model-pricing/api'
 import { pricingOptions } from '@/features/model-pricing/pricing'
 import { handleServerError } from '@/lib/handle-server-error'
+import { requireServerSuccess } from '@/lib/server-error-message'
 
+import { renameGroup } from '../api'
 import { SettingsPageTitleStatusPortal } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
@@ -173,6 +175,18 @@ export function RatioSettingsCard({
 }: RatioSettingsCardProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const queryClient = useQueryClient()
+  const renameMutation = useMutation({
+    mutationFn: async (request: { old_name: string; new_name: string }) =>
+      requireServerSuccess(await renameGroup(request)),
+    meta: { errorToast: false },
+    onSuccess: async () => {
+      // Group names appear in accounts, keys, channels, subscriptions and
+      // pricing, so refresh all mounted consumers after the transaction.
+      await queryClient.invalidateQueries()
+      toast.success(t('Group renamed successfully'))
+    },
+  })
   const [confirmOpen, setConfirmOpen] = useState(false)
 
   const pricingQuery = useModelPricing()
@@ -513,7 +527,13 @@ export function RatioSettingsCard({
         <GroupRatioForm
           form={groupForm}
           onSave={saveGroupRatios}
-          isSaving={updateOption.isPending}
+          isSaving={updateOption.isPending || renameMutation.isPending}
+          onRename={async (oldName, newName) => {
+            await renameMutation.mutateAsync({
+              old_name: oldName,
+              new_name: newName,
+            })
+          }}
         />
       )
     }

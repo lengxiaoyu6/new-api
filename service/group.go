@@ -12,25 +12,30 @@ import (
 )
 
 func GetUserUsableGroups(userGroup string) map[string]string {
+	userGroup = common.ResolveGroupName(userGroup)
 	groupsCopy := setting.GetUserUsableGroupsCopy()
 	if userGroup != "" {
-		specialSettings, b := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(userGroup)
-		if b {
+		for _, candidate := range common.GroupNameCandidates(userGroup) {
+			specialSettings, exists := ratio_setting.GetGroupRatioSetting().GroupSpecialUsableGroup.Get(candidate)
+			if !exists {
+				continue
+			}
 			// 处理特殊可用分组
 			for specialGroup, desc := range specialSettings {
 				if after, ok := strings.CutPrefix(specialGroup, "-:"); ok {
 					// 移除分组
-					groupToRemove := after
+					groupToRemove := common.ResolveGroupName(after)
 					delete(groupsCopy, groupToRemove)
 				} else if after, ok := strings.CutPrefix(specialGroup, "+:"); ok {
 					// 添加分组
-					groupToAdd := after
+					groupToAdd := common.ResolveGroupName(after)
 					groupsCopy[groupToAdd] = desc
 				} else {
 					// 直接添加分组
-					groupsCopy[specialGroup] = desc
+					groupsCopy[common.ResolveGroupName(specialGroup)] = desc
 				}
 			}
+			break
 		}
 		// 如果userGroup不在UserUsableGroups中，返回UserUsableGroups + userGroup。
 		// 描述是英文源文本，由 web 控制台翻译；管理员配置的描述原样显示。
@@ -42,7 +47,7 @@ func GetUserUsableGroups(userGroup string) map[string]string {
 }
 
 func GroupInUserUsableGroups(userGroup, groupName string) bool {
-	_, ok := GetUserUsableGroups(userGroup)[groupName]
+	_, ok := GetUserUsableGroups(userGroup)[common.ResolveGroupName(groupName)]
 	return ok
 }
 
@@ -58,6 +63,7 @@ func GetUserAutoGroup(userGroup string) []string {
 	autoGroups := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, group := range setting.GetAutoGroups() {
+		group = common.ResolveGroupName(group)
 		if !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}
@@ -77,6 +83,7 @@ func FilterUserTokenAutoGroups(userGroup string, groups []string) []string {
 	filtered := make([]string, 0, min(len(groups), maxCount))
 	seen := make(map[string]struct{})
 	for _, group := range groups {
+		group = common.ResolveGroupName(group)
 		if !IsUserSelectableGroup(userGroup, group) {
 			continue
 		}

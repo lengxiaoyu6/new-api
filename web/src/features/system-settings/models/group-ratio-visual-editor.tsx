@@ -103,6 +103,9 @@ type GroupRatioVisualEditorProps = {
   maxTokenAutoGroupsField: ReactNode
   groupSpecialUsableGroup: string
   onChange: (field: string, value: string) => void
+  savedGroupNames?: string[]
+  onRename?: (name: string) => void
+  renameDisabled?: boolean
 }
 
 type GroupPricingRow = {
@@ -278,6 +281,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
   maxTokenAutoGroupsField,
   groupSpecialUsableGroup,
   onChange,
+  savedGroupNames,
+  onRename,
+  renameDisabled,
 }: GroupRatioVisualEditorProps) {
   const { t, i18n } = useTranslation()
   const locale = toIntlLocale(i18n.resolvedLanguage || i18n.language)
@@ -367,6 +373,9 @@ export const GroupRatioVisualEditor = memo(function GroupRatioVisualEditor({
       </div>
       <TabsContent value='pricing' keepMounted>
         <GroupPricingTable
+          savedGroupNames={savedGroupNames}
+          onRename={onRename}
+          renameDisabled={renameDisabled}
           groupRatio={groupRatio}
           userUsableGroups={userUsableGroups}
           topupGroupRatio={topupGroupRatio}
@@ -477,6 +486,9 @@ type GroupPricingTableProps = {
   topupGroupRatio: string
   onChange: (field: string, value: string) => void
   onShowDetail: (name: string) => void
+  savedGroupNames?: string[]
+  onRename?: (name: string) => void
+  renameDisabled?: boolean
 }
 
 function GroupPricingTable({
@@ -485,6 +497,9 @@ function GroupPricingTable({
   topupGroupRatio,
   onChange,
   onShowDetail,
+  savedGroupNames,
+  onRename,
+  renameDisabled,
 }: GroupPricingTableProps) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
@@ -603,6 +618,11 @@ function GroupPricingTable({
       </CardHeader>
       <CardContent>
         <div className='flex min-w-0 flex-col gap-4'>
+          {onRename && renameDisabled && (
+            <p className='text-muted-foreground text-sm'>
+              {t('Save group settings before renaming a group.')}
+            </p>
+          )}
           <InputGroup className='max-w-sm'>
             <InputGroupAddon>
               <Search aria-hidden='true' />
@@ -660,6 +680,7 @@ function GroupPricingTable({
                 cell: (row) => (
                   <Input
                     value={row.name}
+                    readOnly={savedGroupNames?.includes(row.name)}
                     aria-label={t('Group name')}
                     onChange={(event) =>
                       updateRow(row._id, 'name', event.target.value)
@@ -746,6 +767,21 @@ function GroupPricingTable({
                 cellClassName: 'text-right',
                 cell: (row) => (
                   <div className='flex justify-end gap-1'>
+                    {onRename && savedGroupNames?.includes(row.name) && (
+                      <Button
+                        variant='ghost'
+                        size='sm'
+                        onClick={() => onRename(row.name)}
+                        disabled={
+                          renameDisabled ||
+                          row.name === 'default' ||
+                          row.name === 'auto'
+                        }
+                        aria-label={t('Rename {{group}}', { group: row.name })}
+                      >
+                        {t('Rename')}
+                      </Button>
+                    )}
                     <Button
                       variant='ghost'
                       size='sm'

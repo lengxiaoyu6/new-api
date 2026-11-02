@@ -1,6 +1,7 @@
 package model
 
 import (
+	"context"
 	"errors"
 	"sort"
 	"sync"
@@ -40,9 +41,15 @@ func GetAllEnableAbilityWithChannels() ([]AbilityWithChannel, error) {
 }
 
 func GetGroupEnabledModels(group string) []string {
+	group = common.ResolveGroupName(group)
 	var models []string
 	// Find distinct models
 	DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", group, true).Distinct("model").Pluck("model", &models)
+	if len(models) == 0 && SyncGroupNames(context.Background()) == nil {
+		if canonical := common.ResolveGroupName(group); canonical != group {
+			DB.Table("abilities").Where(commonGroupCol+" = ? and enabled = ?", canonical, true).Distinct("model").Pluck("model", &models)
+		}
+	}
 	return models
 }
 
@@ -110,10 +117,14 @@ func GetChannel(
 	retry int,
 	filters []dto.ChannelFilter,
 ) (*Channel, error) {
+	group = common.ResolveGroupName(group)
 	var abilities []Ability
 	err := DB.Where(commonGroupCol+" = ? and model = ? and enabled = ?", group, model, true).Order("priority DESC, weight DESC").Find(&abilities).Error
 	if err != nil {
 		return nil, err
+	}
+	if canonical := common.ResolveGroupName(group); canonical != group {
+		return GetChannel(canonical, model, retry, filters)
 	}
 	abilities = filterAbilitiesByConstraints(abilities, model, filters)
 	// Like the memory cache, retry with the routing name (for example without

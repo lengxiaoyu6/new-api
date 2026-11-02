@@ -60,6 +60,7 @@ function Fixture(props: {
   onSave?: (values: typeof defaults) => Promise<void>
   initial?: Partial<typeof defaults>
   isSaving?: boolean
+  onRename?: (oldName: string, newName: string) => Promise<void>
 }) {
   const [actions, setActions] = useState<HTMLDivElement | null>(null)
   const form = useForm({
@@ -73,12 +74,128 @@ function Fixture(props: {
         form={form}
         onSave={props.onSave ?? (async () => {})}
         isSaving={props.isSaving ?? false}
+        onRename={props.onRename}
       />
     </SettingsPageProvider>
   )
 }
 
 describe('group settings workspace', () => {
+  it('keeps saved group names read-only and allows editing a new group name', async () => {
+    const user = userEvent.setup()
+    render(<Fixture onRename={vi.fn()} />)
+    for (const input of screen.getAllByRole('textbox', {
+      name: 'Group name',
+    })) {
+      expect(input).toHaveAttribute('readonly')
+    }
+    expect(
+      screen.getByRole('button', { name: 'Rename default' })
+    ).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Rename vip' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: 'Add group' }))
+    expect(
+      screen.getAllByRole('textbox', { name: 'Group name' })[0]
+    ).not.toHaveAttribute('readonly')
+    expect(screen.getByRole('button', { name: 'Rename vip' })).toBeDisabled()
+    expect(
+      screen.getByText('Save group settings before renaming a group.')
+    ).toBeVisible()
+  })
+
+  it('validates a rename and submits its current and new names', async () => {
+    const user = userEvent.setup()
+    const onRename = vi.fn(async () => {})
+    render(<Fixture onRename={onRename} />)
+    await user.click(screen.getByRole('button', { name: 'Rename vip' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Rename group' })
+    const input = within(dialog).getByRole('textbox', {
+      name: 'New group name',
+    })
+    const confirm = within(dialog).getByRole('button', { name: 'Rename' })
+    expect(confirm).toBeDisabled()
+    await user.type(input, 'default')
+    expect(
+      await within(dialog).findByText(
+        'Default, automatic, and previous group names cannot be renamed or reused'
+      )
+    ).toBeVisible()
+    expect(confirm).toBeDisabled()
+    await user.clear(input)
+    await user.type(input, 'vip,new')
+    expect(input).toHaveAttribute('aria-invalid', 'true')
+    expect(confirm).toBeDisabled()
+    await user.clear(input)
+    await user.type(input, 'claude-特惠')
+    await waitFor(() => expect(confirm).toBeEnabled())
+    await user.click(confirm)
+    await waitFor(() =>
+      expect(onRename).toHaveBeenCalledWith('vip', 'claude-特惠')
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    )
+  })
+
+  it('displays a failed rename in the dialog and permits retry', async () => {
+    const user = userEvent.setup()
+    const onRename = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('The new group name is already in use'))
+      .mockResolvedValueOnce(undefined)
+    render(<Fixture onRename={onRename} />)
+    await user.click(screen.getByRole('button', { name: 'Rename vip' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Rename group' })
+    const input = within(dialog).getByRole('textbox', {
+      name: 'New group name',
+    })
+    await user.type(input, 'other')
+    await user.click(within(dialog).getByRole('button', { name: 'Rename' }))
+    expect(
+      await within(dialog).findByText('The new group name is already in use')
+    ).toBeVisible()
+    expect(input).toHaveValue('other')
+    await user.type(input, '-new')
+    await user.click(within(dialog).getByRole('button', { name: 'Rename' }))
+    await waitFor(() =>
+      expect(onRename).toHaveBeenLastCalledWith('vip', 'other-new')
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    )
+  })
+
+  it('disables dismissal and repeat submission while renaming', async () => {
+    const user = userEvent.setup()
+    let finish: (() => void) | undefined
+    const onRename = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve
+        })
+    )
+    render(<Fixture onRename={onRename} />)
+    await user.click(screen.getByRole('button', { name: 'Rename vip' }))
+    const dialog = screen.getByRole('alertdialog', { name: 'Rename group' })
+    await user.type(
+      within(dialog).getByRole('textbox', { name: 'New group name' }),
+      'new-vip'
+    )
+    await user.click(within(dialog).getByRole('button', { name: 'Rename' }))
+    expect(
+      within(dialog).getByRole('button', { name: 'Renaming...' })
+    ).toBeDisabled()
+    expect(
+      within(dialog).getByRole('button', { name: 'Cancel' })
+    ).toBeDisabled()
+    await user.keyboard('{Escape}')
+    expect(dialog).toBeInTheDocument()
+    finish?.()
+    await waitFor(() =>
+      expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    )
+  })
+
   it('filters by description and clears search without discarding edits', async () => {
     const user = userEvent.setup()
     render(<Fixture />)
@@ -128,7 +245,9 @@ describe('group settings workspace', () => {
         .map((input) => input.value)
     ).toEqual(['group_2', 'group_1', 'default', 'vip'])
 
-    await user.click(screen.getByRole('button', { name: 'Save group settings' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     const saved = onSave.mock.calls[0][0]
     expect(JSON.parse(saved.GroupRatio)).toEqual({
@@ -201,7 +320,9 @@ describe('group settings workspace', () => {
     expect(screen.getByRole('button', { name: 'Move vip up' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Move vip down' })).toBeDisabled()
     await user.click(screen.getByRole('tab', { name: 'Pricing groups' }))
-    await user.click(screen.getByRole('button', { name: 'Save group settings' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(onSave.mock.calls[0]?.[0]).toEqual(
       expect.objectContaining({
@@ -244,7 +365,9 @@ describe('group settings workspace', () => {
     )
     expect(screen.getByText('Not in pricing table')).toBeVisible()
     await user.click(screen.getByRole('tab', { name: 'Pricing groups' }))
-    await user.click(screen.getByRole('button', { name: 'Save group settings' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
     await waitFor(() => expect(onSave).toHaveBeenCalled())
     expect(JSON.parse(onSave.mock.calls[0][0].AutoGroups)).toEqual([
       'vip',
@@ -286,7 +409,9 @@ describe('group settings workspace', () => {
       { target: { value: '0' } }
     )
     await user.click(screen.getByRole('tab', { name: 'Pricing groups' }))
-    await user.click(screen.getByRole('button', { name: 'Save group settings' }))
+    await user.click(
+      screen.getByRole('button', { name: 'Save group settings' })
+    )
     await waitFor(() =>
       expect(
         screen.getByRole('tab', { name: 'Auto group order' })

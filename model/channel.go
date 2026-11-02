@@ -314,7 +314,7 @@ func (channel *Channel) GetGroups() []string {
 	}
 	groups := strings.Split(strings.Trim(channel.Group, ","), ",")
 	for i, group := range groups {
-		groups[i] = strings.TrimSpace(group)
+		groups[i] = common.ResolveGroupName(strings.TrimSpace(group))
 	}
 	return groups
 }
@@ -336,7 +336,14 @@ func (channel *Channel) GetGroupModels() (map[string][]string, error) {
 		if group == "" {
 			continue
 		}
-		allowed, restricted := settings.GroupModels[group]
+		var allowed []string
+		restricted := false
+		for _, candidate := range common.GroupNameCandidates(group) {
+			if models, exists := settings.GroupModels[candidate]; exists {
+				allowed, restricted = models, true
+				break
+			}
+		}
 		groupModels[group] = []string{}
 		seen := make(map[string]bool, len(models))
 		for _, model := range models {

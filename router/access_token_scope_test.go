@@ -174,6 +174,20 @@ func TestAccessTokenCatalogCoversEveryPermission(t *testing.T) {
 	}
 }
 
+func TestGroupRenameUsesSystemSettingsWriteScope(t *testing.T) {
+	engine := newAccessTokenScopeTestEngine(t)
+	found := false
+	for _, route := range engine.Routes() {
+		if route.Method == "POST" && route.Path == "/api/group/rename" {
+			found = true
+		}
+	}
+	require.True(t, found)
+	rule, ok := middleware.AccessTokenRouteRule("POST /api/group/rename")
+	require.True(t, ok)
+	assert.Equal(t, "option:write", rule.Scope())
+}
+
 func TestAccessTokenVerificationScopesAreAllListed(t *testing.T) {
 	files, err := filepath.Glob("../service/*.go")
 	require.NoError(t, err)

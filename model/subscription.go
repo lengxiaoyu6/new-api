@@ -206,6 +206,9 @@ func (p *SubscriptionPlan) BeforeUpdate(tx *gorm.DB) error {
 }
 
 func (p *SubscriptionPlan) NormalizeDefaults() {
+	p.UpgradeGroup = common.ResolveGroupName(p.UpgradeGroup)
+	p.DowngradeGroup = common.ResolveGroupName(p.DowngradeGroup)
+	p.AllowedGroups = common.CanonicalGroupList(p.AllowedGroups, common.GroupRenameSnapshot.Load().Aliases)
 	if p.AllowBalancePay == nil {
 		p.AllowBalancePay = common.GetPointer(true)
 	}
@@ -434,9 +437,9 @@ func SubscriptionCoversGroup(allowedGroups string, usingGroup string) bool {
 	if len(groups) == 0 {
 		return true
 	}
-	usingGroup = strings.TrimSpace(usingGroup)
+	usingGroup = common.ResolveGroupName(strings.TrimSpace(usingGroup))
 	for _, groupName := range groups {
-		if groupName == usingGroup {
+		if common.ResolveGroupName(groupName) == usingGroup {
 			return true
 		}
 	}

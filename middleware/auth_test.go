@@ -399,6 +399,48 @@ func TestUserAuthAppliesAccessTokenRouteRules(t *testing.T) {
 	assert.Equal(t, http.StatusOK, middlewareBearerRequest(router, "/api/user/self", profile).Code, "the deadline only retires legacy tokens")
 }
 
+func TestGroupRenameRequiresRootAndOptionWrite(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	gin.SetMode(gin.TestMode)
+	root := createMiddlewarePATUser(t, "rename-root", "rename-root-legacy")
+	admin := createMiddlewarePATUser(t, "rename-admin", "rename-admin-legacy")
+	require.NoError(t, model.DB.Model(root).Update("role", common.RoleRootUser).Error)
+	require.NoError(t, model.DB.Model(admin).Update("role", common.RoleAdminUser).Error)
+	rootWrite, _ := createMiddlewareScopedToken(t, root.Id, 0, "option:write")
+	rootRead, _ := createMiddlewareScopedToken(t, root.Id, 0, "option:read")
+	adminWrite, _ := createMiddlewareScopedToken(t, admin.Id, 0, "option:write")
+	expired, _ := createMiddlewareScopedToken(t, root.Id, time.Now().Unix()-1, "option:write")
+	router := gin.New()
+	reached := false
+	router.POST("/api/group/rename", RootAuth(), func(c *gin.Context) {
+		reached = true
+		common.ApiSuccess(c, nil)
+	})
+	for _, test := range []struct {
+		name, token string
+		status      int
+	}{
+		{"root with write scope", rootWrite, http.StatusOK},
+		{"root with read scope", rootRead, http.StatusForbidden},
+		{"admin with write scope", adminWrite, http.StatusForbidden},
+		{"expired credential", expired, http.StatusUnauthorized},
+		{"missing credential", "", http.StatusUnauthorized},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reached = false
+			request := httptest.NewRequest(http.MethodPost, "/api/group/rename", strings.NewReader(`{"old_name":"a","new_name":"b"}`))
+			request.Header.Set("Content-Type", "application/json")
+			if test.token != "" {
+				request.Header.Set("Authorization", "Bearer "+test.token)
+			}
+			response := httptest.NewRecorder()
+			router.ServeHTTP(response, request)
+			assert.Equal(t, test.status, response.Code, response.Body.String())
+			assert.Equal(t, test.status == http.StatusOK, reached)
+		})
+	}
+}
+
 func TestAccessTokenIdentityAndSingleLookup(t *testing.T) {
 	setupDashboardAuthMiddlewareTest(t)
 	gin.SetMode(gin.TestMode)

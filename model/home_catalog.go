@@ -5,6 +5,8 @@ import (
 	"slices"
 	"sync/atomic"
 	"time"
+
+	"github.com/QuantumNous/new-api/common"
 )
 
 type HomeCatalogModel struct {
@@ -142,10 +144,17 @@ func GetHomeCatalog(usableGroups map[string]string) HomeCatalog {
 	models := make(map[string]homeCatalogModel)
 	vendors := make(map[int]HomeCatalogVendor)
 	for _, group := range groups {
-		for _, item := range snapshot.groups[group].models {
+		var source homeCatalogGroup
+		for _, candidate := range common.GroupNameCandidates(group) {
+			if cached, exists := snapshot.groups[candidate]; exists {
+				source = cached
+				break
+			}
+		}
+		for _, item := range source.models {
 			models[item.ModelName] = item
 		}
-		for _, vendor := range snapshot.groups[group].vendors {
+		for _, vendor := range source.vendors {
 			vendors[vendor.ID] = vendor
 		}
 	}

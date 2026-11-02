@@ -59,11 +59,13 @@ import {
   SettingsSwitchItem,
 } from '../components/settings-form-layout'
 import { SettingsPageActionsPortal } from '../components/settings-page-context'
+import { safeJsonParse } from '../utils/json-parser'
 import { safeNumberFieldProps } from '../utils/numeric-field'
 import {
   GroupRatioVisualEditor,
   type GroupSettingsSection,
 } from './group-ratio-visual-editor'
+import { RenameGroupDialog } from './rename-group-dialog'
 
 type GroupFormValues = {
   GroupRatio: string
@@ -80,18 +82,27 @@ type GroupRatioFormProps = {
   form: UseFormReturn<GroupFormValues>
   onSave: (values: GroupFormValues) => Promise<void>
   isSaving: boolean
+  onRename?: (oldName: string, newName: string) => Promise<void>
 }
 
 export const GroupRatioForm = memo(function GroupRatioForm({
   form,
   onSave,
   isSaving,
+  onRename,
 }: GroupRatioFormProps) {
   const { t } = useTranslation()
   const values = useWatch({ control: form.control })
   const [editMode, setEditMode] = useState<'visual' | 'json'>('visual')
   const [guideOpen, setGuideOpen] = useState(false)
   const [section, setSection] = useState<GroupSettingsSection>('pricing')
+  const [renameTarget, setRenameTarget] = useState<string | null>(null)
+  const savedGroupNames = Object.keys(
+    safeJsonParse<Record<string, number>>(
+      form.formState.defaultValues?.GroupRatio ?? '{}',
+      { fallback: {}, silent: true }
+    )
+  )
 
   const handleFieldChange = useCallback(
     (field: keyof GroupFormValues, value: string) => {
@@ -145,6 +156,15 @@ export const GroupRatioForm = memo(function GroupRatioForm({
       </div>
 
       <GroupPricingGuide open={guideOpen} onOpenChange={setGuideOpen} />
+      {renameTarget !== null && onRename && (
+        <RenameGroupDialog
+          key={renameTarget}
+          groupName={renameTarget}
+          groupNames={savedGroupNames}
+          onRename={onRename}
+          onClose={() => setRenameTarget(null)}
+        />
+      )}
 
       <Form {...form}>
         <SettingsPageActionsPortal>
@@ -166,6 +186,9 @@ export const GroupRatioForm = memo(function GroupRatioForm({
         {editMode === 'visual' ? (
           <GroupRatioVisualEditor
             section={section}
+            savedGroupNames={savedGroupNames}
+            onRename={onRename ? setRenameTarget : undefined}
+            renameDisabled={isSaving || form.formState.isDirty}
             onSectionChange={setSection}
             groupRatio={values.GroupRatio ?? ''}
             topupGroupRatio={values.TopupGroupRatio ?? ''}

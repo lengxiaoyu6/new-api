@@ -8,6 +8,7 @@ import (
 )
 
 func IsChannelEnabledForGroupModel(group string, modelName string, channelID int) bool {
+	group = common.ResolveGroupName(group)
 	if group == "" || modelName == "" || channelID <= 0 {
 		return false
 	}
@@ -22,12 +23,15 @@ func IsChannelEnabledForGroupModel(group string, modelName string, channelID int
 		return false
 	}
 
-	if isChannelIDInList(group2model2channels[group][modelName], channelID) {
-		return true
-	}
 	normalized := ratio_setting.RoutingMatchModelName(modelName)
-	if normalized != "" && normalized != modelName {
-		return isChannelIDInList(group2model2channels[group][normalized], channelID)
+	for _, candidate := range common.GroupNameCandidates(group) {
+		if isChannelIDInList(group2model2channels[candidate][modelName], channelID) {
+			return true
+		}
+		if normalized != "" && normalized != modelName &&
+			isChannelIDInList(group2model2channels[candidate][normalized], channelID) {
+			return true
+		}
 	}
 	return false
 }
@@ -51,6 +55,9 @@ func isChannelEnabledForGroupModelDB(group string, modelName string, channelID i
 		Count(&count).Error
 	if err == nil && count > 0 {
 		return true
+	}
+	if canonical := common.ResolveGroupName(group); canonical != group {
+		return isChannelEnabledForGroupModelDB(canonical, modelName, channelID)
 	}
 	normalized := ratio_setting.RoutingMatchModelName(modelName)
 	if normalized == "" || normalized == modelName {

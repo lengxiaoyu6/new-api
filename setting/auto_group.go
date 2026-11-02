@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"sync"
 	"sync/atomic"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,22 +19,29 @@ var autoGroups = []string{
 var DefaultUseAutoGroup = false
 
 var maxTokenAutoGroups atomic.Int64
+var autoGroupsMutex sync.RWMutex
 
 func init() {
 	maxTokenAutoGroups.Store(DefaultMaxTokenAutoGroups)
 }
 
 func ContainsAutoGroup(group string) bool {
-	return slices.Contains(autoGroups, group)
+	return slices.Contains(GetAutoGroups(), common.ResolveGroupName(group))
 }
 
 func UpdateAutoGroupsByJsonString(jsonString string) error {
-	autoGroups = make([]string, 0)
-	return common.Unmarshal([]byte(jsonString), &autoGroups)
+	var groups []string
+	if err := common.Unmarshal([]byte(jsonString), &groups); err != nil {
+		return err
+	}
+	autoGroupsMutex.Lock()
+	autoGroups = groups
+	autoGroupsMutex.Unlock()
+	return nil
 }
 
 func AutoGroups2JsonString() string {
-	jsonBytes, err := common.Marshal(autoGroups)
+	jsonBytes, err := common.Marshal(GetAutoGroups())
 	if err != nil {
 		return "[]"
 	}
@@ -41,7 +49,16 @@ func AutoGroups2JsonString() string {
 }
 
 func GetAutoGroups() []string {
-	return autoGroups
+	autoGroupsMutex.RLock()
+	defer autoGroupsMutex.RUnlock()
+	groups := make([]string, 0, len(autoGroups))
+	for _, group := range autoGroups {
+		group = common.ResolveGroupName(group)
+		if !slices.Contains(groups, group) {
+			groups = append(groups, group)
+		}
+	}
+	return groups
 }
 
 func GetMaxTokenAutoGroups() int {
