@@ -195,6 +195,33 @@ func TestGroupRenameDatabaseMatrix(t *testing.T) {
 			assert.JSONEq(t, `{"model":"claude-max","ratio":0.4}`, string(task.Data))
 			assert.Equal(t, 0.4, ratio_setting.GetGroupRatio("claude-特惠"))
 			assert.Equal(t, 0.4, ratio_setting.GetGroupRatio("claude-max"))
+			// The query model and destination may have different field layouts.
+			t.Run("profile projection with embedded user", func(t *testing.T) {
+				profile, err := GetSelfUserById(user.Id)
+				require.NoError(t, err)
+				assert.Equal(t, "claude-特惠", profile.Group)
+				assert.Equal(t, user.Username, profile.Username)
+				assert.Empty(t, profile.Password)
+			})
+			t.Run("projection with tagged group and different field order", func(t *testing.T) {
+				var projection struct {
+					Name     string `gorm:"column:group"`
+					Username string
+				}
+				require.NoError(t, db.Model(&User{}).Select(commonGroupCol, "username").First(&projection, user.Id).Error)
+				assert.Equal(t, "claude-特惠", projection.Name)
+				assert.Equal(t, user.Username, projection.Username)
+			})
+			t.Run("projection slice without group", func(t *testing.T) {
+				var projections []struct {
+					AuthVersion int64
+					Status      int
+				}
+				require.NoError(t, db.Model(&User{}).Select("auth_version", "status").Where("id = ?", user.Id).Find(&projections).Error)
+				require.Len(t, projections, 1)
+				assert.EqualValues(t, 3, projections[0].AuthVersion)
+				assert.Equal(t, common.UserStatusEnabled, projections[0].Status)
+			})
 			assert.Equal(t, "claude-max", setting.GetUsableGroupDescription("claude-特惠"))
 			ratio, ok := ratio_setting.GetGroupGroupRatio("claude-特惠", "claude-特惠")
 			assert.True(t, ok)

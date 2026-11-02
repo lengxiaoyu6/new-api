@@ -1,20 +1,194 @@
 package controller
 
 import (
+	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/pquerna/otp/totp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
 )
+
+func TestGroupRenamePreservesBrowserSessionAndPasswordLogin(t *testing.T) {
+	user, _ := setupSecurityEnrollmentTest(t)
+	db := model.DB
+	require.NoError(t, db.AutoMigrate(&model.Token{}, &model.Channel{}, &model.Ability{},
+		&model.SubscriptionPlan{}, &model.UserSubscription{}, &model.Task{}))
+	previousNames := common.GroupRenameSnapshot.Load()
+	previousRatios := ratio_setting.GroupRatio2JSONString()
+	common.OptionMapRWMutex.RLock()
+	previousOptions := maps.Clone(common.OptionMap)
+	common.OptionMapRWMutex.RUnlock()
+	previousLoginEnabled := common.PasswordLoginEnabled
+	t.Cleanup(func() {
+		common.GroupRenameSnapshot.Store(previousNames)
+		require.NoError(t, ratio_setting.UpdateGroupRatioByJSONString(previousRatios))
+		common.OptionMapRWMutex.Lock()
+		common.OptionMap = previousOptions
+		common.OptionMapRWMutex.Unlock()
+		common.PasswordLoginEnabled = previousLoginEnabled
+	})
+	model.InitOptionMap()
+	common.PasswordLoginEnabled = true
+	require.NoError(t, model.UpdateOption("GroupRatio", `{"default":1,"claude-max":0.4}`))
+	require.NoError(t, db.Model(user).Update("group", "claude-max").Error)
+	unaffected := &model.User{Username: "rename-unaffected", Password: user.Password,
+		Role: common.RoleCommonUser, Status: common.UserStatusEnabled, Group: "default", AuthVersion: 1,
+		AffCode: "rename-unaffected"}
+	require.NoError(t, db.Create(unaffected).Error)
+	router := gin.New()
+	router.Use(gin.RecoveryWithWriter(io.Discard))
+	router.POST("/api/user/login", Login)
+	router.POST("/api/user/auth/refresh", RefreshAuth)
+	router.POST("/api/user/login/verify", VerifyLogin)
+	router.GET("/api/user/self", middleware.UserAuth(), GetSelf)
+
+	login := func(t *testing.T, username string) service.AuthBundle {
+		t.Helper()
+		response := httptest.NewRecorder()
+		body, err := common.Marshal(map[string]string{"username": username, "password": "enrollment-password"})
+		require.NoError(t, err)
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/user/login",
+			strings.NewReader(string(body))))
+		require.Equal(t, http.StatusOK, response.Code, "password login must not panic")
+		var result struct {
+			Success bool               `json:"success"`
+			Message string             `json:"message"`
+			Data    service.AuthBundle `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		require.True(t, result.Success, result.Message)
+		require.NotEmpty(t, result.Data.AccessToken)
+		for _, cookie := range response.Result().Cookies() {
+			if cookie.Name == service.RefreshCookieName {
+				result.Data.RefreshToken = cookie.Value
+			}
+		}
+		require.NotEmpty(t, result.Data.RefreshToken)
+		return result.Data
+	}
+	access := login(t, user.Username)
+	otherAccess := login(t, unaffected.Username)
+	_, err := model.RenameGroup(t.Context(), "claude-max", "claude-特惠")
+	require.NoError(t, err)
+	for _, account := range []struct {
+		name, group string
+		access      service.AuthBundle
+	}{
+		{"renamed group", "claude-特惠", access},
+		{"unaffected group", "default", otherAccess},
+	} {
+		t.Run("existing browser session/"+account.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodGet, "/api/user/self", nil)
+			request.Header.Set("Authorization", "Bearer "+account.access.AccessToken)
+			router.ServeHTTP(response, request)
+			require.Equal(t, http.StatusOK, response.Code, "the current session must remain usable")
+			var result struct {
+				Success bool `json:"success"`
+				Data    struct {
+					Group string `json:"group"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+			require.True(t, result.Success)
+			assert.Equal(t, account.group, result.Data.Group)
+		})
+	}
+	t.Run("refresh browser session", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodPost, "/api/user/auth/refresh", nil)
+		request.Header.Set("X-Auth-Session", access.Session.SID)
+		request.AddCookie(&http.Cookie{Name: service.RefreshCookieName, Value: access.RefreshToken})
+		router.ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code, "session refresh must remain usable")
+		var result struct {
+			Success bool               `json:"success"`
+			Data    service.AuthBundle `json:"data"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		require.True(t, result.Success)
+		assert.NotEmpty(t, result.Data.AccessToken)
+		assert.Equal(t, access.Session.SID, result.Data.Session.SID)
+	})
+	t.Run("new password login", func(t *testing.T) {
+		login(t, user.Username)
+		login(t, unaffected.Username)
+	})
+	t.Run("incorrect password remains rejected", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/user/login",
+			strings.NewReader(`{"username":"enrollment-user","password":"incorrect-password"}`)))
+		require.Equal(t, http.StatusOK, response.Code)
+		var result struct {
+			Success bool `json:"success"`
+		}
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		assert.False(t, result.Success)
+		assert.Empty(t, response.Result().Cookies())
+	})
+	t.Run("expired session remains rejected", func(t *testing.T) {
+		require.NoError(t, db.Model(&model.UserSession{}).Where("sid = ?", otherAccess.Session.SID).
+			Update("expires_at", time.Now().Add(-time.Minute).Unix()).Error)
+		response := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/api/user/self", nil)
+		request.Header.Set("Authorization", "Bearer "+otherAccess.AccessToken)
+		router.ServeHTTP(response, request)
+		assert.Equal(t, http.StatusUnauthorized, response.Code)
+	})
+	t.Run("second factor remains required and completes once", func(t *testing.T) {
+		factor := &model.TwoFA{UserId: user.Id, Secret: "JBSWY3DPEHPK3PXP", IsEnabled: true}
+		require.NoError(t, db.Create(factor).Error)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/user/login",
+			strings.NewReader(`{"username":"enrollment-user","password":"enrollment-password"}`)))
+		require.Equal(t, http.StatusOK, response.Code)
+		type loginResponse struct {
+			Success bool `json:"success"`
+			Data    struct {
+				service.AuthBundle
+				service.LoginChallenge
+			} `json:"data"`
+		}
+		var result loginResponse
+		require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+		require.True(t, result.Success)
+		require.True(t, result.Data.RequireVerification)
+		assert.Empty(t, result.Data.AccessToken, "password authentication must not bypass the second factor")
+		assert.Empty(t, response.Result().Cookies())
+		code, err := totp.GenerateCode(factor.Secret, time.Now())
+		require.NoError(t, err)
+		body, err := common.Marshal(map[string]string{"flow_token": result.Data.FlowToken, "code": code})
+		require.NoError(t, err)
+		for attempt := range 2 {
+			response = httptest.NewRecorder()
+			router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/user/login/verify", strings.NewReader(string(body))))
+			result = loginResponse{}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &result))
+			assert.Equal(t, attempt == 0, result.Success)
+			if attempt == 0 {
+				assert.NotEmpty(t, result.Data.AccessToken)
+				assert.NotEmpty(t, response.Result().Cookies())
+			} else {
+				assert.Empty(t, result.Data.AccessToken)
+				assert.Empty(t, response.Result().Cookies())
+			}
+		}
+	})
+}
 
 func TestAuthLogoutRejectsRefreshCookieSessionMismatch(t *testing.T) {
 	previousDB := model.DB

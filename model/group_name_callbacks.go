@@ -210,8 +210,19 @@ func canonicalGroupRecords(tx *gorm.DB, aliases map[string]string) error {
 }
 
 func canonicalGroupStruct(tx *gorm.DB, value reflect.Value, columns []string, aliases map[string]string) error {
+	recordSchema := tx.Statement.Schema
+	if value.Type() != recordSchema.ModelType {
+		// Model(&User{}).First(&projection) retains the User schema, while
+		// authentication queries often return smaller structs. Field access
+		// must use the destination's layout, including its column tags.
+		statement := &gorm.Statement{DB: tx}
+		if err := statement.Parse(value.Addr().Interface()); err != nil {
+			return err
+		}
+		recordSchema = statement.Schema
+	}
 	for _, column := range columns {
-		field := tx.Statement.Schema.LookUpField(column)
+		field := recordSchema.LookUpField(column)
 		if field == nil {
 			continue
 		}
