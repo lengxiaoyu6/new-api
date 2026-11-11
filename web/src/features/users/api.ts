@@ -114,6 +114,15 @@ export async function grantUserLotteryAttempts(
   return requireServerSuccess(response.data)
 }
 
+export async function grantAllUsersLotteryAttempts(data: {
+  count: number
+  reason: string
+  request_id: string
+}): Promise<ApiResponse<{ users_count: number; count: number }>> {
+  const response = await api.post('/api/lottery/admin/users/attempts', data)
+  return requireServerSuccess(response.data)
+}
+
 /**
  * Create a new user. Creating an administrator requires an
  * `admin.user.create` proof.

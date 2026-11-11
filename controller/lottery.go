@@ -89,7 +89,7 @@ func lotteryError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, "LOTTERY_WALLET_LIMIT"
 	case errors.Is(err, model.ErrLotteryAccountUnavailable):
 		status, code = http.StatusForbidden, "LOTTERY_ACCOUNT_UNAVAILABLE"
-	case errors.Is(err, model.ErrLotteryGrantPermission):
+	case errors.Is(err, model.ErrLotteryGrantPermission), errors.Is(err, model.ErrLotteryBulkGrantPermission):
 		status, code = http.StatusForbidden, "LOTTERY_GRANT_FORBIDDEN"
 	case errors.Is(err, model.ErrLotteryPoolMissing):
 		status, code = http.StatusConflict, "LOTTERY_POOL_MISSING"
@@ -736,4 +736,22 @@ func AdminGrantLotteryAttempts(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"success": true, "data": grant})
+}
+
+func AdminGrantLotteryAttemptsToAll(c *gin.Context) {
+	var request struct {
+		Count     int    `json:"count"`
+		RequestID string `json:"request_id"`
+		Reason    string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&request); err != nil {
+		common.ApiErrorT(c, "Invalid parameters")
+		return
+	}
+	recipients, err := model.GrantLotteryAttemptsToAll(c.GetInt("id"), c.GetInt("role"), request.Count, request.RequestID, request.Reason)
+	if err != nil {
+		lotteryError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"success": true, "data": gin.H{"users_count": recipients, "count": request.Count}})
 }

@@ -20,6 +20,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { Row } from '@tanstack/react-table'
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
 import { api } from '@/lib/api'
@@ -27,6 +28,7 @@ import { useAuthStore } from '@/stores/auth-store'
 
 import type { User } from '../../types'
 import { DataTableRowActions } from '../data-table-row-actions'
+import { UsersPrimaryButtons } from '../users-primary-buttons'
 import { UsersProvider } from '../users-provider'
 
 const target: User = {
@@ -49,6 +51,19 @@ function renderRow(user = target) {
     <QueryClientProvider client={client}>
       <UsersProvider>
         <DataTableRowActions row={{ original: user } as Row<User>} />
+      </UsersProvider>
+    </QueryClientProvider>
+  )
+}
+
+function renderBulkGrant() {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  })
+  render(
+    <QueryClientProvider client={client}>
+      <UsersProvider>
+        <UsersPrimaryButtons />
       </UsersProvider>
     </QueryClientProvider>
   )
@@ -205,5 +220,126 @@ it.each([
     } else {
       expect(action).not.toBeInTheDocument()
     }
+  }
+)
+
+it('confirms the per-user count before granting to every account and reports the recipient count', async () => {
+  const post = vi.spyOn(api, 'post').mockResolvedValue({
+    data: { success: true, data: { users_count: 208, count: 3 } },
+  })
+  const success = vi.spyOn(toast, 'success')
+  const user = userEvent.setup()
+  renderBulkGrant()
+  await user.click(
+    screen.getByRole('button', { name: 'Grant draw attempts to all users' })
+  )
+  expect(screen.getByRole('dialog')).toHaveAccessibleDescription(
+    'Grant to every existing account, including administrators and disabled accounts. Deleted accounts are excluded. List filters do not affect recipients.'
+  )
+  const count = screen.getByRole('spinbutton', { name: 'Draw attempts' })
+  await user.clear(count)
+  await user.type(count, '3')
+  await user.type(
+    screen.getByRole('textbox', { name: 'Reason' }),
+    'Member gift'
+  )
+  await user.click(screen.getByRole('button', { name: 'Confirm' }))
+  expect(await screen.findByRole('alertdialog')).toHaveAccessibleDescription(
+    'Grant 3 draw attempts to each existing user?'
+  )
+  expect(post).not.toHaveBeenCalled()
+  await user.click(screen.getByRole('button', { name: 'Confirm grant' }))
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith('/api/lottery/admin/users/attempts', {
+      count: 3,
+      reason: 'Member gift',
+      request_id: expect.any(String),
+    })
+  )
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  )
+  expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  expect(success).toHaveBeenCalledWith('Draw attempts granted to 208 users')
+})
+
+it('returns to the bulk form on cancellation and rejects invalid counts without granting', async () => {
+  const post = vi.spyOn(api, 'post')
+  const user = userEvent.setup()
+  renderBulkGrant()
+  await user.click(
+    screen.getByRole('button', { name: 'Grant draw attempts to all users' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Confirm' }))
+  await user.click(await screen.findByRole('button', { name: 'Cancel' }))
+  const count = await screen.findByRole('spinbutton', { name: 'Draw attempts' })
+  expect(count).toHaveValue(1)
+  await user.clear(count)
+  await user.type(count, '0')
+  await user.click(screen.getByRole('button', { name: 'Confirm' }))
+  expect(
+    await screen.findByText(
+      'Draw attempts must be an integer between 1 and 1000000'
+    )
+  ).toBeVisible()
+  expect(post).not.toHaveBeenCalled()
+  expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+})
+
+it('retries a failed bulk grant with the same request and blocks dismissal while pending', async () => {
+  const response = Promise.withResolvers<void>()
+  const post = vi
+    .spyOn(api, 'post')
+    .mockResolvedValueOnce({
+      data: {
+        success: false,
+        message: 'The user has too many unused granted draw attempts',
+      },
+    })
+    .mockImplementationOnce(async () => {
+      await response.promise
+      return { data: { success: true, data: { users_count: 4, count: 1 } } }
+    })
+  const user = userEvent.setup()
+  renderBulkGrant()
+  await user.click(
+    screen.getByRole('button', { name: 'Grant draw attempts to all users' })
+  )
+  await user.click(screen.getByRole('button', { name: 'Confirm' }))
+  await user.click(screen.getByRole('button', { name: 'Confirm grant' }))
+  await waitFor(() => expect(post).toHaveBeenCalledTimes(1))
+  expect(
+    await screen.findByRole('button', { name: 'Confirm grant' })
+  ).toBeEnabled()
+  await user.click(screen.getByRole('button', { name: 'Confirm grant' }))
+  expect(
+    await screen.findByRole('button', { name: 'Processing...' })
+  ).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Cancel' })).toBeDisabled()
+  await user.keyboard('{Escape}')
+  expect(screen.getByRole('alertdialog')).toBeVisible()
+  expect(post).toHaveBeenCalledTimes(2)
+  expect(post.mock.calls[1][1]).toEqual(post.mock.calls[0][1])
+  await act(async () => response.resolve())
+  await waitFor(() =>
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+  )
+})
+
+it.each([1, 10, 100])(
+  'shows all-user grants only for a root administrator (role %i)',
+  (role) => {
+    useAuthStore.getState().auth.setUser({
+      id: 1,
+      username: 'operator',
+      role,
+      permissions: { admin_permissions: { lottery: { operate: true } } },
+    })
+    renderBulkGrant()
+    const button = screen.queryByRole('button', {
+      name: 'Grant draw attempts to all users',
+    })
+    if (role === 100) expect(button).toBeVisible()
+    else expect(button).not.toBeInTheDocument()
   }
 )

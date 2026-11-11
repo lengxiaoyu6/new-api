@@ -857,3 +857,208 @@ func TestUpdateUserSettingKeepsWhatTheRequestLeavesOut(t *testing.T) {
 		})
 	}
 }
+
+func TestAdminGrantLotteryAttemptsToAllAuthorizationAndValidation(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.LotteryActivity{}, &model.LotteryAttemptGrant{}))
+	previousMaster, previousSecure := common.IsMasterNode, common.SessionCookieSecure
+	common.IsMasterNode, common.SessionCookieSecure = true, true
+	t.Cleanup(func() { common.IsMasterNode, common.SessionCookieSecure = previousMaster, previousSecure })
+	require.NoError(t, authz.Init(db))
+	require.NoError(t, db.Create(&model.LotteryActivity{Name: model.PaymentLotteryName}).Error)
+	root := createQuotaTestOperator(t, db, common.RoleRootUser)
+	admin := model.User{Username: "bulk-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "bulk-admin"}
+	user := model.User{Username: "bulk-user", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AuthVersion: 1, AffCode: "bulk-user"}
+	require.NoError(t, db.Create(&admin).Error)
+	require.NoError(t, db.Create(&user).Error)
+	require.NoError(t, authz.SetUserPermissions(admin.Id, authz.PermissionsMap{authz.ResourceLottery: {authz.ActionOperate: true}}))
+	tokens := map[int]string{}
+	for _, account := range []model.User{root, admin, user} {
+		require.NoError(t, model.PublishUserAuthCache(account.Id))
+		bundle, err := service.CreateLoginSession(account.Id, "password", "127.0.0.1", "bulk-grant-test")
+		require.NoError(t, err)
+		tokens[account.Id] = bundle.AccessToken
+	}
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+	engine.POST("/api/lottery/admin/users/attempts", middleware.AdminAuth(), middleware.RequirePermission(authz.LotteryOperate), middleware.SessionCookieOriginGuard(), AdminGrantLotteryAttemptsToAll)
+	for _, tc := range []struct {
+		name, body, origin string
+		operatorID, status int
+		success            bool
+	}{
+		{"anonymous", `{"count":1,"request_id":"denied"}`, "https://panel.example.com", 0, http.StatusUnauthorized, false},
+		{"common user", `{"count":1,"request_id":"denied"}`, "https://panel.example.com", user.Id, http.StatusForbidden, false},
+		{"admin with lottery permission", `{"count":1,"request_id":"denied"}`, "https://panel.example.com", admin.Id, http.StatusForbidden, false},
+		{"foreign origin", `{"count":1,"request_id":"denied"}`, "https://foreign.example.com", root.Id, http.StatusForbidden, false},
+		{"missing origin", `{"count":1,"request_id":"denied"}`, "", root.Id, http.StatusForbidden, false},
+		{"zero", `{"count":0,"request_id":"invalid"}`, "https://panel.example.com", root.Id, http.StatusBadRequest, false},
+		{"over maximum", `{"count":1000001,"request_id":"invalid"}`, "https://panel.example.com", root.Id, http.StatusBadRequest, false},
+		{"fraction", `{"count":1.5,"request_id":"invalid"}`, "https://panel.example.com", root.Id, http.StatusOK, false},
+		{"missing request ID", `{"count":1}`, "https://panel.example.com", root.Id, http.StatusBadRequest, false},
+		{"long reason", fmt.Sprintf(`{"count":1,"request_id":"invalid","reason":%q}`, strings.Repeat("x", 256)), "https://panel.example.com", root.Id, http.StatusBadRequest, false},
+		{"root grant", `{"count":2,"request_id":"bulk-http","reason":"Gift"}`, "https://panel.example.com", root.Id, http.StatusOK, true},
+		{"identical retry", `{"count":2,"request_id":"bulk-http","reason":"Gift"}`, "https://panel.example.com", root.Id, http.StatusOK, true},
+		{"changed retry", `{"count":3,"request_id":"bulk-http","reason":"Gift"}`, "https://panel.example.com", root.Id, http.StatusConflict, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "https://panel.example.com/api/lottery/admin/users/attempts", strings.NewReader(tc.body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Origin", tc.origin)
+			if token := tokens[tc.operatorID]; token != "" {
+				request.Header.Set("Authorization", "Bearer "+token)
+			}
+			response := httptest.NewRecorder()
+			engine.ServeHTTP(response, request)
+			assert.Equal(t, tc.status, response.Code, response.Body.String())
+			var body struct {
+				Success bool `json:"success"`
+				Data    struct {
+					UsersCount int `json:"users_count"`
+					Count      int `json:"count"`
+				} `json:"data"`
+			}
+			require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
+			assert.Equal(t, tc.success, body.Success)
+			if tc.success {
+				assert.Equal(t, 3, body.Data.UsersCount)
+				assert.Equal(t, 2, body.Data.Count)
+			}
+		})
+	}
+	var grants []model.LotteryAttemptGrant
+	require.NoError(t, db.Order("user_id").Find(&grants).Error)
+	require.Len(t, grants, 3)
+	for _, grant := range grants {
+		assert.Equal(t, 2, grant.Remaining)
+		assert.Equal(t, root.Id, grant.OperatorId)
+	}
+}
+
+func TestAdminGrantLotteryAttemptsToAllRetainsRecipientSnapshot(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.LotteryActivity{}, &model.LotteryAttemptGrant{}, &model.TopUp{}, &model.SubscriptionOrder{}))
+	root := createQuotaTestOperator(t, db, common.RoleRootUser)
+	users := []model.User{
+		{Username: "all-normal", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "all-normal"},
+		{Username: "all-admin", Role: common.RoleAdminUser, Status: common.UserStatusEnabled, AffCode: "all-admin"},
+		{Username: "all-disabled", Role: common.RoleCommonUser, Status: common.UserStatusDisabled, AffCode: "all-disabled"},
+		{Username: "all-deleted", Role: common.RoleCommonUser, Status: common.UserStatusEnabled, AffCode: "all-deleted"},
+	}
+	require.NoError(t, db.Create(&users).Error)
+	require.NoError(t, db.Delete(&users[3]).Error)
+	_, err := model.GrantLotteryAttemptsToAll(root.Id, root.Role, 2, "all-snapshot", " Gift ")
+	require.ErrorIs(t, err, model.ErrLotteryPoolMissing)
+	require.NoError(t, db.Create(&model.LotteryActivity{Name: model.PaymentLotteryName}).Error)
+	count, err := model.GrantLotteryAttemptsToAll(root.Id, root.Role, 2, "all-snapshot", " Gift ")
+	require.NoError(t, err)
+	assert.Equal(t, 4, count)
+	var grants []model.LotteryAttemptGrant
+	require.NoError(t, db.Order("user_id").Find(&grants).Error)
+	require.Len(t, grants, 4)
+	ids := make([]int, 0, len(grants))
+	for _, grant := range grants {
+		ids = append(ids, grant.UserId)
+		assert.Equal(t, 2, grant.Count)
+		assert.Equal(t, 2, grant.Remaining)
+		assert.Equal(t, root.Id, grant.OperatorId)
+		assert.Equal(t, "Gift", grant.Reason)
+		assert.Positive(t, grant.CreatedAt)
+	}
+	assert.ElementsMatch(t, []int{root.Id, users[0].Id, users[1].Id, users[2].Id}, ids)
+	require.NoError(t, db.Model(&grants[0]).Update("remaining", 0).Error)
+	history, err := model.GetLotteryAttemptHistoryPage(grants[0].UserId, 1, 20, time.Now())
+	require.NoError(t, err)
+	require.Len(t, history.Items, 1)
+	assert.Equal(t, "admin_grant", history.Items[0].Source)
+	assert.Equal(t, 2, history.Items[0].Count)
+	assert.Equal(t, "Gift", history.Items[0].Reason)
+	require.NoError(t, db.Delete(&users[1]).Error)
+	newcomer := model.User{Username: "all-newcomer", AffCode: "all-newcomer"}
+	require.NoError(t, db.Create(&newcomer).Error)
+	count, err = model.GrantLotteryAttemptsToAll(root.Id, root.Role, 2, "all-snapshot", "Gift")
+	require.NoError(t, err)
+	assert.Equal(t, 4, count)
+	var remaining int
+	require.NoError(t, db.Model(&model.LotteryAttemptGrant{}).Where("id = ?", grants[0].Id).Pluck("remaining", &remaining).Error)
+	assert.Zero(t, remaining)
+	var newcomerGrants int64
+	require.NoError(t, db.Model(&model.LotteryAttemptGrant{}).Where("user_id = ?", newcomer.Id).Count(&newcomerGrants).Error)
+	assert.Zero(t, newcomerGrants)
+	for _, tc := range []struct {
+		operatorID, count int
+		reason            string
+	}{
+		{root.Id, 3, "Gift"}, {root.Id, 2, "Changed"}, {users[0].Id, 2, "Gift"},
+	} {
+		_, err := model.GrantLotteryAttemptsToAll(tc.operatorID, root.Role, tc.count, "all-snapshot", tc.reason)
+		require.ErrorIs(t, err, model.ErrLotteryIdempotencyConflict)
+	}
+	_, err = model.GrantLotteryAttempts(users[0].Id, root.Id, root.Role, 2, grants[0].RequestId, "Gift")
+	require.ErrorIs(t, err, model.ErrLotteryInvalidConfig, "single grants cannot forge a bulk request")
+	count, err = model.GrantLotteryAttemptsToAll(root.Id, root.Role, 1, "all-new-batch", "New gift")
+	require.NoError(t, err)
+	assert.Equal(t, 4, count)
+	require.NoError(t, db.Model(&model.LotteryAttemptGrant{}).Where("user_id = ?", newcomer.Id).Count(&newcomerGrants).Error)
+	assert.EqualValues(t, 1, newcomerGrants)
+}
+
+func TestAdminGrantLotteryAttemptsToAllRollsBackEarlierBatches(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.LotteryActivity{}, &model.LotteryAttemptGrant{}))
+	require.NoError(t, db.Create(&model.LotteryActivity{Name: model.PaymentLotteryName}).Error)
+	root := createQuotaTestOperator(t, db, common.RoleRootUser)
+	// Put the capped recipient after a full insert batch, so rollback must undo earlier writes.
+	for id := 1; id <= 101; id++ {
+		require.NoError(t, db.Create(&model.User{Id: id, Username: fmt.Sprintf("bulk-member-%d", id), AffCode: fmt.Sprintf("bulk-member-%d", id)}).Error)
+	}
+	seed := model.LotteryAttemptGrant{UserId: root.Id, OperatorId: root.Id, Count: model.LotteryMaxGrantedAttempts, Remaining: model.LotteryMaxGrantedAttempts, RequestId: "capped-root"}
+	require.NoError(t, db.Create(&seed).Error)
+	count, err := model.GrantLotteryAttemptsToAll(root.Id, root.Role, 1, "atomic-batch", "Gift")
+	require.ErrorIs(t, err, model.ErrLotteryGrantLimit)
+	assert.Zero(t, count)
+	var stored int64
+	require.NoError(t, db.Model(&model.LotteryAttemptGrant{}).Count(&stored).Error)
+	assert.EqualValues(t, 1, stored)
+	require.NoError(t, db.Model(&seed).Update("remaining", 0).Error)
+	count, err = model.GrantLotteryAttemptsToAll(root.Id, root.Role, 1, "atomic-batch", "Gift")
+	require.NoError(t, err)
+	assert.Equal(t, 102, count)
+	require.NoError(t, db.Model(&model.LotteryAttemptGrant{}).Count(&stored).Error)
+	assert.EqualValues(t, 103, stored)
+}
+
+func TestAdminGrantLotteryAttemptsToAllConcurrentRetries(t *testing.T) {
+	db := setupManageUserTestDB(t)
+	require.NoError(t, db.AutoMigrate(&model.LotteryActivity{}, &model.LotteryAttemptGrant{}))
+	require.NoError(t, db.Create(&model.LotteryActivity{Name: model.PaymentLotteryName}).Error)
+	root := createQuotaTestOperator(t, db, common.RoleRootUser)
+	require.NoError(t, db.Create(&model.User{Username: "concurrent-bulk-user", AffCode: "concurrent-bulk-user"}).Error)
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	var counts [2]int
+	var errs [2]error
+	for i := range 2 {
+		wg.Go(func() {
+			<-start
+			counts[i], errs[i] = model.GrantLotteryAttemptsToAll(root.Id, root.Role, 1, "concurrent-bulk", "Gift")
+		})
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil && common.UsingMainDatabase(common.DatabaseTypeSQLite) {
+			// SQLite can reject a concurrent writer; retry the complete request after it finishes.
+			require.ErrorContains(t, err, "SQLITE_BUSY")
+			counts[i], err = model.GrantLotteryAttemptsToAll(root.Id, root.Role, 1, "concurrent-bulk", "Gift")
+		}
+		require.NoError(t, err)
+		assert.Equal(t, 2, counts[i])
+	}
+	var grants []model.LotteryAttemptGrant
+	require.NoError(t, db.Find(&grants).Error)
+	require.Len(t, grants, 2)
+	for _, grant := range grants {
+		assert.Equal(t, 1, grant.Remaining)
+	}
+}

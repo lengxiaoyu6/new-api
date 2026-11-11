@@ -1,7 +1,9 @@
 package model
 
 import (
+	"crypto/sha256"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,11 +17,14 @@ const PaymentLotteryName = "online-payment-lottery"
 
 const LotteryMaxGrantedAttempts = 1_000_000
 
+const lotteryBulkGrantPrefix = "lottery-bulk-"
+
 var (
-	ErrLotteryGrantInvalid    = errors.New("Draw attempts must be an integer between 1 and 1000000")
-	ErrLotteryGrantLimit      = errors.New("The user has too many unused granted draw attempts")
-	ErrLotteryGrantPermission = errors.New("No permission to update users of same or higher permission level")
-	ErrLotteryPoolMissing     = errors.New("No lottery prize pool configured")
+	ErrLotteryGrantInvalid        = errors.New("Draw attempts must be an integer between 1 and 1000000")
+	ErrLotteryGrantLimit          = errors.New("The user has too many unused granted draw attempts")
+	ErrLotteryGrantPermission     = errors.New("No permission to update users of same or higher permission level")
+	ErrLotteryBulkGrantPermission = errors.New("Only root administrators can grant draw attempts to all users")
+	ErrLotteryPoolMissing         = errors.New("No lottery prize pool configured")
 )
 
 // LotteryAttemptGrant retains the operator and original count after consumption.
@@ -39,7 +44,7 @@ func GrantLotteryAttempts(userID, operatorID, operatorRole, count int, requestID
 	if userID <= 0 || operatorID <= 0 || count <= 0 || count > LotteryMaxGrantedAttempts {
 		return nil, ErrLotteryGrantInvalid
 	}
-	if len(requestID) == 0 || len(requestID) > 128 || utf8.RuneCountInString(reason) > 255 {
+	if len(requestID) == 0 || len(requestID) > 128 || strings.HasPrefix(requestID, lotteryBulkGrantPrefix) || utf8.RuneCountInString(reason) > 255 {
 		return nil, ErrLotteryInvalidConfig
 	}
 	if operatorRole < common.RoleAdminUser {
@@ -90,6 +95,89 @@ func GrantLotteryAttempts(userID, operatorID, operatorRole, count int, requestID
 		return nil, err
 	}
 	return &grant, nil
+}
+
+// GrantLotteryAttemptsToAll commits the recipient snapshot and all grants together.
+// The namespaced request IDs retain the original result even after users join or leave.
+func GrantLotteryAttemptsToAll(operatorID, operatorRole, count int, requestID, reason string) (int, error) {
+	if operatorRole != common.RoleRootUser {
+		return 0, ErrLotteryBulkGrantPermission
+	}
+	requestID, reason = strings.TrimSpace(requestID), strings.TrimSpace(reason)
+	if operatorID <= 0 || count <= 0 || count > LotteryMaxGrantedAttempts {
+		return 0, ErrLotteryGrantInvalid
+	}
+	if len(requestID) == 0 || len(requestID) > 128 || utf8.RuneCountInString(reason) > 255 {
+		return 0, ErrLotteryInvalidConfig
+	}
+	prefix := fmt.Sprintf("%s%x-", lotteryBulkGrantPrefix, sha256.Sum256([]byte(requestID)))
+	var recipients int
+	err := DB.Transaction(func(tx *gorm.DB) error {
+		// Lock users in ID order before reading grants, matching single grants and draws.
+		var users []User
+		if err := lockForUpdate(tx).Select("id").Order("id ASC").Find(&users).Error; err != nil {
+			return err
+		}
+		var previous []LotteryAttemptGrant
+		if err := lockForUpdate(tx).Where("request_id LIKE ?", prefix+"%").Find(&previous).Error; err != nil {
+			return err
+		}
+		if len(previous) > 0 {
+			for _, grant := range previous {
+				if grant.OperatorId != operatorID || grant.Count != count || grant.Reason != reason {
+					return ErrLotteryIdempotencyConflict
+				}
+			}
+			recipients = len(previous)
+			return nil
+		}
+		if len(users) == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		var activity LotteryActivity
+		if err := tx.Select("id").Where("name = ?", PaymentLotteryName).First(&activity).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return ErrLotteryPoolMissing
+			}
+			return err
+		}
+		now := common.GetTimestamp()
+		// Bound SQL parameters for SQLite as well as MySQL and PostgreSQL.
+		const batchSize = 100
+		for start := 0; start < len(users); start += batchSize {
+			batch := users[start:min(start+batchSize, len(users))]
+			ids := make([]int, 0, len(batch))
+			for _, user := range batch {
+				ids = append(ids, user.Id)
+			}
+			var overLimit []int
+			if err := tx.Model(&LotteryAttemptGrant{}).Select("user_id").Where("user_id IN ?", ids).
+				Group("user_id").Having("SUM(remaining) > ?", LotteryMaxGrantedAttempts-count).
+				Limit(1).Pluck("user_id", &overLimit).Error; err != nil {
+				return err
+			}
+			if len(overLimit) > 0 {
+				return ErrLotteryGrantLimit
+			}
+			grants := make([]LotteryAttemptGrant, 0, len(batch))
+			for _, user := range batch {
+				grants = append(grants, LotteryAttemptGrant{
+					UserId: user.Id, Count: count, Remaining: count,
+					RequestId:  fmt.Sprintf("%s%d", prefix, user.Id),
+					OperatorId: operatorID, Reason: reason, CreatedAt: now,
+				})
+			}
+			if err := tx.Create(&grants).Error; err != nil {
+				return err
+			}
+		}
+		recipients = len(users)
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return recipients, nil
 }
 
 // LotteryPaymentUsage binds a completed online payment to exactly one draw.

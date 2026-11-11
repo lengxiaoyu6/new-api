@@ -16,16 +16,24 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { Plus } from 'lucide-react'
+import { Gift, Plus } from 'lucide-react'
+import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Button } from '@/components/ui/button'
+import { useAuthStore } from '@/stores/auth-store'
 
+import { USER_ROLE } from '../constants'
+import { UserLotteryAttemptsDialog } from './user-lottery-attempts-dialog'
 import { useUsers } from './users-provider'
 
 export function UsersPrimaryButtons() {
   const { t } = useTranslation()
   const { setOpen, setCurrentRow } = useUsers()
+  const [grantOpen, setGrantOpen] = useState(false)
+  const canGrantAll = useAuthStore(
+    (state) => state.auth.user?.role === USER_ROLE.ROOT
+  )
 
   const handleCreate = () => {
     setCurrentRow(null)
@@ -33,7 +41,23 @@ export function UsersPrimaryButtons() {
   }
 
   return (
-    <div className='flex gap-2'>
+    <div className='flex flex-wrap gap-2'>
+      {canGrantAll && (
+        <>
+          <Button
+            size='sm'
+            variant='outline'
+            onClick={() => setGrantOpen(true)}
+          >
+            <Gift className='h-4 w-4' aria-hidden='true' />
+            {t('Grant draw attempts to all users')}
+          </Button>
+          <UserLotteryAttemptsDialog
+            open={grantOpen}
+            onOpenChange={setGrantOpen}
+          />
+        </>
+      )}
       <Button size='sm' onClick={handleCreate}>
         <Plus className='h-4 w-4' />
         {t('Add User')}
