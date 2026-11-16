@@ -50,6 +50,7 @@ import { TierPriceFields } from './tier-price-fields'
 import { VisualConditionTree } from './visual-condition-tree'
 
 type PricingNodeProps = {
+  pageCount?: boolean
   imageCount?: boolean
   node: VisualPricingNode
   source: string
@@ -108,6 +109,7 @@ function PricingTierFields(
         </Button>
       </div>
       <TierPriceFields
+        pageCount={props.pageCount}
         imageCount={props.imageCount}
         currency={props.currency}
         billingUnit={node.billingUnit}
@@ -172,6 +174,14 @@ function PricingRuleCard(
   }
 ) {
   const { t, i18n } = useTranslation()
+  let fixedLabel = props.imageCount
+    ? t('Price per image')
+    : t('Price per request')
+  let fixedUnit = props.imageCount ? t('image') : t('request')
+  if (props.pageCount) {
+    fixedLabel = t('Price per page')
+    fixedUnit = t('page')
+  }
   const node = props.node
   const [open, setOpen] = useState(props.first)
   const tier = node.kind === 'tier' ? node : node.yes
@@ -252,13 +262,10 @@ function PricingRuleCard(
               <span className='flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums'>
                 {tier.billingUnit === 'request' ? (
                   <span>
-                    {props.imageCount
-                      ? t('Price per image')
-                      : t('Price per request')}
-                    :{' '}
+                    {fixedLabel}:{' '}
                     {formatPricingAmount(tier.fixedPrice, props.currency) ||
                       '—'}
-                    /{props.imageCount ? t('image') : t('request')}
+                    /{fixedUnit}
                   </span>
                 ) : (
                   <>
@@ -395,6 +402,7 @@ export function VisualBillingDocumentEditor(props: {
         </p>
       )}
       <PricingRuleList
+        pageCount={props.document.pageCount}
         imageCount={props.document.imageCount}
         node={props.document.root}
         prefix=''

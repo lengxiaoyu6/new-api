@@ -252,3 +252,25 @@ describe('request simulation', () => {
     expect(onRequestRuleExprChange).not.toHaveBeenCalled()
   })
 })
+
+test('simulates OCR pages and rejects quantities above the provider limit', async () => {
+  render(
+    <RequestSimulation
+      expression='tier("page", fixed(0.000225)) * page_count'
+      mode='token'
+      currency={USD_PRICING_CURRENCY}
+    />
+  )
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Request simulation' }))
+  const count = screen.getByRole('spinbutton', { name: 'Billable page count' })
+  fireEvent.change(count, { target: { value: '2' } })
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $0.00045'
+  )
+  fireEvent.change(count, { target: { value: '1001' } })
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'page_count must be between 1 and 1000'
+  )
+})

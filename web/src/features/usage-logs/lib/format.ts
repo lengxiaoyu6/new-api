@@ -324,7 +324,7 @@ export interface TieredBillingSummary {
     field: string
     shortLabel: string
     price: number
-    unit?: 'request' | 'image'
+    unit?: 'request' | 'image' | 'page'
   }>
 }
 
@@ -401,31 +401,50 @@ export function getTieredBillingSummary(
       billingUnit: 'request' as const,
       fixedPrice,
     }
+    let shortLabel = 'Per-call'
+    let unit: 'request' | 'image' | 'page' = 'request'
+    if (other.image_count !== undefined) {
+      shortLabel = 'Per image'
+      unit = 'image'
+    }
+    if (actualTier.pageCount) {
+      shortLabel = 'Per page'
+      unit = 'page'
+    }
     return {
       tiers,
       tier: actualTier,
       priceEntries: [
         {
           field: 'fixedPrice',
-          shortLabel:
-            other.image_count !== undefined ? 'Per image' : 'Per-call',
+          shortLabel,
           price: fixedPrice,
-          unit: other.image_count !== undefined ? 'image' : 'request',
+          unit,
         },
       ],
     }
   }
   if (!tier) return null
   if (tier.billingUnit === 'request' && typeof tier.fixedPrice === 'number') {
+    let shortLabel = 'Per-call'
+    let unit: 'request' | 'image' | 'page' = 'request'
+    if (tier.imageCount) {
+      shortLabel = 'Per image'
+      unit = 'image'
+    }
+    if (tier.pageCount) {
+      shortLabel = 'Per page'
+      unit = 'page'
+    }
     return {
       tiers,
       tier,
       priceEntries: [
         {
           field: 'fixedPrice',
-          shortLabel: tier.imageCount ? 'Per image' : 'Per-call',
+          shortLabel,
           price: tier.fixedPrice,
-          unit: tier.imageCount ? 'image' : 'request',
+          unit,
         },
       ],
     }

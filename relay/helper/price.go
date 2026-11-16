@@ -80,6 +80,16 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
+	if request, ocr := info.Request.(*dto.DeepSeekOCRRequest); ocr {
+		count := dto.MaxOCRPages
+		body, err := common.Marshal(map[string]string{"purpose": request.Purpose})
+		if err != nil {
+			return hosttypes.PriceData{}, err
+		}
+		info.BillingRequestInput = &billingexpr.RequestInput{
+			Body: body, Headers: cloneStringMap(info.RequestHeaders), PageCount: &count,
+		}
+	}
 
 	// Check if this model uses tiered_expr billing. The selected channel profile
 	// has precedence over the model-level definition.
@@ -89,6 +99,10 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	}
 	if definition.BillingMode == billing_setting.BillingModeTieredExpr {
 		return modelPriceHelperTiered(c, info, billingModelName, definition, promptTokens, groupRatioInfo)
+	}
+
+	if _, ocr := info.Request.(*dto.DeepSeekOCRRequest); ocr && !usePrice {
+		return hosttypes.PriceData{}, errors.New("OCR requires per-page or per-request pricing; token ratios are not supported")
 	}
 
 	var preConsumedQuota int
@@ -446,6 +460,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 	}
 
 	snapshot := &billingexpr.BillingSnapshot{
+		EstimatedPageCount:        trace.PageCount,
 		EstimatedImageCount:       trace.ImageCount,
 		BillingMode:               billing_setting.BillingModeTieredExpr,
 		ModelName:                 billingModelName,

@@ -115,7 +115,7 @@ type BreakdownPriceField = {
   id: string
   label: string
   labelKind: DynamicPriceLabelKind
-  unit: BillingUsageUnit | 'request' | 'token' | 'image'
+  unit: BillingUsageUnit | 'request' | 'token' | 'image' | 'page'
   unitLabel?: string | Record<string, string>
   showTokenUnit?: boolean
   value: (tier: BreakdownTier) => number
@@ -217,7 +217,8 @@ function formatBreakdownPrice(
   const amount =
     field.labelKind === 'schema' ||
     field.unit === 'request' ||
-    field.unit === 'image'
+    field.unit === 'image' ||
+    field.unit === 'page'
       ? formatTaskUsageUnitPrice(value * priceMultiplier, {
           tokenUnit: 'M',
           ...taskPriceOptions,
@@ -233,6 +234,7 @@ function formatBreakdownPrice(
   }
   if (field.unit === 'request') return `${amount}/${t('request')}`
   if (field.unit === 'image') return `${amount}/${t('image')}`
+  if (field.unit === 'page') return `${amount}/${t('page')}`
   return amount
 }
 
@@ -453,19 +455,21 @@ export function DynamicPricingBreakdown({
       )
     ) {
       for (const field of fields) field.showTokenUnit = true
+      let label = 'Price per request'
+      let unit: BreakdownPriceField['unit'] = 'request'
+      if (tiers.some((tier) => !isTaskBreakdownTier(tier) && tier.imageCount)) {
+        label = 'Price per image'
+        unit = 'image'
+      }
+      if (tiers.some((tier) => !isTaskBreakdownTier(tier) && tier.pageCount)) {
+        label = 'Price per page'
+        unit = 'page'
+      }
       fields.push({
         id: 'fixedPrice',
-        label: tiers.some(
-          (tier) => !isTaskBreakdownTier(tier) && tier.imageCount
-        )
-          ? 'Price per image'
-          : 'Price per request',
+        label,
         labelKind: 'i18n',
-        unit: tiers.some(
-          (tier) => !isTaskBreakdownTier(tier) && tier.imageCount
-        )
-          ? 'image'
-          : 'request',
+        unit,
         value: (tier) =>
           !isTaskBreakdownTier(tier) && tier.billingUnit === 'request'
             ? Number(tier.fixedPrice)
@@ -581,7 +585,8 @@ export function DynamicPricingBreakdown({
                           >
                             {value > 0 ||
                             ((field.unit === 'request' ||
-                              field.unit === 'image') &&
+                              field.unit === 'image' ||
+                              field.unit === 'page') &&
                               Number.isFinite(value))
                               ? formatBreakdownPrice(
                                   value,
@@ -698,7 +703,9 @@ export function DynamicPricingBreakdown({
                 cell: (tier: BreakdownTier) => {
                   const value = field.value(tier)
                   return value > 0 ||
-                    ((field.unit === 'request' || field.unit === 'image') &&
+                    ((field.unit === 'request' ||
+                      field.unit === 'image' ||
+                      field.unit === 'page') &&
                       Number.isFinite(value)) ? (
                     <span className={cn(!compact && 'font-semibold')}>
                       {formatBreakdownPrice(

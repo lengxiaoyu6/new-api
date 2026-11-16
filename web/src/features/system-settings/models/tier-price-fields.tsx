@@ -110,6 +110,7 @@ function PriceField({
 }
 
 type TierPriceFieldsProps = {
+  pageCount?: boolean
   imageCount?: boolean
   billingUnit?: 'token' | 'request'
   fixedPrice?: string
@@ -163,13 +164,23 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
       />
     )
   }
+  let fixedLabel = props.imageCount
+    ? t('Price per image')
+    : t('Price per request')
+  let billingLabel = props.imageCount ? t('Price per image') : t('Per-call')
+  let fixedUnit = props.imageCount ? t('image') : t('request')
+  if (props.pageCount) {
+    fixedLabel = t('Price per page')
+    billingLabel = t('Per page')
+    fixedUnit = t('page')
+  }
   const billingControl = props.onBillingUnitChange && (
     <Select
       items={[
         { value: 'token', label: t('Per token') },
         {
           value: 'request',
-          label: props.imageCount ? t('Price per image') : t('Per-call'),
+          label: billingLabel,
         },
       ]}
       value={props.billingUnit ?? 'token'}
@@ -189,9 +200,7 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
       <SelectContent alignItemWithTrigger={false}>
         <SelectGroup>
           <SelectItem value='token'>{t('Per token')}</SelectItem>
-          <SelectItem value='request'>
-            {props.imageCount ? t('Price per image') : t('Per-call')}
-          </SelectItem>
+          <SelectItem value='request'>{billingLabel}</SelectItem>
         </SelectGroup>
       </SelectContent>
     </Select>
@@ -202,12 +211,10 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
         {billingControl}
         <PriceField
           currency={props.currency}
-          label={
-            props.imageCount ? t('Price per image') : t('Price per request')
-          }
+          label={fixedLabel}
           value={props.fixedPrice ?? ''}
           onChange={(value) => props.onFixedPriceChange?.(value)}
-          hint={`${props.currency.symbol}/${props.imageCount ? t('image') : t('request')}`}
+          hint={`${props.currency.symbol}/${fixedUnit}`}
           invalid={props.invalidVariables?.includes('fixed')}
         />
       </>

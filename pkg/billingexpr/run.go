@@ -67,7 +67,19 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		trace.ImageCount = &imageCount
 	}
 
+	pageCount := 1
+	if usedVars["page_count"] {
+		if request.PageCount != nil {
+			pageCount = *request.PageCount
+		}
+		if pageCount < 1 || pageCount > dto.MaxOCRPages {
+			return 0, trace, fmt.Errorf("page_count must be between 1 and %d", dto.MaxOCRPages)
+		}
+		trace.PageCount = &pageCount
+	}
+
 	env := map[string]any{
+		"page_count":  float64(pageCount),
 		"image_count": float64(imageCount),
 		"p":           params.P,
 		"c":           params.C,

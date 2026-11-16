@@ -532,6 +532,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		modelRequest.Model = constant.DeepSeekSearchModel
 	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/tools/fetch") {
 		modelRequest.Model = constant.DeepSeekFetchModel
+	} else if strings.HasPrefix(c.Request.URL.Path, "/v1/tools/ocr") {
+		modelRequest.Model = constant.DeepSeekOCRModel
 	}
 	if strings.HasPrefix(c.Request.URL.Path, "/v1/images/generations") {
 		modelRequest.Model = common.GetStringIfEmpty(modelRequest.Model, "dall-e")

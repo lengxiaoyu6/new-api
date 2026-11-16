@@ -163,6 +163,21 @@ OpenAI 已于 2026-05-12 下线 DALL·E 2/3；其校验、默认值和倍率保�
 
 > **注意：** 自动扣除针对 GPT/OpenAI 格式的 API（prompt_tokens 包含子类别）。Claude 格式的 API 不重复扣除缓存；未独立计价的缓存读取和缓存写入加回输入。系统根据上游返回格式自动处理。
 
+### OCR Page Quantity
+
+`page_count` is a non-token quantity for the DeepSeek OCR endpoint. The built-in
+price is `tier("page", fixed(0.000225)) * page_count`, in USD per page. The
+upstream's token usage is reference-only and does not affect OCR billing.
+The quantity defaults to 1 outside OCR and, when supplied, must be an integer
+from 1 to `dto.MaxOCRPages` (1,000). Task expressions reject this chat quantity.
+
+OCR reserves the maximum 1,000 pages before submission because the actual page
+count is reported only after recognition. Settlement uses the bounded reported
+`page_count`, checked against the returned pages. The estimated quantity stays
+in the snapshot and the actual quantity is recorded in the consume log.
+The pricing request context retains only `purpose`, never the uploaded file.
+A client disconnect does not cancel upstream recognition or successful settlement.
+
 ### Built-in Functions
 
 | Function | Signature | Purpose |

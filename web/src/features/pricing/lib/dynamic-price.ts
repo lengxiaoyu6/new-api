@@ -70,7 +70,7 @@ export type DynamicPriceEntry = {
   formattedRange?: string
   minValue?: number
   maxValue?: number
-  unit: 'token' | BillingUsageUnit | 'request' | 'image'
+  unit: 'token' | BillingUsageUnit | 'request' | 'image' | 'page'
   unitLabel?: string | Record<string, string>
   variable?: BillingVar
   description?: string | Record<string, string>
@@ -129,6 +129,7 @@ export function getDynamicPriceUnitLabelKey(
   if (entry.unit === 'token' && !entry.variable) return '1M token'
   if (entry.unit === 'request') return 'request'
   if (entry.unit === 'image') return 'image'
+  if (entry.unit === 'page') return 'page'
   return null
 }
 
@@ -289,16 +290,29 @@ export function getDynamicPriceEntries(
     tier.billingUnit === 'request' &&
     typeof tier.fixedPrice === 'number'
   ) {
+    let label = 'Price per request'
+    let shortLabel = 'Per-call'
+    let unit: DynamicPriceEntry['unit'] = 'request'
+    if (tier.imageCount) {
+      label = 'Price per image'
+      shortLabel = 'Per image'
+      unit = 'image'
+    }
+    if (tier.pageCount) {
+      label = 'Price per page'
+      shortLabel = 'Per page'
+      unit = 'page'
+    }
     return [
       {
         key: 'fixed',
         field: 'fixedPrice',
-        label: tier.imageCount ? 'Price per image' : 'Price per request',
-        shortLabel: tier.imageCount ? 'Per image' : 'Per-call',
+        label,
+        shortLabel,
         labelKind: 'i18n',
         value: tier.fixedPrice,
         formatted: formatTaskUsageUnitPrice(tier.fixedPrice, options),
-        unit: tier.imageCount ? 'image' : 'request',
+        unit,
       },
     ]
   }

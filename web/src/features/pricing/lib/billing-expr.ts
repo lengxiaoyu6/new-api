@@ -303,6 +303,7 @@ function mapTokenTier(
   return {
     label: tier.label,
     ...(tier.imageCount ? { imageCount: true } : {}),
+    ...(tier.pageCount ? { pageCount: true } : {}),
     conditions: tier.conditions,
     ...(tier.billingUnit === 'request'
       ? { billingUnit: tier.billingUnit, fixedPrice: tier.fixedPrice }
@@ -635,8 +636,8 @@ export function splitBillingExprAndRequestRules(expr: string): {
     }
   })
 
-  const quantityParts = baseParts.filter(
-    (part) => unwrapOuterParens(part) === 'image_count'
+  const quantityParts = baseParts.filter((part) =>
+    ['image_count', 'page_count'].includes(unwrapOuterParens(part))
   )
   if (ruleParts.length === 0 || baseParts.length - quantityParts.length !== 1) {
     return { billingExpr: trimmed, requestRuleExpr: '' }

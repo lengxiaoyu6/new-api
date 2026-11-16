@@ -76,12 +76,16 @@ export function RequestSimulation(props: RequestSimulationProps) {
   const bodyId = useId()
   const headersId = useId()
   const timeId = useId()
+  const pageCountId = useId()
+  const [pageCount, setPageCount] = useState('1')
   const imageCountId = useId()
   const [imageCount, setImageCount] = useState('1')
   const compiled = useMemo(
     () => compileBillingExpression(props.expression),
     [props.expression]
   )
+  const usesPageCount =
+    compiled.status === 'ready' && compiled.variables.has('page_count')
   const usesImageCount =
     compiled.status === 'ready' && compiled.variables.has('image_count')
   const booleanFields = Object.entries(props.usageSchema ?? {}).filter(
@@ -170,6 +174,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
       }
     }
     return evaluateBillingExpression(props.expression, {
+      pageCount: Number(pageCount),
       imageCount: Number(imageCount),
       tokens: props.tokens,
       usage,
@@ -181,6 +186,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
     })
   }, [
     open,
+    pageCount,
     imageCount,
     body,
     headers,
@@ -221,6 +227,22 @@ export function RequestSimulation(props: RequestSimulationProps) {
         {t('Request simulation')}
       </CollapsibleTrigger>
       <CollapsibleContent className='mt-3 space-y-4'>
+        {usesPageCount && (
+          <Field>
+            <FieldLabel htmlFor={pageCountId}>
+              {t('Billable page count')}
+            </FieldLabel>
+            <Input
+              id={pageCountId}
+              type='number'
+              min={1}
+              max={1000}
+              step={1}
+              value={pageCount}
+              onChange={(event) => setPageCount(event.target.value)}
+            />
+          </Field>
+        )}
         {usesImageCount && (
           <Field>
             <FieldLabel htmlFor={imageCountId}>

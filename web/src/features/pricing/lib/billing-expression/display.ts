@@ -34,6 +34,7 @@ export type TokenTierCondition = {
 }
 export type TokenTier = {
   conditionText?: string
+  pageCount?: boolean
   imageCount?: boolean
   billingUnit?: 'token' | 'request'
   fixedPrice?: number
@@ -145,7 +146,8 @@ function tokenTier(
     if (
       input.kind === 'variable' &&
       input.name !== 'len' &&
-      input.name !== 'image_count'
+      input.name !== 'image_count' &&
+      input.name !== 'page_count'
     ) {
       variable = input.name
     } else {
@@ -221,11 +223,16 @@ export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
       [node.left, node.right],
       [node.right, node.left],
     ]) {
-      if (factor.kind === 'variable' && factor.name === 'image_count') {
+      if (
+        factor.kind === 'variable' &&
+        (factor.name === 'image_count' || factor.name === 'page_count')
+      ) {
         return (
           readTokenTierChain(pricing)?.map((tier) => ({
             ...tier,
-            imageCount: true,
+            ...(factor.name === 'page_count'
+              ? { pageCount: true }
+              : { imageCount: true }),
           })) ?? null
         )
       }

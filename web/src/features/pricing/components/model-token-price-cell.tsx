@@ -81,7 +81,10 @@ export function ModelTokenPriceCell(props: {
     ]
   )
   const isRequestExpression = summary?.primaryEntries.some(
-    (entry) => entry.unit === 'request' || entry.unit === 'image'
+    (entry) =>
+      entry.unit === 'request' ||
+      entry.unit === 'image' ||
+      entry.unit === 'page'
   )
   if (
     !props.tier &&

@@ -25,6 +25,7 @@ import zh from '@/i18n/locales/zh.json'
 import contract from '../../../../../../pkg/billingexpr/testdata/frontend_simulation.json'
 import {
   combineBillingExpr,
+  parseTiersFromExpr,
   splitBillingExprAndRequestRules,
 } from '../billing-expr'
 import { formatBillingCondition } from '../billing-expression/condition-display'
@@ -648,5 +649,85 @@ describe('visual billing document', () => {
         'hour("UTC") > 9 ? max(p * 2, 1) : tier("off", p * 1)'
       )
     ).toBeNull()
+  })
+})
+
+describe('OCR page pricing', () => {
+  const expression = 'tier("page", fixed(0.000225)) * page_count'
+
+  test('evaluates actual pages independently of reference tokens and displays the per-page rate', () => {
+    expect(
+      evaluateBillingExpression(expression, { pageCount: 2 })
+    ).toMatchObject({
+      status: 'success',
+      cost: 450,
+      pageCount: 2,
+      billingUnit: 'request',
+    })
+    expect(parseTiersFromExpr(expression)).toEqual([
+      {
+        label: 'page',
+        conditions: [],
+        billingUnit: 'request',
+        fixedPrice: 0.000225,
+        pageCount: true,
+      },
+    ])
+    expect(
+      getTieredBillingSummary({
+        billing_mode: 'tiered_expr',
+        expr_b64: btoa(expression),
+        billing_unit: 'request',
+        fixed_price: 0.000225,
+        matched_tier: 'page',
+        page_count: 2,
+      })?.priceEntries
+    ).toEqual([
+      {
+        field: 'fixedPrice',
+        shortLabel: 'Per page',
+        price: 0.000225,
+        unit: 'page',
+      },
+    ])
+  })
+
+  test.each([-1, 0, 1.5, 1001])(
+    'rejects invalid page count %s',
+    (pageCount) => {
+      expect(
+        evaluateBillingExpression(expression, { pageCount })
+      ).toMatchObject({ status: 'invalid' })
+    }
+  )
+
+  test('editing a page price preserves its quantity multiplier', () => {
+    const document = parseVisualBillingDocument(expression)
+    assert(document && document.root.kind === 'tier')
+    document.root.fixedPrice = '0.001'
+    expect(serializeVisualBillingDocument(document)).toEqual({
+      ok: true,
+      source: expression.replace('0.000225', '0.001'),
+    })
+  })
+
+  test('a custom request price remains per-call when the log contains actual OCR pages', () => {
+    expect(
+      getTieredBillingSummary({
+        billing_mode: 'tiered_expr',
+        expr_b64: btoa('tier("request", fixed(0.01))'),
+        billing_unit: 'request',
+        fixed_price: 0.01,
+        matched_tier: 'request',
+        page_count: 2,
+      })?.priceEntries
+    ).toEqual([
+      {
+        field: 'fixedPrice',
+        shortLabel: 'Per-call',
+        price: 0.01,
+        unit: 'request',
+      },
+    ])
   })
 })

@@ -248,6 +248,17 @@ class BillingRuntime {
       return { value: node.value, integer: node.integer }
     }
     if (node.kind === 'variable') {
+      if (node.name === 'page_count') {
+        const value = this.context.pageCount ?? 1
+        if (!Number.isInteger(value) || value < 1 || value > 1000) {
+          throw new BillingExpressionError({
+            code: 'number',
+            detail: 'page_count must be between 1 and 1000',
+            position: node.start,
+          })
+        }
+        return { value }
+      }
       if (node.name === 'image_count') {
         const value = this.context.imageCount ?? 1
         if (!Number.isInteger(value) || value < 1 || value > 128) {
@@ -558,6 +569,9 @@ export function evaluateBillingExpression(
       status: 'success',
       cost: result,
       billingUnit: runtime.billingUnit,
+      ...(compiled.variables.has('page_count')
+        ? { pageCount: context.pageCount ?? 1 }
+        : {}),
       ...(compiled.variables.has('image_count')
         ? { imageCount: context.imageCount ?? 1 }
         : {}),

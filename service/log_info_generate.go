@@ -110,6 +110,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other.SetPublic("cache_tokens", cacheTokens)
 	other.SetPublic("cache_ratio", cacheRatio)
 	other.SetPublic("model_price", modelPrice)
+	if relayInfo.BillingPageCount != nil {
+		other.SetPublic("page_count", *relayInfo.BillingPageCount)
+	}
 	other.SetPublic("user_group_ratio", userGroupRatio)
 	other.SetPublic("frt", float64(relayInfo.FirstResponseTime.UnixMilli()-relayInfo.StartTime.UnixMilli()))
 	if relayInfo.ReasoningEffort != "" {
@@ -376,6 +379,9 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 				"ai": tokens.AI, "ao": tokens.AO,
 			})
 		}
+		if result.PageCount != nil {
+			other.SetPublic("page_count", *result.PageCount)
+		}
 		if result.ImageCount != nil {
 			other.SetPublic("image_count", *result.ImageCount)
 		}
@@ -390,6 +396,9 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 			other.SetPublic("request_rules", result.RequestRules)
 		}
 	} else if snap.EstimatedBillingUnit != "" {
+		if snap.EstimatedPageCount != nil {
+			other.SetPublic("page_count", *snap.EstimatedPageCount)
+		}
 		if snap.EstimatedImageCount != nil {
 			other.SetPublic("image_count", *snap.EstimatedImageCount)
 		}

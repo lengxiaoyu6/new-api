@@ -42,7 +42,11 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	case types.RelayFormatOpenAIAlphaSearch:
 		request, err = GetAndValidateAlphaSearchRequest(c)
 	case types.RelayFormatDeepSeekTools:
-		request, err = GetAndValidateDeepSeekToolsRequest(c)
+		if relayMode == relayconstant.RelayModeToolsOCR {
+			request, err = GetAndValidateDeepSeekOCRRequest(c)
+		} else {
+			request, err = GetAndValidateDeepSeekToolsRequest(c)
+		}
 
 	case types.RelayFormatOpenAIImage:
 		request, err = GetAndValidOpenAIImageRequest(c, relayMode)
@@ -192,6 +196,35 @@ func GetAndValidateDeepSeekToolsRequest(c *gin.Context) (*dto.DeepSeekToolsReque
 	}
 	request.RawBody = rawBody
 	return request, nil
+}
+
+// GetAndValidateDeepSeekOCRRequest validates the multipart contract before any
+// reservation or upstream submission. Temporary parsed files are disposable:
+// forwarding reads the unchanged replayable request body.
+func GetAndValidateDeepSeekOCRRequest(c *gin.Context) (*dto.DeepSeekOCRRequest, error) {
+	if c.ContentType() != "multipart/form-data" {
+		return nil, errors.New("OCR requires multipart/form-data")
+	}
+	form, err := common.ParseMultipartFormReusable(c)
+	if err != nil {
+		return nil, err
+	}
+	defer form.RemoveAll()
+	if len(form.Value) != 1 || len(form.Value["purpose"]) != 1 || len(form.File) != 1 || len(form.File["file"]) != 1 {
+		return nil, errors.New("OCR requires exactly one file and one purpose, with no additional fields")
+	}
+	purpose := form.Value["purpose"][0]
+	if purpose != "text_recognition" && purpose != "rich_layout_recognition" {
+		return nil, errors.New("purpose must be text_recognition or rich_layout_recognition")
+	}
+	file := form.File["file"][0]
+	if file.Filename == "" || file.Size == 0 {
+		return nil, errors.New("file must be non-empty and have a filename")
+	}
+	if file.Size > dto.MaxOCRFileSize {
+		return nil, common.ErrRequestBodyTooLarge
+	}
+	return &dto.DeepSeekOCRRequest{Purpose: purpose}, nil
 }
 
 func GetAndValidateResponsesCompactionRequest(c *gin.Context) (*dto.OpenAIResponsesCompactionRequest, error) {

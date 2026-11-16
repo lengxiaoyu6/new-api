@@ -32,3 +32,28 @@ func (r *DeepSeekToolsRequest) SetModelName(modelName string) {
 		r.Model = modelName
 	}
 }
+
+// DeepSeek OCR accepts no model field. Model is only the gateway routing name;
+// files remain in the host's replayable body storage, outside pricing context.
+const (
+	MaxOCRFileSize = 100 << 20
+	MaxOCRPages    = 1000
+)
+
+type DeepSeekOCRRequest struct {
+	Model   string `json:"model,omitempty"`
+	Purpose string `json:"purpose"`
+}
+
+func (r *DeepSeekOCRRequest) GetTokenCountMeta() *types.TokenCountMeta {
+	// OCR tokens are reference-only; billing uses page_count.
+	return &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
+}
+
+func (r *DeepSeekOCRRequest) IsStream(_ *http.Request) bool { return false }
+
+func (r *DeepSeekOCRRequest) SetModelName(modelName string) {
+	if modelName != "" {
+		r.Model = modelName
+	}
+}

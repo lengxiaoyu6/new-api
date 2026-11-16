@@ -88,6 +88,8 @@ func (a *Adaptor) GetRequestURL(info *relaycommon.RelayInfo) (string, error) {
 			return fmt.Sprintf("%s/responses", info.ChannelBaseUrl), nil
 		case constant.RelayModeToolsSearch:
 			return fmt.Sprintf("%s/v1/tools/search", info.ChannelBaseUrl), nil
+		case constant.RelayModeToolsOCR:
+			return fmt.Sprintf("%s/v1/tools/ocr", info.ChannelBaseUrl), nil
 		case constant.RelayModeToolsFetch:
 			return fmt.Sprintf("%s/v1/tools/fetch", info.ChannelBaseUrl), nil
 		default:

@@ -4,10 +4,12 @@ import "github.com/QuantumNous/new-api/constant"
 
 // GetEndpointTypesByChannelType 获取渠道最优先端点类型（所有的渠道都支持 OpenAI 端点）
 func GetEndpointTypesByChannelType(channelType int, modelName string) []constant.EndpointType {
-	// The DeepSeek Search and Fetch routing names serve only their endpoint.
+	// The DeepSeek tool routing names serve only their endpoint.
 	switch modelName {
 	case constant.DeepSeekSearchModel:
 		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsSearch}
+	case constant.DeepSeekOCRModel:
+		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsOCR}
 	case constant.DeepSeekFetchModel:
 		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsFetch}
 	}

@@ -299,3 +299,19 @@ describe('usage facts billing details', () => {
     expect(screen.getByText('Total Cost')).toBeInTheDocument()
   })
 })
+
+test('shows actual OCR pages and the per-page rate in billing details', () => {
+  const queryClient = renderDetails({
+    billing_mode: 'tiered_expr',
+    expr_b64: btoa('tier("page", fixed(0.000225)) * page_count'),
+    billing_unit: 'request',
+    fixed_price: 0.000225,
+    page_count: 2,
+    matched_tier: 'page',
+  })
+  expect(
+    screen.getByText('Billable page count').parentElement
+  ).toHaveTextContent('2')
+  expect(screen.getAllByText(/\/page/).length).toBeGreaterThan(0)
+  queryClient.clear()
+})

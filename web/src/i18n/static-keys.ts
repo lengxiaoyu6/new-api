@@ -111,6 +111,9 @@ export const STATIC_I18N_KEYS = [
 
   'Price per image',
   'Per image',
+  'Per page',
+  'Price per page',
+  'page',
   'Audio requests',
   'Text-only requests',
   'Realtime pricing must be converted manually.',

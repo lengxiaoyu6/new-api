@@ -14,6 +14,8 @@ type RequestInput struct {
 	// ImageCount is a validated billing quantity, separate from the frozen
 	// request's n. Settlement can replace it with the actual returned count.
 	ImageCount *int
+	// PageCount is the bounded OCR quantity, independent of reference-only tokens.
+	PageCount *int
 }
 
 // TokenParams holds all token dimensions passed into an Expr evaluation.
@@ -50,6 +52,7 @@ const (
 
 // TraceResult holds side-channel info captured while an expression runs.
 type TraceResult struct {
+	PageCount    *int               `json:"page_count,omitempty"`
 	ImageCount   *int               `json:"image_count,omitempty"`
 	BillingUnit  BillingUnit        `json:"billing_unit"`
 	FixedPrice   *float64           `json:"fixed_price,omitempty"`
@@ -82,6 +85,7 @@ type BillingSnapshot struct {
 	ProfileLabel              map[string]string `json:"profile_label,omitempty"`
 	ProfileSource             string            `json:"profile_source,omitempty"`
 	ChannelID                 int               `json:"channel_id,omitempty"`
+	EstimatedPageCount        *int              `json:"estimated_page_count,omitempty"`
 	EstimatedImageCount       *int              `json:"estimated_image_count,omitempty"`
 	EstimatedBillingUnit      BillingUnit       `json:"estimated_billing_unit,omitempty"`
 	EstimatedFixedPrice       *float64          `json:"estimated_fixed_price,omitempty"`
@@ -93,6 +97,7 @@ type TieredResult struct {
 	// billing that explicitly references img_cr. Logs serialize these through
 	// the shared injection path, not as additional snapshot state.
 	BillingTokens          *TokenParams       `json:"-"`
+	PageCount              *int               `json:"page_count,omitempty"`
 	ImageCount             *int               `json:"image_count,omitempty"`
 	BillingUnit            BillingUnit        `json:"billing_unit"`
 	FixedPrice             *float64           `json:"fixed_price,omitempty"`

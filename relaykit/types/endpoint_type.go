@@ -12,6 +12,7 @@ const (
 	EndpointTypeOpenAIAlphaSearch     EndpointType = "openai-alpha-search"
 	EndpointTypeDeepSeekToolsSearch   EndpointType = "deepseek-tools-search"
 	EndpointTypeDeepSeekToolsFetch    EndpointType = "deepseek-tools-fetch"
+	EndpointTypeDeepSeekToolsOCR      EndpointType = "deepseek-tools-ocr"
 	EndpointTypeAnthropic             EndpointType = "anthropic"
 	EndpointTypeGemini                EndpointType = "gemini"
 	EndpointTypeJinaRerank            EndpointType = "jina-rerank"

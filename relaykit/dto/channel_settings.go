@@ -254,6 +254,7 @@ const (
 	advancedCustomEndpointPathOpenAIAlphaSearch      = "/v1/alpha/search"
 	advancedCustomEndpointPathDeepSeekToolsSearch    = "/v1/tools/search"
 	advancedCustomEndpointPathDeepSeekToolsFetch     = "/v1/tools/fetch"
+	advancedCustomEndpointPathDeepSeekToolsOCR       = "/v1/tools/ocr"
 	advancedCustomEndpointPathClaudeMessages         = "/v1/messages"
 	advancedCustomEndpointPathJinaRerank             = "/v1/rerank"
 	advancedCustomEndpointPathImageGeneration        = "/v1/images/generations"
@@ -387,6 +388,8 @@ func advancedCustomEndpointTypeFromIncomingPath(incomingPath string) (types.Endp
 		return types.EndpointTypeOpenAIAlphaSearch, true
 	case advancedCustomEndpointPathDeepSeekToolsSearch:
 		return types.EndpointTypeDeepSeekToolsSearch, true
+	case advancedCustomEndpointPathDeepSeekToolsOCR:
+		return types.EndpointTypeDeepSeekToolsOCR, true
 	case advancedCustomEndpointPathDeepSeekToolsFetch:
 		return types.EndpointTypeDeepSeekToolsFetch, true
 	case advancedCustomEndpointPathClaudeMessages:

@@ -13,6 +13,7 @@ const (
 	EndpointTypeOpenAIAlphaSearch     = types.EndpointTypeOpenAIAlphaSearch
 	EndpointTypeDeepSeekToolsSearch   = types.EndpointTypeDeepSeekToolsSearch
 	EndpointTypeDeepSeekToolsFetch    = types.EndpointTypeDeepSeekToolsFetch
+	EndpointTypeDeepSeekToolsOCR      = types.EndpointTypeDeepSeekToolsOCR
 	EndpointTypeAnthropic             = types.EndpointTypeAnthropic
 	EndpointTypeGemini                = types.EndpointTypeGemini
 	EndpointTypeJinaRerank            = types.EndpointTypeJinaRerank
@@ -21,9 +22,10 @@ const (
 	EndpointTypeOpenAIVideo           = types.EndpointTypeOpenAIVideo
 )
 
-// Model names the distributor assigns to /v1/tools/search and /v1/tools/fetch,
+// Model names the distributor assigns to the DeepSeek tool endpoints,
 // whose bodies carry no model. Channels serve the endpoints by listing them.
 const (
 	DeepSeekSearchModel = "deepseek-search"
 	DeepSeekFetchModel  = "deepseek-fetch"
+	DeepSeekOCRModel    = "deepseek-ocr"
 )
