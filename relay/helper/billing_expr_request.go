@@ -105,6 +105,10 @@ func cloneRequestInput(src billingexpr.RequestInput) billingexpr.RequestInput {
 	input := billingexpr.RequestInput{
 		Headers: cloneStringMap(src.Headers),
 	}
+	if src.CharacterCount != nil {
+		count := *src.CharacterCount
+		input.CharacterCount = &count
+	}
 	if src.PageCount != nil {
 		count := *src.PageCount
 		input.PageCount = &count

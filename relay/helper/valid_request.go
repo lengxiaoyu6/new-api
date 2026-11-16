@@ -44,6 +44,8 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	case types.RelayFormatDeepSeekTools:
 		if relayMode == relayconstant.RelayModeToolsOCR {
 			request, err = GetAndValidateDeepSeekOCRRequest(c)
+		} else if relayMode == relayconstant.RelayModeToolsTTS {
+			request, err = GetAndValidateDeepSeekTTSRequest(c)
 		} else {
 			request, err = GetAndValidateDeepSeekToolsRequest(c)
 		}
@@ -196,6 +198,30 @@ func GetAndValidateDeepSeekToolsRequest(c *gin.Context) (*dto.DeepSeekToolsReque
 	}
 	request.RawBody = rawBody
 	return request, nil
+}
+
+// GetAndValidateDeepSeekTTSRequest bounds the provider's weighted character
+// quantity before pricing. RawBody preserves optional false values and fields.
+func GetAndValidateDeepSeekTTSRequest(c *gin.Context) (*dto.DeepSeekTTSRequest, error) {
+	if c.ContentType() != "application/json" {
+		return nil, errors.New("TTS requires application/json")
+	}
+	storage, err := common.GetBodyStorage(c)
+	if err != nil {
+		return nil, err
+	}
+	if storage.Size() > dto.MaxTTSRequestSize {
+		return nil, errors.New("TTS request body must be at most 64 KiB")
+	}
+	request := &dto.DeepSeekTTSRequest{}
+	if err := common.UnmarshalBodyReusableNoCopy(c, request); err != nil {
+		return nil, err
+	}
+	if err := request.Validate(); err != nil {
+		return nil, err
+	}
+	request.RawBody, err = storage.Bytes()
+	return request, err
 }
 
 // GetAndValidateDeepSeekOCRRequest validates the multipart contract before any

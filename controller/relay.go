@@ -52,6 +52,8 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 		err = relay.ResponsesHelper(c, info)
 	case relayconstant.RelayModeAlphaSearch:
 		err = relay.AlphaSearchHelper(c, info)
+	case relayconstant.RelayModeToolsTTS:
+		err = relay.DeepSeekTTSHelper(c, info)
 	case relayconstant.RelayModeToolsOCR:
 		err = relay.DeepSeekOCRHelper(c, info)
 	case relayconstant.RelayModeToolsSearch, relayconstant.RelayModeToolsFetch:

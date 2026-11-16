@@ -453,3 +453,285 @@ func TestDeepSeekOCRSettlesAfterClientDisconnect(t *testing.T) {
 	assert.False(t, settlement.refunded)
 	assert.Equal(t, "\n", writer.Body.String(), "heartbeat was flushed before the final response")
 }
+
+func deepSeekTTSContext(t *testing.T, writer http.ResponseWriter, body, baseURL string) *gin.Context {
+	t.Helper()
+	c := deepSeekOCRContext(t, writer, []byte(body), "application/json", baseURL)
+	c.Request.URL.Path = "/v1/tools/tts"
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, constant.DeepSeekTTSModel)
+	return c
+}
+
+func TestDeepSeekTTS(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+	batch, logConsume := common.BatchUpdateEnabled, common.LogConsumeEnabled
+	common.BatchUpdateEnabled, common.LogConsumeEnabled = true, false
+	t.Cleanup(func() { common.BatchUpdateEnabled, common.LogConsumeEnabled = batch, logConsume })
+	settings := config.GlobalConfig.Get("billing_setting").(*billing_setting.BillingSetting)
+	saved := *settings
+	savedPrices := ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		*settings = saved
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+	})
+	const defaultBody = `{"text":"你好 A🙂","voice_id":"stella","format":"pcm","filter_markdown":false,"character_count":10000}`
+	const audio = "\x01\x00\x00\xffaudio\x00"
+	for _, tt := range []struct {
+		name, expression, prices, response, contentType string
+		body, billingBody                               string
+		status, quota                                   int
+		wantError                                       bool
+	}{
+		{name: "weighted characters ignore token estimation and client quantity", quota: 79, response: audio},
+		{name: "text alone preserves provider defaults", body: `{"text":"你好 A🙂"}`, billingBody: `{}`, quota: 79, response: audio},
+		{name: "alternate voice", body: `{"text":"你好 A🙂","voice_id":"tide"}`, billingBody: `{"voice_id":"tide"}`, quota: 79, response: audio},
+		{name: "custom character price", expression: `tier("character", fixed(0.001)) * character_count`, quota: 3500, response: audio},
+		{name: "custom request price", expression: `tier("request", fixed(0.01))`, quota: 5000, response: audio},
+		{name: "explicit free expression", expression: `tier("character", fixed(0)) * character_count`, response: audio},
+		{name: "legacy request override", prices: `{"deepseek-tts":0.01}`, quota: 5000, response: audio},
+		{name: "legacy free override", prices: `{"deepseek-tts":0}`, response: audio},
+		{name: "empty audio refunds", wantError: true},
+		{name: "HTTP rejection refunds", status: 400, contentType: "application/json", response: `{"error":{"message":"invalid voice","type":"invalid_request_error"}}`, wantError: true},
+		{name: "HTTP 200 JSON error refunds", contentType: "application/json", response: `{"error":{"message":"synthesis failed","type":"server_error"}}`, wantError: true},
+		{name: "non-audio response refunds", contentType: "text/plain", response: "synthesis failed", wantError: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			body := tt.body
+			if body == "" {
+				body = defaultBody
+			}
+			billingBody := tt.billingBody
+			if billingBody == "" {
+				billingBody = `{"voice_id":"stella","format":"pcm","filter_markdown":false}`
+			}
+			*settings = billing_setting.BillingSetting{BillingMode: map[string]string{}, BillingExpr: map[string]string{}}
+			if tt.expression != "" {
+				settings.BillingMode[constant.DeepSeekTTSModel] = billing_setting.BillingModeTieredExpr
+				settings.BillingExpr[constant.DeepSeekTTSModel] = tt.expression
+			}
+			prices := tt.prices
+			if prices == "" {
+				prices = `{}`
+			}
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(prices))
+			var gotBody []byte
+			var gotPath, gotAuth string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath, gotAuth = r.URL.Path, r.Header.Get("Authorization")
+				gotBody, _ = io.ReadAll(r.Body)
+				contentType := tt.contentType
+				if contentType == "" {
+					contentType = "audio/pcm"
+				}
+				w.Header().Set("Content-Type", contentType)
+				w.Header().Set("Content-Disposition", `attachment; filename="speech.pcm"`)
+				if tt.status != 0 {
+					w.WriteHeader(tt.status)
+				}
+				_, _ = io.WriteString(w, tt.response)
+			}))
+			t.Cleanup(upstream.Close)
+			recorder := httptest.NewRecorder()
+			c := deepSeekTTSContext(t, recorder, body, upstream.URL)
+			request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+			require.NoError(t, err)
+			assert.Empty(t, request.GetTokenCountMeta().CombineText)
+			tts := request.(*dto.DeepSeekTTSRequest)
+			assert.Equal(t, 7, tts.CharacterCount)
+			if tt.body == "" {
+				require.NotNil(t, tts.FilterMarkdown)
+				assert.False(t, *tts.FilterMarkdown)
+			}
+			info, err := relaycommon.GenRelayInfo(c, types.RelayFormatDeepSeekTools, request, nil)
+			require.NoError(t, err)
+			price, err := helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
+			require.NoError(t, err)
+			if !tt.wantError {
+				assert.Equal(t, tt.quota, price.QuotaToPreConsume)
+			}
+			if info.BillingRequestInput != nil {
+				assert.JSONEq(t, billingBody, string(info.BillingRequestInput.Body))
+			}
+			settlement := &recordedSettlement{}
+			info.Billing = settlement
+			apiErr := RefundFailedRequestBilling(c, info, DeepSeekTTSHelper(c, info))
+			assert.Equal(t, "/v1/tools/tts", gotPath)
+			assert.Equal(t, "Bearer sk-test", gotAuth)
+			assert.Equal(t, body, string(gotBody))
+			if tt.wantError {
+				require.NotNil(t, apiErr)
+				assert.True(t, types.IsSkipRetryError(apiErr))
+				assert.True(t, settlement.refunded)
+				assert.Empty(t, settlement.settled)
+				assert.Empty(t, recorder.Body.String())
+				return
+			}
+			require.Nil(t, apiErr)
+			assert.Equal(t, []int{tt.quota}, settlement.settled)
+			assert.False(t, settlement.refunded)
+			assert.Equal(t, audio, recorder.Body.String())
+			assert.True(t, recorder.Flushed)
+			assert.Equal(t, "audio/pcm", recorder.Header().Get("Content-Type"))
+			assert.Equal(t, `attachment; filename="speech.pcm"`, recorder.Header().Get("Content-Disposition"))
+			other := service.GenerateTextOtherInfo(c, info, 0, 1, 0, 0, 0, info.PriceData.ModelPrice, -1)
+			assert.Equal(t, 7, other.Snapshot()["character_count"])
+			if info.TieredBillingSnapshot != nil {
+				ok, quota, result := service.TryTieredSettle(info, billingexpr.TokenParams{P: 1e12, C: 1e12})
+				require.True(t, ok)
+				assert.Equal(t, tt.quota, quota)
+				service.InjectTieredBillingInfo(other, info, result)
+				assert.Equal(t, 7, other.Snapshot()["character_count"])
+			}
+		})
+	}
+}
+
+func TestDeepSeekTTSValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+		count      int
+		invalid    bool
+	}{
+		{name: "missing text", body: `{"voice_id":"stella"}`, invalid: true},
+		{name: "whitespace", body: `{"text":"  ","voice_id":"stella"}`, invalid: true},
+		{name: "missing voice", body: `{"text":"hello"}`, count: 5},
+		{name: "empty voice", body: `{"text":"hello","voice_id":""}`, invalid: true},
+		{name: "unsupported voice", body: `{"text":"hello","voice_id":"unknown"}`, invalid: true},
+		{name: "wrong voice type", body: `{"text":"hello","voice_id":1}`, invalid: true},
+		{name: "documented maximum characters", body: `{"text":"` + strings.Repeat("a", 10000) + `"}`, count: 10000},
+		{name: "documented maximum request body", body: `{"text":"hello"}` + strings.Repeat(" ", (64<<10)-len(`{"text":"hello"}`)), count: 5},
+		{name: "oversized request body", body: `{"text":"hello","voice_id":"stella"}` + strings.Repeat(" ", 64<<10), invalid: true},
+		{name: "unsupported format", body: `{"text":"hello","voice_id":"stella","format":"mp3"}`, invalid: true},
+		{name: "wrong boolean type", body: `{"text":"hello","voice_id":"stella","filter_markdown":"false"}`, invalid: true},
+		{name: "default options", body: `{"text":"hello","voice_id":"stella"}`, count: 5},
+		{name: "Han extension and emoji", body: `{"text":"𠀀🙂","voice_id":"stella","format":"wav"}`, count: 3},
+		{name: "maximum Latin", body: `{"text":"` + strings.Repeat("a", dto.MaxTTSCharacters) + `","voice_id":"stella"}`, count: dto.MaxTTSCharacters},
+		{name: "maximum Han", body: `{"text":"` + strings.Repeat("中", dto.MaxTTSCharacters/2) + `","voice_id":"stella"}`, count: dto.MaxTTSCharacters},
+		{name: "too many Latin", body: `{"text":"` + strings.Repeat("a", dto.MaxTTSCharacters+1) + `","voice_id":"stella"}`, invalid: true},
+		{name: "too many Han", body: `{"text":"` + strings.Repeat("中", dto.MaxTTSCharacters/2+1) + `","voice_id":"stella"}`, invalid: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := deepSeekTTSContext(t, httptest.NewRecorder(), tt.body, "http://unused")
+			request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+			if tt.invalid {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, tt.count, request.(*dto.DeepSeekTTSRequest).CharacterCount)
+		})
+	}
+	t.Run("billing expression bounds", func(t *testing.T) {
+		expression, ok := billing_setting.GetBillingExpr(constant.DeepSeekTTSModel)
+		require.True(t, ok)
+		assert.True(t, billingexpr.UsesChatQuantities(expression), "task pricing must reject TTS character quantities")
+		for _, count := range []int{0, -1, 1, dto.MaxTTSCharacters, dto.MaxTTSCharacters + 1} {
+			cost, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, billingexpr.RequestInput{CharacterCount: &count})
+			if count < 1 || count > dto.MaxTTSCharacters {
+				require.ErrorContains(t, err, "character_count")
+				continue
+			}
+			require.NoError(t, err)
+			assert.InDelta(t, float64(count)*22.5, cost, 1e-9)
+			assert.Equal(t, &count, trace.CharacterCount)
+		}
+	})
+}
+
+func TestDeepSeekTTSSettlesAfterClientDisconnect(t *testing.T) {
+	service.InitHttpClient()
+	batch, logConsume := common.BatchUpdateEnabled, common.LogConsumeEnabled
+	common.BatchUpdateEnabled, common.LogConsumeEnabled = true, false
+	t.Cleanup(func() { common.BatchUpdateEnabled, common.LogConsumeEnabled = batch, logConsume })
+	firstChunk := make(chan struct{})
+	upstreamContext := make(chan error, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "audio/wav")
+		_, _ = io.WriteString(w, "RIFF")
+		w.(http.Flusher).Flush()
+		select {
+		case <-firstChunk:
+			upstreamContext <- r.Context().Err()
+			_, _ = io.WriteString(w, "audio after disconnect")
+		case <-r.Context().Done():
+			upstreamContext <- r.Context().Err()
+		}
+	}))
+	t.Cleanup(upstream.Close)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	writer := &ocrDisconnectWriter{ResponseRecorder: httptest.NewRecorder(), onHeartbeat: func() { cancel(); close(firstChunk) }}
+	c := deepSeekTTSContext(t, writer, `{"text":"你好 A🙂","voice_id":"stella"}`, upstream.URL)
+	c.Request = c.Request.WithContext(ctx)
+	request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+	require.NoError(t, err)
+	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatDeepSeekTools, request, nil)
+	require.NoError(t, err)
+	_, err = helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
+	require.NoError(t, err)
+	settlement := &recordedSettlement{}
+	info.Billing = settlement
+	require.Nil(t, DeepSeekTTSHelper(c, info))
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.NoError(t, <-upstreamContext)
+	assert.Equal(t, []int{79}, settlement.settled)
+	assert.False(t, settlement.refunded)
+	assert.Equal(t, "RIFF", writer.Body.String())
+}
+
+func TestDeepSeekTTSRejectsInvalidOverrideBeforeSubmission(t *testing.T) {
+	for _, tt := range []struct {
+		name, field, value, message string
+	}{
+		{name: "text changes", field: "text", value: "a changed billing quantity", message: "text cannot change after billing reservation"},
+		{name: "oversized body", field: "extra", value: strings.Repeat("a", dto.MaxTTSRequestSize), message: "request body must be at most 64 KiB"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := deepSeekTTSContext(t, httptest.NewRecorder(), `{"text":"hello"}`, "http://unused")
+			common.SetContextKey(c, constant.ContextKeyChannelParamOverride, map[string]any{tt.field: tt.value})
+			request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+			require.NoError(t, err)
+			info, err := relaycommon.GenRelayInfo(c, types.RelayFormatDeepSeekTools, request, nil)
+			require.NoError(t, err)
+			_, err = helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
+			require.NoError(t, err)
+			settlement := &recordedSettlement{}
+			info.Billing = settlement
+			apiErr := RefundFailedRequestBilling(c, info, DeepSeekTTSHelper(c, info))
+			require.NotNil(t, apiErr)
+			assert.Contains(t, apiErr.Error(), tt.message)
+			assert.True(t, settlement.refunded)
+			assert.Empty(t, settlement.settled)
+		})
+	}
+}
+
+func TestDeepSeekTTSInterruptedAudioKeepsCharacterCharge(t *testing.T) {
+	service.InitHttpClient()
+	batch, logConsume := common.BatchUpdateEnabled, common.LogConsumeEnabled
+	common.BatchUpdateEnabled, common.LogConsumeEnabled = true, false
+	t.Cleanup(func() { common.BatchUpdateEnabled, common.LogConsumeEnabled = batch, logConsume })
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.Header().Set("Content-Type", "audio/wav")
+		w.Header().Set("Content-Length", "1024")
+		_, _ = io.WriteString(w, "RIFF")
+	}))
+	t.Cleanup(upstream.Close)
+	recorder := httptest.NewRecorder()
+	c := deepSeekTTSContext(t, recorder, `{"text":"hello","voice_id":"stella"}`, upstream.URL)
+	request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+	require.NoError(t, err)
+	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatDeepSeekTools, request, nil)
+	require.NoError(t, err)
+	_, err = helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
+	require.NoError(t, err)
+	settlement := &recordedSettlement{}
+	info.Billing = settlement
+	require.Nil(t, DeepSeekTTSHelper(c, info))
+	assert.Equal(t, "RIFF", recorder.Body.String(), "do not append JSON to interrupted audio")
+	assert.Equal(t, []int{56}, settlement.settled)
+	assert.False(t, settlement.refunded)
+}

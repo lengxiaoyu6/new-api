@@ -78,12 +78,16 @@ export function RequestSimulation(props: RequestSimulationProps) {
   const timeId = useId()
   const pageCountId = useId()
   const [pageCount, setPageCount] = useState('1')
+  const characterCountId = useId()
+  const [characterCount, setCharacterCount] = useState('1')
   const imageCountId = useId()
   const [imageCount, setImageCount] = useState('1')
   const compiled = useMemo(
     () => compileBillingExpression(props.expression),
     [props.expression]
   )
+  const usesCharacterCount =
+    compiled.status === 'ready' && compiled.variables.has('character_count')
   const usesPageCount =
     compiled.status === 'ready' && compiled.variables.has('page_count')
   const usesImageCount =
@@ -174,6 +178,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
       }
     }
     return evaluateBillingExpression(props.expression, {
+      characterCount: Number(characterCount),
       pageCount: Number(pageCount),
       imageCount: Number(imageCount),
       tokens: props.tokens,
@@ -186,6 +191,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
     })
   }, [
     open,
+    characterCount,
     pageCount,
     imageCount,
     body,
@@ -240,6 +246,22 @@ export function RequestSimulation(props: RequestSimulationProps) {
               step={1}
               value={pageCount}
               onChange={(event) => setPageCount(event.target.value)}
+            />
+          </Field>
+        )}
+        {usesCharacterCount && (
+          <Field>
+            <FieldLabel htmlFor={characterCountId}>
+              {t('Billable character count')}
+            </FieldLabel>
+            <Input
+              id={characterCountId}
+              type='number'
+              min={1}
+              max={10000}
+              step={1}
+              value={characterCount}
+              onChange={(event) => setCharacterCount(event.target.value)}
             />
           </Field>
         )}

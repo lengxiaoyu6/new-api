@@ -315,3 +315,19 @@ test('shows actual OCR pages and the per-page rate in billing details', () => {
   expect(screen.getAllByText(/\/page/).length).toBeGreaterThan(0)
   queryClient.clear()
 })
+
+test('shows actual TTS characters and the per-character rate in billing details', () => {
+  const queryClient = renderDetails({
+    billing_mode: 'tiered_expr',
+    expr_b64: btoa('tier("character", fixed(0.0000225)) * character_count'),
+    billing_unit: 'request',
+    fixed_price: 0.0000225,
+    character_count: 2,
+    matched_tier: 'character',
+  })
+  expect(
+    screen.getByText('Billable character count').parentElement
+  ).toHaveTextContent('2')
+  expect(screen.getAllByText(/\/character/).length).toBeGreaterThan(0)
+  queryClient.clear()
+})

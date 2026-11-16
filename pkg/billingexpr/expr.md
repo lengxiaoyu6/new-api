@@ -178,6 +178,28 @@ in the snapshot and the actual quantity is recorded in the consume log.
 The pricing request context retains only `purpose`, never the uploaded file.
 A client disconnect does not cancel upstream recognition or successful settlement.
 
+### TTS Character Quantity
+
+`character_count` prices the native HTTP DeepSeek TTS endpoint separately from
+text or audio tokens. Its built-in expression is
+`tier("character", fixed(0.0000225)) * character_count` ($22.5 per million
+characters). Han characters count as two; other Unicode code points count as
+one. The supplied quantity must be an integer from 1 to
+`dto.MaxTTSCharacters` (10,000); it defaults to 1 outside TTS. Task usage
+expressions reject this chat quantity.
+
+Only `text` is required. `voice_id`, `format` and `filter_markdown` are optional;
+omitted fields stay omitted so DeepSeek applies its defaults. HTTP bodies,
+including bodies after parameter overrides, are bounded at 64 KiB.
+
+TTS reserves and settles the complete validated input quantity. The billing
+context contains voice, format and Markdown-filter options, without the input
+text. Parameter overrides and outbound hooks may change synthesis options but
+cannot change the text after reservation. Once an audio response begins, a
+client disconnect or partial audio response does not reduce its character
+charge. An empty, rejected or non-audio upstream response releases the
+reservation. Submitted synthesis requests are never replayed automatically.
+
 ### Built-in Functions
 
 | Function | Signature | Purpose |

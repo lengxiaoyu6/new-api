@@ -315,6 +315,7 @@ export interface LogOtherData {
   billing_unit?: 'token' | 'request'
   fixed_price?: number
   page_count?: number
+  character_count?: number
   image_count?: number
   expr_b64?: string
   matched_tier?: string

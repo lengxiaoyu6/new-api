@@ -61,6 +61,7 @@ export type VisualBillingDocument = {
   source: string
   root: VisualPricingNode
   pageCount?: boolean
+  characterCount?: boolean
   imageCount?: boolean
 }
 export type VisualBillingIssue = { id: string; message: string }
@@ -183,6 +184,7 @@ function readVisualPricing(node: ExpressionNode): VisualPricingNode | null {
       term.left.name === 'len' ||
       term.left.name === 'image_count' ||
       term.left.name === 'page_count' ||
+      term.left.name === 'character_count' ||
       term.right.kind !== 'literal' ||
       typeof term.right.value !== 'number' ||
       term.right.value < 0
@@ -211,13 +213,17 @@ function quantityPricingRoot(node: ExpressionNode): ExpressionNode | null {
   if (node.kind !== 'binary' || node.operator !== '*') return null
   if (
     node.right.kind === 'variable' &&
-    (node.right.name === 'image_count' || node.right.name === 'page_count')
+    (node.right.name === 'image_count' ||
+      node.right.name === 'page_count' ||
+      node.right.name === 'character_count')
   ) {
     return node.left
   }
   if (
     node.left.kind === 'variable' &&
-    (node.left.name === 'image_count' || node.left.name === 'page_count')
+    (node.left.name === 'image_count' ||
+      node.left.name === 'page_count' ||
+      node.left.name === 'character_count')
   ) {
     return node.right
   }
@@ -238,6 +244,8 @@ export function parseVisualBillingDocument(
     imageCount:
       pricing !== compiled.ast && compiled.variables.has('image_count'),
     pageCount: pricing !== compiled.ast && compiled.variables.has('page_count'),
+    characterCount:
+      pricing !== compiled.ast && compiled.variables.has('character_count'),
   }
   return serializeVisualBillingDocument(document).ok ? document : null
 }
@@ -497,7 +505,7 @@ export function serializeVisualBillingDocument(
   const issues: VisualBillingIssue[] = []
   let body = writeVisualPricing(document.root, document.source, issues)
   if (
-    (document.imageCount || document.pageCount) &&
+    (document.imageCount || document.pageCount || document.characterCount) &&
     document.root.kind === 'branch' &&
     document.root.origin?.kind !== 'conditional'
   ) {
@@ -518,7 +526,7 @@ export function serializeVisualBillingDocument(
     }
   }
   const pricingOrigin =
-    document.imageCount || document.pageCount
+    document.imageCount || document.pageCount || document.characterCount
       ? quantityPricingRoot(original.ast)
       : original.ast
   if (!pricingOrigin) {

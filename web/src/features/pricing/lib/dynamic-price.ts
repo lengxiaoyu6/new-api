@@ -70,7 +70,7 @@ export type DynamicPriceEntry = {
   formattedRange?: string
   minValue?: number
   maxValue?: number
-  unit: 'token' | BillingUsageUnit | 'request' | 'image' | 'page'
+  unit: 'token' | BillingUsageUnit | 'request' | 'image' | 'page' | 'character'
   unitLabel?: string | Record<string, string>
   variable?: BillingVar
   description?: string | Record<string, string>
@@ -130,6 +130,7 @@ export function getDynamicPriceUnitLabelKey(
   if (entry.unit === 'request') return 'request'
   if (entry.unit === 'image') return 'image'
   if (entry.unit === 'page') return 'page'
+  if (entry.unit === 'character') return 'character'
   return null
 }
 
@@ -302,6 +303,11 @@ export function getDynamicPriceEntries(
       label = 'Price per page'
       shortLabel = 'Per page'
       unit = 'page'
+    }
+    if (tier.characterCount) {
+      label = 'Price per character'
+      shortLabel = 'Per character'
+      unit = 'character'
     }
     return [
       {

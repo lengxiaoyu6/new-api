@@ -91,6 +91,27 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 	}
 
+	if request, tts := info.Request.(*dto.DeepSeekTTSRequest); tts {
+		count := request.CharacterCount
+		metadata := map[string]any{}
+		if request.VoiceID != nil {
+			metadata["voice_id"] = *request.VoiceID
+		}
+		if request.Format != nil {
+			metadata["format"] = *request.Format
+		}
+		if request.FilterMarkdown != nil {
+			metadata["filter_markdown"] = *request.FilterMarkdown
+		}
+		body, err := common.Marshal(metadata)
+		if err != nil {
+			return hosttypes.PriceData{}, err
+		}
+		info.BillingRequestInput = &billingexpr.RequestInput{
+			Body: body, Headers: cloneStringMap(info.RequestHeaders), CharacterCount: &count,
+		}
+	}
+
 	// Check if this model uses tiered_expr billing. The selected channel profile
 	// has precedence over the model-level definition.
 	definition, definitionErr := billingDefinitionFromContext(c, billingModelName)
@@ -103,6 +124,10 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 	if _, ocr := info.Request.(*dto.DeepSeekOCRRequest); ocr && !usePrice {
 		return hosttypes.PriceData{}, errors.New("OCR requires per-page or per-request pricing; token ratios are not supported")
+	}
+
+	if _, tts := info.Request.(*dto.DeepSeekTTSRequest); tts && !usePrice {
+		return hosttypes.PriceData{}, errors.New("TTS requires per-character or per-request pricing; token ratios are not supported")
 	}
 
 	var preConsumedQuota int
@@ -461,6 +486,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 
 	snapshot := &billingexpr.BillingSnapshot{
 		EstimatedPageCount:        trace.PageCount,
+		EstimatedCharacterCount:   trace.CharacterCount,
 		EstimatedImageCount:       trace.ImageCount,
 		BillingMode:               billing_setting.BillingModeTieredExpr,
 		ModelName:                 billingModelName,

@@ -124,6 +124,10 @@ func SetRelayRouter(router *gin.Engine) {
 			controller.Relay(c, types.RelayFormatDeepSeekTools)
 		})
 
+		httpRouter.POST("/tools/tts", func(c *gin.Context) {
+			controller.Relay(c, types.RelayFormatDeepSeekTools)
+		})
+
 		httpRouter.POST("/tools/ocr", func(c *gin.Context) {
 			controller.Relay(c, types.RelayFormatDeepSeekTools)
 		})

@@ -16,6 +16,8 @@ type RequestInput struct {
 	ImageCount *int
 	// PageCount is the bounded OCR quantity, independent of reference-only tokens.
 	PageCount *int
+	// CharacterCount is the bounded weighted input quantity for native TTS.
+	CharacterCount *int
 }
 
 // TokenParams holds all token dimensions passed into an Expr evaluation.
@@ -52,13 +54,14 @@ const (
 
 // TraceResult holds side-channel info captured while an expression runs.
 type TraceResult struct {
-	PageCount    *int               `json:"page_count,omitempty"`
-	ImageCount   *int               `json:"image_count,omitempty"`
-	BillingUnit  BillingUnit        `json:"billing_unit"`
-	FixedPrice   *float64           `json:"fixed_price,omitempty"`
-	MatchedTier  string             `json:"matched_tier"`
-	RequestRules []RequestRuleTrace `json:"request_rules,omitempty"`
-	Cost         float64            `json:"cost"`
+	PageCount      *int               `json:"page_count,omitempty"`
+	CharacterCount *int               `json:"character_count,omitempty"`
+	ImageCount     *int               `json:"image_count,omitempty"`
+	BillingUnit    BillingUnit        `json:"billing_unit"`
+	FixedPrice     *float64           `json:"fixed_price,omitempty"`
+	MatchedTier    string             `json:"matched_tier"`
+	RequestRules   []RequestRuleTrace `json:"request_rules,omitempty"`
+	Cost           float64            `json:"cost"`
 }
 
 // BillingSnapshot captures billing state at pre-consume time. Expression and
@@ -86,6 +89,7 @@ type BillingSnapshot struct {
 	ProfileSource             string            `json:"profile_source,omitempty"`
 	ChannelID                 int               `json:"channel_id,omitempty"`
 	EstimatedPageCount        *int              `json:"estimated_page_count,omitempty"`
+	EstimatedCharacterCount   *int              `json:"estimated_character_count,omitempty"`
 	EstimatedImageCount       *int              `json:"estimated_image_count,omitempty"`
 	EstimatedBillingUnit      BillingUnit       `json:"estimated_billing_unit,omitempty"`
 	EstimatedFixedPrice       *float64          `json:"estimated_fixed_price,omitempty"`
@@ -98,6 +102,7 @@ type TieredResult struct {
 	// the shared injection path, not as additional snapshot state.
 	BillingTokens          *TokenParams       `json:"-"`
 	PageCount              *int               `json:"page_count,omitempty"`
+	CharacterCount         *int               `json:"character_count,omitempty"`
 	ImageCount             *int               `json:"image_count,omitempty"`
 	BillingUnit            BillingUnit        `json:"billing_unit"`
 	FixedPrice             *float64           `json:"fixed_price,omitempty"`

@@ -274,3 +274,31 @@ test('simulates OCR pages and rejects quantities above the provider limit', asyn
     'page_count must be between 1 and 1000'
   )
 })
+
+test('simulates TTS characters and rejects quantities above the provider limit', async () => {
+  render(
+    <RequestSimulation
+      expression='tier("character", fixed(0.0000225)) * character_count'
+      mode='token'
+      currency={USD_PRICING_CURRENCY}
+    />
+  )
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Request simulation' }))
+  const count = screen.getByRole('spinbutton', {
+    name: 'Billable character count',
+  })
+  fireEvent.change(count, { target: { value: '2' } })
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $0.000045'
+  )
+  fireEvent.change(count, { target: { value: '10000' } })
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $0.225'
+  )
+  fireEvent.change(count, { target: { value: '10001' } })
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'character_count must be between 1 and 10000'
+  )
+})

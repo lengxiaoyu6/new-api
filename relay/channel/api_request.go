@@ -384,7 +384,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
-	if info.RelayMode == constant.RelayModeToolsOCR {
+	if info.RelayMode == constant.RelayModeToolsOCR || info.RelayMode == constant.RelayModeToolsTTS {
 		req = req.WithContext(c.Request.Context())
 	}
 	ApplyUpstreamBodyMetadata(req, requestBody)

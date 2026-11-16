@@ -1265,6 +1265,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 value={formatNumber(other.page_count)}
               />
             )}
+            {other.character_count !== undefined && (
+              <DetailRow
+                label={t('Billable character count')}
+                value={formatNumber(other.character_count)}
+              />
+            )}
             {other.image_count !== undefined && (
               <DetailRow
                 label={t('Billable image count')}

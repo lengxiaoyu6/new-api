@@ -731,3 +731,93 @@ describe('OCR page pricing', () => {
     ])
   })
 })
+
+describe('TTS character pricing', () => {
+  const expression = 'tier("character", fixed(0.0000225)) * character_count'
+
+  test('evaluates actual characters independently of reference tokens and displays the per-character rate', () => {
+    expect(
+      evaluateBillingExpression(expression, { characterCount: 2 })
+    ).toMatchObject({
+      status: 'success',
+      cost: 45,
+      characterCount: 2,
+      billingUnit: 'request',
+    })
+    expect(parseTiersFromExpr(expression)).toEqual([
+      {
+        label: 'character',
+        conditions: [],
+        billingUnit: 'request',
+        fixedPrice: 0.0000225,
+        characterCount: true,
+      },
+    ])
+    expect(
+      getTieredBillingSummary({
+        billing_mode: 'tiered_expr',
+        expr_b64: btoa(expression),
+        billing_unit: 'request',
+        fixed_price: 0.0000225,
+        matched_tier: 'character',
+        character_count: 2,
+      })?.priceEntries
+    ).toEqual([
+      {
+        field: 'fixedPrice',
+        shortLabel: 'Per character',
+        price: 0.0000225,
+        unit: 'character',
+      },
+    ])
+  })
+
+  test('accepts the documented maximum of 10,000 characters', () => {
+    expect(
+      evaluateBillingExpression(expression, { characterCount: 10000 })
+    ).toMatchObject({
+      status: 'success',
+      cost: 225000,
+      characterCount: 10000,
+    })
+  })
+
+  test.each([-1, 0, 1.5, 10001])(
+    'rejects invalid character count %s',
+    (characterCount) => {
+      expect(
+        evaluateBillingExpression(expression, { characterCount })
+      ).toMatchObject({ status: 'invalid' })
+    }
+  )
+
+  test('editing a character price preserves its quantity multiplier', () => {
+    const document = parseVisualBillingDocument(expression)
+    assert(document && document.root.kind === 'tier')
+    document.root.fixedPrice = '0.001'
+    expect(serializeVisualBillingDocument(document)).toEqual({
+      ok: true,
+      source: expression.replace('0.0000225', '0.001'),
+    })
+  })
+
+  test('a custom request price remains per-call when the log contains actual TTS characters', () => {
+    expect(
+      getTieredBillingSummary({
+        billing_mode: 'tiered_expr',
+        expr_b64: btoa('tier("request", fixed(0.01))'),
+        billing_unit: 'request',
+        fixed_price: 0.01,
+        matched_tier: 'request',
+        character_count: 2,
+      })?.priceEntries
+    ).toEqual([
+      {
+        field: 'fixedPrice',
+        shortLabel: 'Per-call',
+        price: 0.01,
+        unit: 'request',
+      },
+    ])
+  })
+})

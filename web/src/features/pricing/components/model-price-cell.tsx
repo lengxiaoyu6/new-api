@@ -124,7 +124,8 @@ export function ModelPriceCell(props: {
       (entry) =>
         entry.unit === 'request' ||
         entry.unit === 'image' ||
-        entry.unit === 'page'
+        entry.unit === 'page' ||
+        entry.unit === 'character'
     )
     metrics = dynamic.primaryEntries
       .slice(0, hasRequestPrice ? 3 : 2)

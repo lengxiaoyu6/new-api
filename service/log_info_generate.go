@@ -110,6 +110,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	other.SetPublic("cache_tokens", cacheTokens)
 	other.SetPublic("cache_ratio", cacheRatio)
 	other.SetPublic("model_price", modelPrice)
+	if relayInfo.BillingCharacterCount != nil {
+		other.SetPublic("character_count", *relayInfo.BillingCharacterCount)
+	}
 	if relayInfo.BillingPageCount != nil {
 		other.SetPublic("page_count", *relayInfo.BillingPageCount)
 	}
@@ -379,6 +382,9 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 				"ai": tokens.AI, "ao": tokens.AO,
 			})
 		}
+		if result.CharacterCount != nil {
+			other.SetPublic("character_count", *result.CharacterCount)
+		}
 		if result.PageCount != nil {
 			other.SetPublic("page_count", *result.PageCount)
 		}
@@ -396,6 +402,9 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 			other.SetPublic("request_rules", result.RequestRules)
 		}
 	} else if snap.EstimatedBillingUnit != "" {
+		if snap.EstimatedCharacterCount != nil {
+			other.SetPublic("character_count", *snap.EstimatedCharacterCount)
+		}
 		if snap.EstimatedPageCount != nil {
 			other.SetPublic("page_count", *snap.EstimatedPageCount)
 		}

@@ -111,6 +111,7 @@ function PriceField({
 
 type TierPriceFieldsProps = {
   pageCount?: boolean
+  characterCount?: boolean
   imageCount?: boolean
   billingUnit?: 'token' | 'request'
   fixedPrice?: string
@@ -173,6 +174,11 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
     fixedLabel = t('Price per page')
     billingLabel = t('Per page')
     fixedUnit = t('page')
+  }
+  if (props.characterCount) {
+    fixedLabel = t('Price per character')
+    billingLabel = t('Per character')
+    fixedUnit = t('character')
   }
   const billingControl = props.onBillingUnitChange && (
     <Select

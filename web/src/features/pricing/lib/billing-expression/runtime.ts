@@ -259,6 +259,17 @@ class BillingRuntime {
         }
         return { value }
       }
+      if (node.name === 'character_count') {
+        const value = this.context.characterCount ?? 1
+        if (!Number.isInteger(value) || value < 1 || value > 10000) {
+          throw new BillingExpressionError({
+            code: 'number',
+            detail: 'character_count must be between 1 and 10000',
+            position: node.start,
+          })
+        }
+        return { value }
+      }
       if (node.name === 'image_count') {
         const value = this.context.imageCount ?? 1
         if (!Number.isInteger(value) || value < 1 || value > 128) {
@@ -571,6 +582,9 @@ export function evaluateBillingExpression(
       billingUnit: runtime.billingUnit,
       ...(compiled.variables.has('page_count')
         ? { pageCount: context.pageCount ?? 1 }
+        : {}),
+      ...(compiled.variables.has('character_count')
+        ? { characterCount: context.characterCount ?? 1 }
         : {}),
       ...(compiled.variables.has('image_count')
         ? { imageCount: context.imageCount ?? 1 }

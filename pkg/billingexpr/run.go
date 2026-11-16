@@ -78,21 +78,33 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		trace.PageCount = &pageCount
 	}
 
+	characterCount := 1
+	if usedVars["character_count"] {
+		if request.CharacterCount != nil {
+			characterCount = *request.CharacterCount
+		}
+		if characterCount < 1 || characterCount > dto.MaxTTSCharacters {
+			return 0, trace, fmt.Errorf("character_count must be between 1 and %d", dto.MaxTTSCharacters)
+		}
+		trace.CharacterCount = &characterCount
+	}
+
 	env := map[string]any{
-		"page_count":  float64(pageCount),
-		"image_count": float64(imageCount),
-		"p":           params.P,
-		"c":           params.C,
-		"len":         params.Len,
-		"cr":          params.CR,
-		"cc":          params.CC,
-		"cc1h":        params.CC1h,
-		"cc12h":       params.CC12h,
-		"img":         params.Img,
-		"img_cr":      params.ImgCR,
-		"img_o":       params.ImgO,
-		"ai":          params.AI,
-		"ao":          params.AO,
+		"character_count": float64(characterCount),
+		"page_count":      float64(pageCount),
+		"image_count":     float64(imageCount),
+		"p":               params.P,
+		"c":               params.C,
+		"len":             params.Len,
+		"cr":              params.CR,
+		"cc":              params.CC,
+		"cc1h":            params.CC1h,
+		"cc12h":           params.CC12h,
+		"img":             params.Img,
+		"img_cr":          params.ImgCR,
+		"img_o":           params.ImgO,
+		"ai":              params.AI,
+		"ao":              params.AO,
 		"tier": func(name string, value float64) float64 {
 			trace.MatchedTier = name
 			trace.Cost = value

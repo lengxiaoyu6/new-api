@@ -53,6 +53,7 @@ const (
 	RelayModeToolsSearch
 	RelayModeToolsFetch
 	RelayModeToolsOCR
+	RelayModeToolsTTS
 )
 
 func Path2RelayMode(path string) int {
@@ -83,6 +84,8 @@ func Path2RelayMode(path string) int {
 		relayMode = RelayModeToolsSearch
 	} else if strings.HasPrefix(path, "/v1/tools/fetch") {
 		relayMode = RelayModeToolsFetch
+	} else if strings.HasPrefix(path, "/v1/tools/tts") {
+		relayMode = RelayModeToolsTTS
 	} else if strings.HasPrefix(path, "/v1/tools/ocr") {
 		relayMode = RelayModeToolsOCR
 	} else if strings.HasPrefix(path, "/v1/audio/speech") {

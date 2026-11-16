@@ -35,6 +35,7 @@ export const BILLING_VARIABLES = [
   ...TOKEN_VARIABLES,
   'image_count',
   'page_count',
+  'character_count',
 ] as const
 export type BillingVariable = (typeof BILLING_VARIABLES)[number]
 export const TIME_FUNCTIONS = [
@@ -131,6 +132,7 @@ export type ExpressionFailure = {
 export type CompilationResult = CompiledBillingExpression | ExpressionFailure
 export type BillingSimulationContext = {
   pageCount?: number
+  characterCount?: number
   imageCount?: number
   /** Already normalized billable counts; no implicit cache subtraction. */
   tokens?: Partial<Record<TokenVariable, number>>
@@ -148,6 +150,7 @@ export type BillingEvaluationResult =
       billingUnit: 'token' | 'request'
       fixedPrice?: number
       pageCount?: number
+      characterCount?: number
       imageCount?: number
       matchedTier: string
       requestRules: BillingRequestRule[]

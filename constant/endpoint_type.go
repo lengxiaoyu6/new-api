@@ -14,6 +14,7 @@ const (
 	EndpointTypeDeepSeekToolsSearch   = types.EndpointTypeDeepSeekToolsSearch
 	EndpointTypeDeepSeekToolsFetch    = types.EndpointTypeDeepSeekToolsFetch
 	EndpointTypeDeepSeekToolsOCR      = types.EndpointTypeDeepSeekToolsOCR
+	EndpointTypeDeepSeekToolsTTS      = types.EndpointTypeDeepSeekToolsTTS
 	EndpointTypeAnthropic             = types.EndpointTypeAnthropic
 	EndpointTypeGemini                = types.EndpointTypeGemini
 	EndpointTypeJinaRerank            = types.EndpointTypeJinaRerank
@@ -28,4 +29,5 @@ const (
 	DeepSeekSearchModel = "deepseek-search"
 	DeepSeekFetchModel  = "deepseek-fetch"
 	DeepSeekOCRModel    = "deepseek-ocr"
+	DeepSeekTTSModel    = "deepseek-tts"
 )
