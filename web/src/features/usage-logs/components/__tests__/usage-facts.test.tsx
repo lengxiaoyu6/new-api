@@ -331,3 +331,19 @@ test('shows actual TTS characters and the per-character rate in billing details'
   expect(screen.getAllByText(/\/character/).length).toBeGreaterThan(0)
   queryClient.clear()
 })
+
+test('shows measured ASR seconds and the per-second price', () => {
+  const queryClient = renderDetails({
+    billing_mode: 'tiered_expr',
+    expr_b64: btoa('tier("second", fixed(0.001)) * audio_seconds'),
+    billing_unit: 'request',
+    fixed_price: 0.001,
+    audio_seconds: 4,
+    matched_tier: 'second',
+  })
+  expect(
+    screen.getByText('Billable audio seconds').parentElement
+  ).toHaveTextContent('4')
+  expect(screen.getAllByText(/\/s/).length).toBeGreaterThan(0)
+  queryClient.clear()
+})

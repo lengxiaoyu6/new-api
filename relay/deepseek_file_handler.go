@@ -23,11 +23,10 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// DeepSeekOCRHelper forwards the validated multipart body unchanged. DeepSeek
-// continues recognition after a client disconnect, so the bounded upstream
-// context and settlement survive that disconnect. Submission is never replayed
-// automatically when its outcome is uncertain.
-func DeepSeekOCRHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
+// DeepSeekFileHelper forwards native OCR and ASR multipart bodies unchanged.
+// Recognition and settlement survive a downstream disconnect, and submitted
+// recognition requests are never replayed automatically.
+func DeepSeekFileHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	info.InitChannelMeta(c)
 	switch info.ChannelType {
 	case constant.ChannelTypeDeepSeek, constant.ChannelTypeNewAPI,
@@ -37,15 +36,16 @@ func DeepSeekOCRHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 			return types.NewError(fmt.Errorf("channel does not support %s", c.Request.URL.Path), types.ErrorCodeInvalidRequest)
 		}
 	}
-	request, ok := info.Request.(*dto.DeepSeekOCRRequest)
-	if !ok {
-		return types.NewError(errors.New("invalid OCR request"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+	_, ocr := info.Request.(*dto.DeepSeekOCRRequest)
+	_, asr := info.Request.(*dto.DeepSeekASRRequest)
+	if !ocr && !asr {
+		return types.NewError(errors.New("invalid multipart tool request"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
-	if err := helper.ModelMappedHelper(c, info, request); err != nil {
+	if err := helper.ModelMappedHelper(c, info, info.Request); err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
 	if len(info.ParamOverride) > 0 {
-		return types.NewError(errors.New("parameter overrides are not supported for OCR multipart requests"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+		return types.NewError(errors.New("parameter overrides are not supported for multipart tool requests"), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
 	if apiErr := requestplugin.PassThrough(c, info, nil); apiErr != nil {
 		return apiErr
@@ -116,6 +116,23 @@ func DeepSeekOCRHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 		resp.StatusCode = http.StatusBadGateway
 		apiErr := service.RelayErrorHandler(ctx, resp, false)
 		return types.NewError(apiErr, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
+	}
+	if asr {
+		var result struct {
+			Text       *string `json:"text"`
+			DurationMS int64   `json:"duration_ms"`
+		}
+		if err := common.Unmarshal(responseBody, &result); err != nil {
+			return types.NewError(err, types.ErrorCodeBadResponseBody, types.ErrOptionWithSkipRetry())
+		}
+		if result.Text == nil || result.DurationMS <= 0 || result.DurationMS > dto.MaxASRDurationSeconds*1000 {
+			return types.NewError(errors.New("invalid ASR text or duration_ms"), types.ErrorCodeBadResponseBody, types.ErrOptionWithSkipRetry())
+		}
+		seconds := int((result.DurationMS + 999) / 1000)
+		info.BillingAudioSeconds = &seconds
+		_, _ = c.Writer.Write(responseBody)
+		service.PostTextConsumeQuota(c, info, &dto.Usage{}, nil)
+		return nil
 	}
 	var result struct {
 		Object    string `json:"object"`

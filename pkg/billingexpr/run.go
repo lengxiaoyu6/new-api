@@ -89,8 +89,20 @@ func runProgram(prog *vm.Program, requestRules []RequestRuleTrace, usedVars map[
 		trace.CharacterCount = &characterCount
 	}
 
+	audioSeconds := 1
+	if usedVars["audio_seconds"] {
+		if request.AudioSeconds != nil {
+			audioSeconds = *request.AudioSeconds
+		}
+		if audioSeconds < 1 || audioSeconds > dto.MaxASRDurationSeconds {
+			return 0, trace, fmt.Errorf("audio_seconds must be between 1 and %d", dto.MaxASRDurationSeconds)
+		}
+		trace.AudioSeconds = &audioSeconds
+	}
+
 	env := map[string]any{
 		"character_count": float64(characterCount),
+		"audio_seconds":   float64(audioSeconds),
 		"page_count":      float64(pageCount),
 		"image_count":     float64(imageCount),
 		"p":               params.P,

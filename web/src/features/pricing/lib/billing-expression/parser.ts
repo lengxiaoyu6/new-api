@@ -447,6 +447,7 @@ function validateFixedPricingTree(
         factor.kind === 'variable' &&
         (factor.name === 'image_count' ||
           factor.name === 'page_count' ||
+          factor.name === 'audio_seconds' ||
           factor.name === 'character_count')
       ) {
         validateFixedPricingTree(pricing, rules)

@@ -3,6 +3,8 @@ package relay
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -27,6 +29,208 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func deepSeekASRWAV(seconds int) []byte {
+	dataSize := seconds * 8000 * 2
+	audio := make([]byte, 44+dataSize)
+	copy(audio, "RIFF")
+	binary.LittleEndian.PutUint32(audio[4:], uint32(36+dataSize))
+	copy(audio[8:], "WAVEfmt ")
+	binary.LittleEndian.PutUint32(audio[16:], 16)
+	binary.LittleEndian.PutUint16(audio[20:], 1)
+	binary.LittleEndian.PutUint16(audio[22:], 1)
+	binary.LittleEndian.PutUint32(audio[24:], 8000)
+	binary.LittleEndian.PutUint32(audio[28:], 16000)
+	binary.LittleEndian.PutUint16(audio[32:], 2)
+	binary.LittleEndian.PutUint16(audio[34:], 16)
+	copy(audio[36:], "data")
+	binary.LittleEndian.PutUint32(audio[40:], uint32(dataSize))
+	return audio
+}
+
+func deepSeekASRContext(t *testing.T, writer http.ResponseWriter, audio []byte, baseURL string, extraFields ...string) (*gin.Context, []byte) {
+	t.Helper()
+	var body bytes.Buffer
+	form := multipart.NewWriter(&body)
+	// Format is determined from content, even with an unrelated extension.
+	file, err := form.CreateFormFile("file", "speech.bin")
+	require.NoError(t, err)
+	_, err = file.Write(audio)
+	require.NoError(t, err)
+	for _, field := range extraFields {
+		require.NoError(t, form.WriteField(field, "unexpected"))
+	}
+	require.NoError(t, form.Close())
+	c := deepSeekOCRContext(t, writer, body.Bytes(), form.FormDataContentType(), baseURL)
+	c.Request.URL.Path = "/v1/tools/asr"
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, constant.DeepSeekASRModel)
+	return c, body.Bytes()
+}
+
+func TestDeepSeekASR(t *testing.T) {
+	service.InitHttpClient()
+	gin.SetMode(gin.TestMode)
+	batch, logConsume := common.BatchUpdateEnabled, common.LogConsumeEnabled
+	common.BatchUpdateEnabled, common.LogConsumeEnabled = true, false
+	t.Cleanup(func() { common.BatchUpdateEnabled, common.LogConsumeEnabled = batch, logConsume })
+	settings := config.GlobalConfig.Get("billing_setting").(*billing_setting.BillingSetting)
+	saved, savedPrices := *settings, ratio_setting.ModelPrice2JSONString()
+	t.Cleanup(func() {
+		*settings = saved
+		require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(savedPrices))
+	})
+	tests := []struct {
+		name, response, expression, prices string
+		status, quota, reservation         int
+		wantError                          bool
+	}{
+		{name: "fractional second rounds up", response: `{"request_id":"req","text":"hello","duration_ms":3200}`, quota: 32, reservation: 967},
+		{name: "whole second", response: `{"text":"hello","duration_ms":1000}`, quota: 8, reservation: 967},
+		{name: "maximum duration", response: `{"text":"hello","duration_ms":120000}`, quota: 967, reservation: 967},
+		{name: "silent transcript still bills audio", response: `{"text":"","duration_ms":1}`, quota: 8, reservation: 967},
+		{name: "custom per-second price", response: `{"text":"hello","duration_ms":3200}`, expression: `tier("second", fixed(0.001)) * audio_seconds`, quota: 2000, reservation: 60000},
+		{name: "custom per-request price", response: `{"text":"hello","duration_ms":3200}`, expression: `tier("request", fixed(0.01))`, quota: 5000, reservation: 5000},
+		{name: "explicit free expression", response: `{"text":"hello","duration_ms":3200}`, expression: `tier("second", fixed(0)) * audio_seconds`},
+		{name: "legacy per-request override", response: `{"text":"hello","duration_ms":3200}`, prices: `{"deepseek-asr":0.01}`, quota: 5000, reservation: 5000},
+		{name: "legacy free override", response: `{"text":"hello","duration_ms":3200}`, prices: `{"deepseek-asr":0}`},
+		{name: "zero duration", response: `{"text":"","duration_ms":0}`, wantError: true},
+		{name: "negative duration", response: `{"text":"","duration_ms":-1}`, wantError: true},
+		{name: "oversized duration", response: `{"text":"","duration_ms":120001}`, wantError: true},
+		{name: "fractional milliseconds", response: `{"text":"","duration_ms":1.5}`, wantError: true},
+		{name: "overflow duration", response: `{"text":"","duration_ms":18446744073709551615}`, wantError: true},
+		{name: "missing duration", response: `{"text":"hello"}`, wantError: true},
+		{name: "missing transcript", response: `{"duration_ms":1000}`, wantError: true},
+		{name: "HTTP 200 error", response: `{"error":{"message":"recognition failed","type":"server_error"}}`, wantError: true},
+		{name: "busy upstream", status: 503, response: `{"error":{"message":"busy","type":"server_error"}}`, wantError: true},
+		{name: "invalid JSON", response: `{"text":`, wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			*settings = billing_setting.BillingSetting{BillingMode: map[string]string{}, BillingExpr: map[string]string{}}
+			if tt.expression != "" {
+				settings.BillingMode[constant.DeepSeekASRModel] = billing_setting.BillingModeTieredExpr
+				settings.BillingExpr[constant.DeepSeekASRModel] = tt.expression
+			}
+			prices := tt.prices
+			if prices == "" {
+				prices = `{}`
+			}
+			require.NoError(t, ratio_setting.UpdateModelPriceByJSONString(prices))
+			var gotBody []byte
+			var gotPath, gotContentType, gotAuth string
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotPath, gotContentType, gotAuth = r.URL.Path, r.Header.Get("Content-Type"), r.Header.Get("Authorization")
+				gotBody, _ = io.ReadAll(r.Body)
+				w.Header().Set("Content-Type", "application/json")
+				if tt.status != 0 {
+					w.WriteHeader(tt.status)
+				}
+				_, _ = io.WriteString(w, tt.response)
+			}))
+			t.Cleanup(upstream.Close)
+			recorder := httptest.NewRecorder()
+			c, body := deepSeekASRContext(t, recorder, deepSeekASRWAV(1), upstream.URL)
+			request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+			require.NoError(t, err)
+			assert.Empty(t, request.GetTokenCountMeta().CombineText)
+			info, err := relaycommon.GenRelayInfo(c, types.RelayFormatDeepSeekTools, request, nil)
+			require.NoError(t, err)
+			price, err := helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
+			require.NoError(t, err)
+			reservation := tt.reservation
+			if tt.wantError {
+				reservation = 967
+			}
+			assert.Equal(t, reservation, price.QuotaToPreConsume)
+			assert.Empty(t, info.BillingRequestInput.Body, "file data must stay outside pricing snapshots")
+			settlement := &recordedSettlement{}
+			info.Billing = settlement
+			apiErr := RefundFailedRequestBilling(c, info, DeepSeekFileHelper(c, info))
+			assert.Equal(t, "/v1/tools/asr", gotPath)
+			assert.Equal(t, c.Request.Header.Get("Content-Type"), gotContentType)
+			assert.Equal(t, "Bearer sk-test", gotAuth)
+			assert.Equal(t, body, gotBody)
+			if tt.wantError {
+				require.NotNil(t, apiErr)
+				assert.True(t, types.IsSkipRetryError(apiErr))
+				assert.True(t, settlement.refunded)
+				assert.Empty(t, settlement.settled)
+				return
+			}
+			require.Nil(t, apiErr)
+			assert.Equal(t, []int{tt.quota}, settlement.settled)
+			assert.False(t, settlement.refunded)
+			assert.Equal(t, tt.response, recorder.Body.String())
+			other := service.GenerateTextOtherInfo(c, info, 0, 1, 0, 0, 0, info.PriceData.ModelPrice, -1)
+			if info.TieredBillingSnapshot != nil {
+				if tt.expression == "" || strings.Contains(tt.expression, "audio_seconds") {
+					assert.Equal(t, 120, *info.TieredBillingSnapshot.EstimatedAudioSeconds)
+				}
+				settled, quota, result := service.TryTieredSettle(info, billingexpr.TokenParams{P: 1e12, C: 1e12})
+				require.True(t, settled)
+				assert.Equal(t, tt.quota, quota)
+				service.InjectTieredBillingInfo(other, info, result)
+			}
+			assert.Equal(t, *info.BillingAudioSeconds, other.Snapshot()["audio_seconds"])
+		})
+	}
+}
+
+func TestDeepSeekASRValidation(t *testing.T) {
+	// One second of mono Opus silence, encoded by FFmpeg; no runtime encoder is needed.
+	opus, err := base64.StdEncoding.DecodeString("T2dnUwACAAAAAAAAAADrbdE9AAAAAOTU3TwBE09wdXNIZWFkAQE4AYC7AAAAAABPZ2dTAAAAAAAAAAAAAOtt0T0BAAAAtcmVZAE/T3B1c1RhZ3MNAAAATGF2ZjU4Ljc2LjEwMAEAAAAeAAAAZW5jb2Rlcj1MYXZjNTguMTM0LjEwMCBsaWJvcHVzT2dnUwAAgLsAAAAAAADrbdE9AgAAAOb9HAIyBwYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYIC+Y7I6tgCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GCAissw7GT2dnUwAEuLwAAAAAAADrbdE9AwAAANDGIG4BBggIrLMOxg==")
+	require.NoError(t, err)
+	nonPCM := deepSeekASRWAV(1)
+	binary.LittleEndian.PutUint16(nonPCM[20:], 3)
+	wrongBits := deepSeekASRWAV(1)
+	binary.LittleEndian.PutUint16(wrongBits[34:], 24)
+	tests := []struct {
+		name   string
+		audio  []byte
+		fields []string
+		valid  bool
+	}{
+		{name: "Ogg Opus", audio: opus, valid: true},
+		{name: "float WAV", audio: nonPCM},
+		{name: "24-bit WAV", audio: wrongBits},
+		{name: "PCM WAV", audio: deepSeekASRWAV(1), valid: true},
+		{name: "maximum duration", audio: deepSeekASRWAV(120), valid: true},
+		{name: "too long", audio: deepSeekASRWAV(121)},
+		{name: "unsupported content", audio: []byte("not a WAV or Opus file")},
+		{name: "empty file"},
+		{name: "file too large", audio: make([]byte, dto.MaxASRFileSize+1)},
+		{name: "unexpected model", audio: deepSeekASRWAV(1), fields: []string{"model"}},
+		{name: "unexpected language", audio: deepSeekASRWAV(1), fields: []string{"language"}},
+		{name: "unexpected multiplier", audio: deepSeekASRWAV(1), fields: []string{"audio_seconds"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _ := deepSeekASRContext(t, httptest.NewRecorder(), tt.audio, "", tt.fields...)
+			_, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+			if tt.valid {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+			}
+		})
+	}
+	t.Run("bounded audio quantities", func(t *testing.T) {
+		expression, ok := billing_setting.GetBillingExpr(constant.DeepSeekASRModel)
+		require.True(t, ok)
+		for _, seconds := range []int{-1, 0, 1, 120, 121} {
+			cost, trace, err := billingexpr.RunExprWithRequest(expression, billingexpr.TokenParams{}, billingexpr.RequestInput{AudioSeconds: &seconds})
+			if seconds < 1 || seconds > 120 {
+				require.ErrorContains(t, err, "audio_seconds")
+				continue
+			}
+			require.NoError(t, err)
+			assert.InDelta(t, float64(seconds)*0.058/3600*1e6, cost, 1e-8)
+			assert.Equal(t, &seconds, trace.AudioSeconds)
+			assert.Equal(t, billingexpr.BillingUnitRequest, trace.BillingUnit)
+		}
+		assert.True(t, billingexpr.UsesChatQuantities(expression))
+	})
+}
 
 func TestBuildAlphaSearchRequestBodyPreservesUnknownFields(t *testing.T) {
 	raw := []byte(`{
@@ -314,7 +518,7 @@ func TestDeepSeekOCR(t *testing.T) {
 			}
 			settlement := &recordedSettlement{}
 			info.Billing = settlement
-			apiErr := DeepSeekOCRHelper(c, info)
+			apiErr := DeepSeekFileHelper(c, info)
 			apiErr = RefundFailedRequestBilling(c, info, apiErr)
 			assert.Equal(t, "/v1/tools/ocr", gotPath)
 			assert.Equal(t, contentType, gotContentType)
@@ -446,7 +650,7 @@ func TestDeepSeekOCRSettlesAfterClientDisconnect(t *testing.T) {
 	require.NoError(t, err)
 	settlement := &recordedSettlement{}
 	info.Billing = settlement
-	require.Nil(t, DeepSeekOCRHelper(c, info))
+	require.Nil(t, DeepSeekFileHelper(c, info))
 	require.ErrorIs(t, ctx.Err(), context.Canceled)
 	require.NoError(t, <-upstreamContext)
 	assert.Equal(t, []int{113}, settlement.settled)
@@ -734,4 +938,38 @@ func TestDeepSeekTTSInterruptedAudioKeepsCharacterCharge(t *testing.T) {
 	assert.Equal(t, "RIFF", recorder.Body.String(), "do not append JSON to interrupted audio")
 	assert.Equal(t, []int{56}, settlement.settled)
 	assert.False(t, settlement.refunded)
+}
+
+func TestDeepSeekASRSettlesAfterClientDisconnect(t *testing.T) {
+	service.InitHttpClient()
+	batch, logConsume := common.BatchUpdateEnabled, common.LogConsumeEnabled
+	common.BatchUpdateEnabled, common.LogConsumeEnabled = true, false
+	t.Cleanup(func() { common.BatchUpdateEnabled, common.LogConsumeEnabled = batch, logConsume })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	upstreamContext := make(chan error, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		cancel()
+		upstreamContext <- r.Context().Err()
+		_, _ = io.WriteString(w, `{"request_id":"req","text":"hello","duration_ms":3200}`)
+	}))
+	t.Cleanup(upstream.Close)
+	writer := &ocrDisconnectWriter{ResponseRecorder: httptest.NewRecorder(), disconnected: true}
+	c, _ := deepSeekASRContext(t, writer, deepSeekASRWAV(1), upstream.URL)
+	c.Request = c.Request.WithContext(ctx)
+	request, err := helper.GetAndValidateRequest(c, types.RelayFormatDeepSeekTools)
+	require.NoError(t, err)
+	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatDeepSeekTools, request, nil)
+	require.NoError(t, err)
+	_, err = helper.ModelPriceHelper(c, info, 0, request.GetTokenCountMeta())
+	require.NoError(t, err)
+	settlement := &recordedSettlement{}
+	info.Billing = settlement
+	require.Nil(t, DeepSeekFileHelper(c, info))
+	require.ErrorIs(t, ctx.Err(), context.Canceled)
+	require.NoError(t, <-upstreamContext)
+	assert.Equal(t, []int{32}, settlement.settled)
+	assert.False(t, settlement.refunded)
+	assert.Empty(t, writer.Body.String())
 }

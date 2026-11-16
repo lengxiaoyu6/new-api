@@ -91,6 +91,13 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 		}
 	}
 
+	if _, asr := info.Request.(*dto.DeepSeekASRRequest); asr {
+		seconds := dto.MaxASRDurationSeconds
+		info.BillingRequestInput = &billingexpr.RequestInput{
+			Headers: cloneStringMap(info.RequestHeaders), AudioSeconds: &seconds,
+		}
+	}
+
 	if request, tts := info.Request.(*dto.DeepSeekTTSRequest); tts {
 		count := request.CharacterCount
 		metadata := map[string]any{}
@@ -128,6 +135,10 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 
 	if _, tts := info.Request.(*dto.DeepSeekTTSRequest); tts && !usePrice {
 		return hosttypes.PriceData{}, errors.New("TTS requires per-character or per-request pricing; token ratios are not supported")
+	}
+
+	if _, asr := info.Request.(*dto.DeepSeekASRRequest); asr && !usePrice {
+		return hosttypes.PriceData{}, errors.New("ASR requires per-second or per-request pricing; token ratios are not supported")
 	}
 
 	var preConsumedQuota int
@@ -487,6 +498,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 	snapshot := &billingexpr.BillingSnapshot{
 		EstimatedPageCount:        trace.PageCount,
 		EstimatedCharacterCount:   trace.CharacterCount,
+		EstimatedAudioSeconds:     trace.AudioSeconds,
 		EstimatedImageCount:       trace.ImageCount,
 		BillingMode:               billing_setting.BillingModeTieredExpr,
 		ModelName:                 billingModelName,

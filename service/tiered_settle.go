@@ -224,6 +224,7 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 			EstimatedTier:             trace.MatchedTier,
 			EstimatedPageCount:        trace.PageCount,
 			EstimatedCharacterCount:   trace.CharacterCount,
+			EstimatedAudioSeconds:     trace.AudioSeconds,
 			EstimatedImageCount:       trace.ImageCount,
 			EstimatedBillingUnit:      trace.BillingUnit,
 			EstimatedFixedPrice:       trace.FixedPrice,
@@ -272,6 +273,7 @@ func refreshTieredBillingGroup(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		snap.EstimatedTier = trace.MatchedTier
 		snap.EstimatedPageCount = trace.PageCount
 		snap.EstimatedCharacterCount = trace.CharacterCount
+		snap.EstimatedAudioSeconds = trace.AudioSeconds
 		snap.EstimatedImageCount = trace.ImageCount
 		snap.EstimatedBillingUnit = trace.BillingUnit
 		snap.EstimatedFixedPrice = trace.FixedPrice
@@ -346,6 +348,11 @@ func TryTieredSettle(relayInfo *relaycommon.RelayInfo, params billingexpr.TokenP
 	requestInput := billingexpr.RequestInput{}
 	if relayInfo.BillingRequestInput != nil {
 		requestInput = *relayInfo.BillingRequestInput
+	}
+	if relayInfo.BillingAudioSeconds != nil {
+		requestInput.AudioSeconds = relayInfo.BillingAudioSeconds
+	} else if snap.EstimatedAudioSeconds != nil {
+		requestInput.AudioSeconds = snap.EstimatedAudioSeconds
 	}
 	if relayInfo.BillingCharacterCount != nil {
 		requestInput.CharacterCount = relayInfo.BillingCharacterCount

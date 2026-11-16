@@ -115,7 +115,14 @@ type BreakdownPriceField = {
   id: string
   label: string
   labelKind: DynamicPriceLabelKind
-  unit: BillingUsageUnit | 'request' | 'token' | 'image' | 'page' | 'character'
+  unit:
+    | BillingUsageUnit
+    | 'request'
+    | 'token'
+    | 'image'
+    | 'page'
+    | 'character'
+    | 'second'
   unitLabel?: string | Record<string, string>
   showTokenUnit?: boolean
   value: (tier: BreakdownTier) => number
@@ -470,6 +477,12 @@ export function DynamicPricingBreakdown({
       ) {
         label = 'Price per character'
         unit = 'character'
+      }
+      if (
+        tiers.some((tier) => !isTaskBreakdownTier(tier) && tier.audioSeconds)
+      ) {
+        label = 'Price per second'
+        unit = 'second'
       }
       fields.push({
         id: 'fixedPrice',

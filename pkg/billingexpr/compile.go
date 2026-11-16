@@ -128,6 +128,7 @@ var (
 var compileEnvPrototypeV1 = map[string]any{
 	"page_count":      float64(1),
 	"character_count": float64(1),
+	"audio_seconds":   float64(1),
 	"image_count":     float64(1),
 	"p":               float64(0),
 	"c":               float64(0),
@@ -327,7 +328,7 @@ func UsedVarsByHash(exprStr, hash string) map[string]bool {
 // chatQuantityVars are the quantities a chat request fills: the token counts of
 // its response and the image count it asks for. Task usage billing has none of
 // them, so there the token counts would read 0 and image_count 1.
-var chatQuantityVars = []string{"p", "c", "len", "cr", "cc", "cc1h", "cc12h", "img", "img_cr", "img_o", "ai", "ao", "image_count", "page_count", "character_count"}
+var chatQuantityVars = []string{"p", "c", "len", "cr", "cc", "cc1h", "cc12h", "img", "img_cr", "img_o", "ai", "ao", "image_count", "page_count", "character_count", "audio_seconds"}
 
 // UsesChatQuantities reports whether an expression reads a chat request
 // quantity, including in branches the current request would not evaluate.

@@ -41,6 +41,7 @@ func ComputeTieredQuotaWithRequest(snap *BillingSnapshot, params TokenParams, re
 	result := TieredResult{
 		PageCount:              trace.PageCount,
 		CharacterCount:         trace.CharacterCount,
+		AudioSeconds:           trace.AudioSeconds,
 		ImageCount:             trace.ImageCount,
 		BillingUnit:            trace.BillingUnit,
 		FixedPrice:             trace.FixedPrice,

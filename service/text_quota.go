@@ -65,6 +65,7 @@ type textQuotaSummary struct {
 	AudioInputPrice        float64
 	ToolSurchargeItems     []ToolSurchargeItem
 	ToolCallSurchargeQuota decimal.Decimal
+	BillableSeconds        int
 	BillableCharacters     int
 	BillablePages          int
 	FixedPriceBilling      bool
@@ -76,7 +77,7 @@ type textQuotaSummary struct {
 // surcharge (e.g. /v1/alpha/search returns no usage but bills one web_search
 // call), so token count alone is not sufficient to decide.
 func (s *textQuotaSummary) hasBillableUsage() bool {
-	return s.BillableCharacters > 0 || s.BillablePages > 0 || s.FixedPriceBilling || s.TotalTokens > 0 ||
+	return s.BillableSeconds > 0 || s.BillableCharacters > 0 || s.BillablePages > 0 || s.FixedPriceBilling || s.TotalTokens > 0 ||
 		(s.IsClaudeUsageSemantic && (s.CacheTokens > 0 || s.CacheCreationTokens > 0 ||
 			s.CacheCreationTokens5m > 0 || s.CacheCreationTokens1h > 0)) ||
 		!s.ToolCallSurchargeQuota.IsZero()
@@ -244,6 +245,9 @@ func calculateTextQuotaSummary(ctx *gin.Context, relayInfo *relaycommon.RelayInf
 		CacheCreationRatio1h:  relayInfo.PriceData.CacheCreation1hRatio,
 		CacheCreationRatio12h: relayInfo.PriceData.CacheCreation12hRatio,
 		UsageSemantic:         usageSemanticFromUsage(relayInfo, usage),
+	}
+	if relayInfo.BillingAudioSeconds != nil {
+		summary.BillableSeconds = *relayInfo.BillingAudioSeconds
 	}
 	if relayInfo.BillingCharacterCount != nil {
 		summary.BillableCharacters = *relayInfo.BillingCharacterCount

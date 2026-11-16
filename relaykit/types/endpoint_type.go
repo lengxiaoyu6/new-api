@@ -14,6 +14,7 @@ const (
 	EndpointTypeDeepSeekToolsFetch    EndpointType = "deepseek-tools-fetch"
 	EndpointTypeDeepSeekToolsOCR      EndpointType = "deepseek-tools-ocr"
 	EndpointTypeDeepSeekToolsTTS      EndpointType = "deepseek-tools-tts"
+	EndpointTypeDeepSeekToolsASR      EndpointType = "deepseek-tools-asr"
 	EndpointTypeAnthropic             EndpointType = "anthropic"
 	EndpointTypeGemini                EndpointType = "gemini"
 	EndpointTypeJinaRerank            EndpointType = "jina-rerank"

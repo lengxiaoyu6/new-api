@@ -51,6 +51,7 @@ import { VisualConditionTree } from './visual-condition-tree'
 
 type PricingNodeProps = {
   pageCount?: boolean
+  audioSeconds?: boolean
   characterCount?: boolean
   imageCount?: boolean
   node: VisualPricingNode
@@ -111,6 +112,7 @@ function PricingTierFields(
       </div>
       <TierPriceFields
         pageCount={props.pageCount}
+        audioSeconds={props.audioSeconds}
         characterCount={props.characterCount}
         imageCount={props.imageCount}
         currency={props.currency}
@@ -187,6 +189,10 @@ function PricingRuleCard(
   if (props.characterCount) {
     fixedLabel = t('Price per character')
     fixedUnit = t('character')
+  }
+  if (props.audioSeconds) {
+    fixedLabel = t('Price per second')
+    fixedUnit = t('second')
   }
   const node = props.node
   const [open, setOpen] = useState(props.first)
@@ -409,6 +415,7 @@ export function VisualBillingDocumentEditor(props: {
       )}
       <PricingRuleList
         pageCount={props.document.pageCount}
+        audioSeconds={props.document.audioSeconds}
         characterCount={props.document.characterCount}
         imageCount={props.document.imageCount}
         node={props.document.root}

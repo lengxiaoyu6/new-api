@@ -1,11 +1,15 @@
 package helper
 
 import (
+	"bytes"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -17,6 +21,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/gin-gonic/gin"
+	"github.com/go-audio/wav"
 )
 
 func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dto.Request, err error) {
@@ -42,7 +47,9 @@ func GetAndValidateRequest(c *gin.Context, format types.RelayFormat) (request dt
 	case types.RelayFormatOpenAIAlphaSearch:
 		request, err = GetAndValidateAlphaSearchRequest(c)
 	case types.RelayFormatDeepSeekTools:
-		if relayMode == relayconstant.RelayModeToolsOCR {
+		if relayMode == relayconstant.RelayModeToolsASR {
+			request, err = GetAndValidateDeepSeekASRRequest(c)
+		} else if relayMode == relayconstant.RelayModeToolsOCR {
 			request, err = GetAndValidateDeepSeekOCRRequest(c)
 		} else if relayMode == relayconstant.RelayModeToolsTTS {
 			request, err = GetAndValidateDeepSeekTTSRequest(c)
@@ -198,6 +205,73 @@ func GetAndValidateDeepSeekToolsRequest(c *gin.Context) (*dto.DeepSeekToolsReque
 	}
 	request.RawBody = rawBody
 	return request, nil
+}
+
+// GetAndValidateDeepSeekASRRequest checks the uploaded content, independently of
+// its filename. Billing reserves the provider's duration ceiling, not metadata.
+func GetAndValidateDeepSeekASRRequest(c *gin.Context) (*dto.DeepSeekASRRequest, error) {
+	if c.ContentType() != "multipart/form-data" {
+		return nil, errors.New("ASR requires multipart/form-data")
+	}
+	form, err := common.ParseMultipartFormReusable(c)
+	if err != nil {
+		return nil, err
+	}
+	defer form.RemoveAll()
+	if len(form.Value) != 0 || len(form.File) != 1 || len(form.File["file"]) != 1 {
+		return nil, errors.New("ASR requires exactly one file, with no additional fields")
+	}
+	file := form.File["file"][0]
+	if file.Filename == "" || file.Size == 0 {
+		return nil, errors.New("file must be non-empty and have a filename")
+	}
+	if file.Size > dto.MaxASRFileSize {
+		return nil, errors.New("ASR file must be at most 8 MiB")
+	}
+	audio, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer audio.Close()
+	header := make([]byte, 512)
+	n, err := io.ReadFull(audio, header)
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return nil, err
+	}
+	header = header[:n]
+	if _, err := audio.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	var format string
+	var preSkip uint16
+	switch {
+	case len(header) >= 12 && bytes.Equal(header[:4], []byte("RIFF")) && bytes.Equal(header[8:12], []byte("WAVE")):
+		decoder := wav.NewDecoder(audio)
+		decoder.ReadInfo()
+		if decoder.Err() != nil || decoder.WavAudioFormat != 1 || decoder.BitDepth != 16 ||
+			(decoder.NumChans != 1 && decoder.NumChans != 2) ||
+			!slices.Contains([]uint32{8000, 16000, 22050, 24000, 32000, 44100, 48000}, decoder.SampleRate) {
+			return nil, errors.New("ASR WAV requires 16-bit PCM, one or two channels and a supported sample rate")
+		}
+		format = ".wav"
+	case len(header) >= 27 && bytes.Equal(header[:4], []byte("OggS")):
+		offset := 27 + int(header[26])
+		if offset+19 > len(header) || !bytes.Equal(header[offset:offset+8], []byte("OpusHead")) ||
+			(header[offset+9] != 1 && header[offset+9] != 2) {
+			return nil, errors.New("ASR Ogg requires Opus audio with one or two channels")
+		}
+		preSkip = binary.LittleEndian.Uint16(header[offset+10 : offset+12])
+		format = ".opus"
+	default:
+		return nil, errors.New("ASR requires 16-bit PCM WAV or Ogg Opus audio")
+	}
+	duration, err := common.GetAudioDuration(c.Request.Context(), audio, format)
+	// Ogg's final granule position includes the encoder's initial pre-skip.
+	duration -= float64(preSkip) / 48000
+	if err != nil || math.IsNaN(duration) || math.IsInf(duration, 0) || duration <= 0 || duration > dto.MaxASRDurationSeconds {
+		return nil, errors.New("ASR audio duration must be greater than zero and at most 120 seconds")
+	}
+	return &dto.DeepSeekASRRequest{}, nil
 }
 
 // GetAndValidateDeepSeekTTSRequest bounds the provider's weighted character

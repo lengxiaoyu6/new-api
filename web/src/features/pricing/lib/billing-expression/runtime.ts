@@ -259,6 +259,17 @@ class BillingRuntime {
         }
         return { value }
       }
+      if (node.name === 'audio_seconds') {
+        const value = this.context.audioSeconds ?? 1
+        if (!Number.isInteger(value) || value < 1 || value > 120) {
+          throw new BillingExpressionError({
+            code: 'number',
+            detail: 'audio_seconds must be between 1 and 120',
+            position: node.start,
+          })
+        }
+        return { value }
+      }
       if (node.name === 'character_count') {
         const value = this.context.characterCount ?? 1
         if (!Number.isInteger(value) || value < 1 || value > 10000) {
@@ -582,6 +593,9 @@ export function evaluateBillingExpression(
       billingUnit: runtime.billingUnit,
       ...(compiled.variables.has('page_count')
         ? { pageCount: context.pageCount ?? 1 }
+        : {}),
+      ...(compiled.variables.has('audio_seconds')
+        ? { audioSeconds: context.audioSeconds ?? 1 }
         : {}),
       ...(compiled.variables.has('character_count')
         ? { characterCount: context.characterCount ?? 1 }

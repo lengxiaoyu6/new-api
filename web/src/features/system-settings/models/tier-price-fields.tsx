@@ -111,6 +111,7 @@ function PriceField({
 
 type TierPriceFieldsProps = {
   pageCount?: boolean
+  audioSeconds?: boolean
   characterCount?: boolean
   imageCount?: boolean
   billingUnit?: 'token' | 'request'
@@ -179,6 +180,11 @@ export function TierPriceFields(props: TierPriceFieldsProps) {
     fixedLabel = t('Price per character')
     billingLabel = t('Per character')
     fixedUnit = t('character')
+  }
+  if (props.audioSeconds) {
+    fixedLabel = t('Price per second')
+    billingLabel = t('Per second')
+    fixedUnit = t('second')
   }
   const billingControl = props.onBillingUnitChange && (
     <Select

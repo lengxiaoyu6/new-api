@@ -1265,6 +1265,12 @@ export function DetailsDialog(props: DetailsDialogProps) {
                 value={formatNumber(other.page_count)}
               />
             )}
+            {other.audio_seconds !== undefined && (
+              <DetailRow
+                label={t('Billable audio seconds')}
+                value={formatNumber(other.audio_seconds)}
+              />
+            )}
             {other.character_count !== undefined && (
               <DetailRow
                 label={t('Billable character count')}

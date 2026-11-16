@@ -25,6 +25,7 @@ var defaultEndpointInfoMap = map[constant.EndpointType]EndpointInfo{
 	constant.EndpointTypeDeepSeekToolsFetch:    {Path: "/v1/tools/fetch", Method: "POST"},
 	constant.EndpointTypeDeepSeekToolsOCR:      {Path: "/v1/tools/ocr", Method: "POST"},
 	constant.EndpointTypeDeepSeekToolsTTS:      {Path: "/v1/tools/tts", Method: "POST"},
+	constant.EndpointTypeDeepSeekToolsASR:      {Path: "/v1/tools/asr", Method: "POST"},
 	constant.EndpointTypeAnthropic:             {Path: "/v1/messages", Method: "POST"},
 	constant.EndpointTypeGemini:                {Path: "/v1beta/models/{model}:generateContent", Method: "POST"},
 	constant.EndpointTypeJinaRerank:            {Path: "/v1/rerank", Method: "POST"},

@@ -10,6 +10,8 @@ func GetEndpointTypesByChannelType(channelType int, modelName string) []constant
 		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsSearch}
 	case constant.DeepSeekTTSModel:
 		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsTTS}
+	case constant.DeepSeekASRModel:
+		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsASR}
 	case constant.DeepSeekOCRModel:
 		return []constant.EndpointType{constant.EndpointTypeDeepSeekToolsOCR}
 	case constant.DeepSeekFetchModel:

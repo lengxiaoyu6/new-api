@@ -35,6 +35,7 @@ export type TokenTierCondition = {
 export type TokenTier = {
   conditionText?: string
   pageCount?: boolean
+  audioSeconds?: boolean
   characterCount?: boolean
   imageCount?: boolean
   billingUnit?: 'token' | 'request'
@@ -149,6 +150,7 @@ function tokenTier(
       input.name !== 'len' &&
       input.name !== 'image_count' &&
       input.name !== 'page_count' &&
+      input.name !== 'audio_seconds' &&
       input.name !== 'character_count'
     ) {
       variable = input.name
@@ -229,6 +231,7 @@ export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
         factor.kind === 'variable' &&
         (factor.name === 'image_count' ||
           factor.name === 'page_count' ||
+          factor.name === 'audio_seconds' ||
           factor.name === 'character_count')
       ) {
         return (
@@ -236,6 +239,7 @@ export function readTokenTierChain(node: ExpressionNode): TokenTier[] | null {
             ...tier,
             ...(factor.name === 'page_count' ? { pageCount: true } : {}),
             ...(factor.name === 'image_count' ? { imageCount: true } : {}),
+            ...(factor.name === 'audio_seconds' ? { audioSeconds: true } : {}),
             ...(factor.name === 'character_count'
               ? { characterCount: true }
               : {}),

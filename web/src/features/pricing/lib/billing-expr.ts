@@ -304,6 +304,7 @@ function mapTokenTier(
     label: tier.label,
     ...(tier.imageCount ? { imageCount: true } : {}),
     ...(tier.pageCount ? { pageCount: true } : {}),
+    ...(tier.audioSeconds ? { audioSeconds: true } : {}),
     ...(tier.characterCount ? { characterCount: true } : {}),
     conditions: tier.conditions,
     ...(tier.billingUnit === 'request'
@@ -638,7 +639,7 @@ export function splitBillingExprAndRequestRules(expr: string): {
   })
 
   const quantityParts = baseParts.filter((part) =>
-    ['image_count', 'page_count', 'character_count'].includes(
+    ['image_count', 'page_count', 'character_count', 'audio_seconds'].includes(
       unwrapOuterParens(part)
     )
   )

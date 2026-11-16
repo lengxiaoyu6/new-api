@@ -78,6 +78,8 @@ export function RequestSimulation(props: RequestSimulationProps) {
   const timeId = useId()
   const pageCountId = useId()
   const [pageCount, setPageCount] = useState('1')
+  const audioSecondsId = useId()
+  const [audioSeconds, setAudioSeconds] = useState('1')
   const characterCountId = useId()
   const [characterCount, setCharacterCount] = useState('1')
   const imageCountId = useId()
@@ -86,6 +88,8 @@ export function RequestSimulation(props: RequestSimulationProps) {
     () => compileBillingExpression(props.expression),
     [props.expression]
   )
+  const usesAudioSeconds =
+    compiled.status === 'ready' && compiled.variables.has('audio_seconds')
   const usesCharacterCount =
     compiled.status === 'ready' && compiled.variables.has('character_count')
   const usesPageCount =
@@ -178,6 +182,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
       }
     }
     return evaluateBillingExpression(props.expression, {
+      audioSeconds: Number(audioSeconds),
       characterCount: Number(characterCount),
       pageCount: Number(pageCount),
       imageCount: Number(imageCount),
@@ -191,6 +196,7 @@ export function RequestSimulation(props: RequestSimulationProps) {
     })
   }, [
     open,
+    audioSeconds,
     characterCount,
     pageCount,
     imageCount,
@@ -246,6 +252,22 @@ export function RequestSimulation(props: RequestSimulationProps) {
               step={1}
               value={pageCount}
               onChange={(event) => setPageCount(event.target.value)}
+            />
+          </Field>
+        )}
+        {usesAudioSeconds && (
+          <Field>
+            <FieldLabel htmlFor={audioSecondsId}>
+              {t('Billable audio seconds')}
+            </FieldLabel>
+            <Input
+              id={audioSecondsId}
+              type='number'
+              min={1}
+              max={120}
+              step={1}
+              value={audioSeconds}
+              onChange={(event) => setAudioSeconds(event.target.value)}
             />
           </Field>
         )}

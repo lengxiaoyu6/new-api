@@ -18,6 +18,8 @@ type RequestInput struct {
 	PageCount *int
 	// CharacterCount is the bounded weighted input quantity for native TTS.
 	CharacterCount *int
+	// AudioSeconds is the bounded duration of a native ASR request.
+	AudioSeconds *int
 }
 
 // TokenParams holds all token dimensions passed into an Expr evaluation.
@@ -56,6 +58,7 @@ const (
 type TraceResult struct {
 	PageCount      *int               `json:"page_count,omitempty"`
 	CharacterCount *int               `json:"character_count,omitempty"`
+	AudioSeconds   *int               `json:"audio_seconds,omitempty"`
 	ImageCount     *int               `json:"image_count,omitempty"`
 	BillingUnit    BillingUnit        `json:"billing_unit"`
 	FixedPrice     *float64           `json:"fixed_price,omitempty"`
@@ -90,6 +93,7 @@ type BillingSnapshot struct {
 	ChannelID                 int               `json:"channel_id,omitempty"`
 	EstimatedPageCount        *int              `json:"estimated_page_count,omitempty"`
 	EstimatedCharacterCount   *int              `json:"estimated_character_count,omitempty"`
+	EstimatedAudioSeconds     *int              `json:"estimated_audio_seconds,omitempty"`
 	EstimatedImageCount       *int              `json:"estimated_image_count,omitempty"`
 	EstimatedBillingUnit      BillingUnit       `json:"estimated_billing_unit,omitempty"`
 	EstimatedFixedPrice       *float64          `json:"estimated_fixed_price,omitempty"`
@@ -103,6 +107,7 @@ type TieredResult struct {
 	BillingTokens          *TokenParams       `json:"-"`
 	PageCount              *int               `json:"page_count,omitempty"`
 	CharacterCount         *int               `json:"character_count,omitempty"`
+	AudioSeconds           *int               `json:"audio_seconds,omitempty"`
 	ImageCount             *int               `json:"image_count,omitempty"`
 	BillingUnit            BillingUnit        `json:"billing_unit"`
 	FixedPrice             *float64           `json:"fixed_price,omitempty"`

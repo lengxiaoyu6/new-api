@@ -821,3 +821,87 @@ describe('TTS character pricing', () => {
     ])
   })
 })
+
+describe('ASR duration pricing', () => {
+  const expression = 'tier("second", fixed(0.001)) * audio_seconds'
+  test('evaluates seconds and presents their unit price independently of tokens', () => {
+    expect(
+      evaluateBillingExpression(expression, { audioSeconds: 4 })
+    ).toMatchObject({
+      status: 'success',
+      cost: 4000,
+      audioSeconds: 4,
+      billingUnit: 'request',
+    })
+    expect(parseTiersFromExpr(expression)).toEqual([
+      {
+        label: 'second',
+        conditions: [],
+        billingUnit: 'request',
+        fixedPrice: 0.001,
+        audioSeconds: true,
+      },
+    ])
+    expect(
+      getTieredBillingSummary({
+        billing_mode: 'tiered_expr',
+        expr_b64: btoa(expression),
+        billing_unit: 'request',
+        fixed_price: 0.001,
+        matched_tier: 'second',
+        audio_seconds: 4,
+      })?.priceEntries
+    ).toEqual([
+      {
+        field: 'fixedPrice',
+        shortLabel: 'Per second',
+        price: 0.001,
+        unit: 'second',
+      },
+    ])
+  })
+  test.each([-1, 0, 1.5, 121, Number.POSITIVE_INFINITY, Number.NaN])(
+    'rejects invalid seconds %s',
+    (audioSeconds) => {
+      expect(
+        evaluateBillingExpression(expression, { audioSeconds })
+      ).toMatchObject({ status: 'invalid' })
+    }
+  )
+  test('keeps the seconds multiplier when editing the price', () => {
+    const document = parseVisualBillingDocument(expression)
+    assert(document && document.root.kind === 'tier')
+    document.root.fixedPrice = '0.002'
+    expect(serializeVisualBillingDocument(document)).toEqual({
+      ok: true,
+      source: expression.replace('0.001', '0.002'),
+    })
+  })
+  test('accepts the duration limit and the published hourly price', () => {
+    const result = evaluateBillingExpression(
+      'tier("second", fixed(0.000016111111111111112)) * audio_seconds',
+      { audioSeconds: 120 }
+    )
+    assert(result.status === 'success')
+    expect(result.cost).toBeCloseTo(1933.3333333333333)
+  })
+  test('preserves a per-call override even when the log contains measured seconds', () => {
+    expect(
+      getTieredBillingSummary({
+        billing_mode: 'tiered_expr',
+        expr_b64: btoa('tier("request", fixed(0.01))'),
+        billing_unit: 'request',
+        fixed_price: 0.01,
+        matched_tier: 'request',
+        audio_seconds: 4,
+      })?.priceEntries
+    ).toEqual([
+      {
+        field: 'fixedPrice',
+        shortLabel: 'Per-call',
+        price: 0.01,
+        unit: 'request',
+      },
+    ])
+  })
+})

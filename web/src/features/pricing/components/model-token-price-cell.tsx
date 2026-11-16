@@ -85,7 +85,8 @@ export function ModelTokenPriceCell(props: {
       entry.unit === 'request' ||
       entry.unit === 'image' ||
       entry.unit === 'page' ||
-      entry.unit === 'character'
+      entry.unit === 'character' ||
+      entry.unit === 'second'
   )
   if (
     !props.tier &&

@@ -200,6 +200,26 @@ client disconnect or partial audio response does not reduce its character
 charge. An empty, rejected or non-audio upstream response releases the
 reservation. Submitted synthesis requests are never replayed automatically.
 
+### ASR Audio Duration
+
+`audio_seconds` is the native DeepSeek ASR billing quantity, independent of
+transcription tokens. The built-in expression is
+`tier("second", fixed(0.000016111111111111112)) * audio_seconds`, equivalent to
+the published limited-time price of $0.058/hour. The quantity defaults to 1
+outside ASR and must be an integer from 1 to `dto.MaxASRDurationSeconds` (120).
+Task usage expressions reject this chat quantity.
+
+ASR reserves 120 seconds before submission and settles on the validated
+upstream `duration_ms`, rounded up to a whole second. A positive duration with
+an empty transcript is still billable. Malformed or unsuccessful responses
+release the reservation; successful recognition settles even after a client
+disconnect. Submitted requests are never replayed automatically. Pricing
+snapshots retain only the estimated duration and headers, never uploaded audio.
+
+The native request requires exactly one multipart `file`, at most 8 MiB of
+16-bit PCM WAV or Ogg Opus with a duration of at most 120 seconds. The format
+is detected from content. There is no model or language form field.
+
 ### Built-in Functions
 
 | Function | Signature | Purpose |

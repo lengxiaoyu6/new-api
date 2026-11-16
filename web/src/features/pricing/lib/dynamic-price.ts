@@ -70,7 +70,14 @@ export type DynamicPriceEntry = {
   formattedRange?: string
   minValue?: number
   maxValue?: number
-  unit: 'token' | BillingUsageUnit | 'request' | 'image' | 'page' | 'character'
+  unit:
+    | 'token'
+    | BillingUsageUnit
+    | 'request'
+    | 'image'
+    | 'page'
+    | 'character'
+    | 'second'
   unitLabel?: string | Record<string, string>
   variable?: BillingVar
   description?: string | Record<string, string>
@@ -308,6 +315,11 @@ export function getDynamicPriceEntries(
       label = 'Price per character'
       shortLabel = 'Per character'
       unit = 'character'
+    }
+    if (tier.audioSeconds) {
+      label = 'Price per second'
+      shortLabel = 'Per second'
+      unit = 'second'
     }
     return [
       {

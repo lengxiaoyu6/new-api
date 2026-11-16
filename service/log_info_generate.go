@@ -113,6 +113,9 @@ func GenerateTextOtherInfo(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, m
 	if relayInfo.BillingCharacterCount != nil {
 		other.SetPublic("character_count", *relayInfo.BillingCharacterCount)
 	}
+	if relayInfo.BillingAudioSeconds != nil {
+		other.SetPublic("audio_seconds", *relayInfo.BillingAudioSeconds)
+	}
 	if relayInfo.BillingPageCount != nil {
 		other.SetPublic("page_count", *relayInfo.BillingPageCount)
 	}
@@ -385,6 +388,9 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 		if result.CharacterCount != nil {
 			other.SetPublic("character_count", *result.CharacterCount)
 		}
+		if result.AudioSeconds != nil {
+			other.SetPublic("audio_seconds", *result.AudioSeconds)
+		}
 		if result.PageCount != nil {
 			other.SetPublic("page_count", *result.PageCount)
 		}
@@ -404,6 +410,9 @@ func InjectTieredBillingInfo(other *model.LogOther, relayInfo *relaycommon.Relay
 	} else if snap.EstimatedBillingUnit != "" {
 		if snap.EstimatedCharacterCount != nil {
 			other.SetPublic("character_count", *snap.EstimatedCharacterCount)
+		}
+		if snap.EstimatedAudioSeconds != nil {
+			other.SetPublic("audio_seconds", *snap.EstimatedAudioSeconds)
 		}
 		if snap.EstimatedPageCount != nil {
 			other.SetPublic("page_count", *snap.EstimatedPageCount)

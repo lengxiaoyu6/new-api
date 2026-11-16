@@ -302,3 +302,31 @@ test('simulates TTS characters and rejects quantities above the provider limit',
     'character_count must be between 1 and 10000'
   )
 })
+
+test('simulates ASR seconds and rejects durations above the provider limit', async () => {
+  render(
+    <RequestSimulation
+      expression='tier("second", fixed(0.001)) * audio_seconds'
+      mode='token'
+      currency={USD_PRICING_CURRENCY}
+    />
+  )
+  await userEvent
+    .setup()
+    .click(screen.getByRole('button', { name: 'Request simulation' }))
+  const seconds = screen.getByRole('spinbutton', {
+    name: 'Billable audio seconds',
+  })
+  fireEvent.change(seconds, { target: { value: '4' } })
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $0.004'
+  )
+  fireEvent.change(seconds, { target: { value: '120' } })
+  expect(screen.getByRole('status')).toHaveTextContent(
+    'Simulated request cost: $0.12'
+  )
+  fireEvent.change(seconds, { target: { value: '121' } })
+  expect(screen.getByRole('alert')).toHaveTextContent(
+    'audio_seconds must be between 1 and 120'
+  )
+})

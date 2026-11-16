@@ -118,3 +118,25 @@ func (r *DeepSeekTTSRequest) SetModelName(modelName string) {
 		r.Model = modelName
 	}
 }
+
+// ASR accepts only a file. Model is an internal routing name, never a form field.
+const (
+	MaxASRFileSize        = 8 << 20
+	MaxASRDurationSeconds = 120
+)
+
+type DeepSeekASRRequest struct {
+	Model string `json:"-"`
+}
+
+func (r *DeepSeekASRRequest) GetTokenCountMeta() *types.TokenCountMeta {
+	return &types.TokenCountMeta{TokenType: types.TokenTypeTokenizer}
+}
+
+func (r *DeepSeekASRRequest) IsStream(_ *http.Request) bool { return false }
+
+func (r *DeepSeekASRRequest) SetModelName(modelName string) {
+	if modelName != "" {
+		r.Model = modelName
+	}
+}

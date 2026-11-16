@@ -40,4 +40,6 @@ var builtinBillingExpr = map[string]string{
 	constant.DeepSeekOCRModel: `tier("page", fixed(0.000225)) * page_count`,
 	// https://api-docs.deepseek.com/guides/tts (2026-11-16): $22.5/1M characters.
 	constant.DeepSeekTTSModel: `tier("character", fixed(0.0000225)) * character_count`,
+	// https://api-docs.deepseek.com/guides/asr (2026-11-16): $0.058/hour, rounded up to whole seconds.
+	constant.DeepSeekASRModel: `tier("second", fixed(0.000016111111111111112)) * audio_seconds`,
 }

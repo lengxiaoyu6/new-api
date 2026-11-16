@@ -61,6 +61,7 @@ export type VisualBillingDocument = {
   source: string
   root: VisualPricingNode
   pageCount?: boolean
+  audioSeconds?: boolean
   characterCount?: boolean
   imageCount?: boolean
 }
@@ -184,6 +185,7 @@ function readVisualPricing(node: ExpressionNode): VisualPricingNode | null {
       term.left.name === 'len' ||
       term.left.name === 'image_count' ||
       term.left.name === 'page_count' ||
+      term.left.name === 'audio_seconds' ||
       term.left.name === 'character_count' ||
       term.right.kind !== 'literal' ||
       typeof term.right.value !== 'number' ||
@@ -215,6 +217,7 @@ function quantityPricingRoot(node: ExpressionNode): ExpressionNode | null {
     node.right.kind === 'variable' &&
     (node.right.name === 'image_count' ||
       node.right.name === 'page_count' ||
+      node.right.name === 'audio_seconds' ||
       node.right.name === 'character_count')
   ) {
     return node.left
@@ -223,6 +226,7 @@ function quantityPricingRoot(node: ExpressionNode): ExpressionNode | null {
     node.left.kind === 'variable' &&
     (node.left.name === 'image_count' ||
       node.left.name === 'page_count' ||
+      node.left.name === 'audio_seconds' ||
       node.left.name === 'character_count')
   ) {
     return node.right
@@ -244,6 +248,8 @@ export function parseVisualBillingDocument(
     imageCount:
       pricing !== compiled.ast && compiled.variables.has('image_count'),
     pageCount: pricing !== compiled.ast && compiled.variables.has('page_count'),
+    audioSeconds:
+      pricing !== compiled.ast && compiled.variables.has('audio_seconds'),
     characterCount:
       pricing !== compiled.ast && compiled.variables.has('character_count'),
   }
@@ -505,7 +511,10 @@ export function serializeVisualBillingDocument(
   const issues: VisualBillingIssue[] = []
   let body = writeVisualPricing(document.root, document.source, issues)
   if (
-    (document.imageCount || document.pageCount || document.characterCount) &&
+    (document.imageCount ||
+      document.pageCount ||
+      document.characterCount ||
+      document.audioSeconds) &&
     document.root.kind === 'branch' &&
     document.root.origin?.kind !== 'conditional'
   ) {
@@ -526,7 +535,10 @@ export function serializeVisualBillingDocument(
     }
   }
   const pricingOrigin =
-    document.imageCount || document.pageCount || document.characterCount
+    document.imageCount ||
+    document.pageCount ||
+    document.characterCount ||
+    document.audioSeconds
       ? quantityPricingRoot(original.ast)
       : original.ast
   if (!pricingOrigin) {

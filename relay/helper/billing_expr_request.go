@@ -105,6 +105,10 @@ func cloneRequestInput(src billingexpr.RequestInput) billingexpr.RequestInput {
 	input := billingexpr.RequestInput{
 		Headers: cloneStringMap(src.Headers),
 	}
+	if src.AudioSeconds != nil {
+		seconds := *src.AudioSeconds
+		input.AudioSeconds = &seconds
+	}
 	if src.CharacterCount != nil {
 		count := *src.CharacterCount
 		input.CharacterCount = &count
