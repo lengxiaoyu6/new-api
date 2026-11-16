@@ -32,6 +32,7 @@ import {
   PricingToolbar,
   type PricingToolbarProps,
 } from '../components/pricing-toolbar'
+import { filterByQuotaType } from '../lib/filters'
 import type { PricingModel } from '../types'
 
 let style: HTMLStyleElement
@@ -85,6 +86,157 @@ function catalogSidebarProps(): PricingSidebarProps {
 }
 
 describe('pricing controls', () => {
+  it.each<{
+    name: string
+    pricing: Partial<PricingModel>
+    matches: string[]
+  }>([
+    { name: 'legacy token pricing', pricing: {}, matches: ['token'] },
+    {
+      name: 'legacy per-request pricing',
+      pricing: { quota_type: 1, model_price: 0.01 },
+      matches: ['request'],
+    },
+    {
+      name: 'dynamic fixed pricing with a legacy token quota type',
+      pricing: {
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("request", fixed(0.01))',
+      },
+      matches: ['request'],
+    },
+    {
+      name: 'free dynamic per-request pricing',
+      pricing: {
+        billing_mode: 'tiered_expr',
+        billing_expr: 'v1:tier("free", fixed(0))',
+      },
+      matches: ['request'],
+    },
+    {
+      name: 'request-dependent fixed tiers with an extra multiplier',
+      pricing: {
+        billing_mode: 'tiered_expr',
+        billing_expr:
+          '(param("quality") == "hd" ? tier("hd", fixed(0.02)) : tier("base", fixed(0.01))) * (header("x-fast") == "true" ? 2 : 1)',
+      },
+      matches: ['request'],
+    },
+    {
+      name: 'mixed pricing across nested time tiers classified only as token-based',
+      pricing: {
+        billing_mode: 'tiered_expr',
+        billing_expr:
+          'hour("UTC") < 12 ? (len < 1000 ? tier("short", fixed(0.01)) : tier("long", p * 2 + c * 8)) : tier("night", fixed(0.02))',
+      },
+      matches: ['token'],
+    },
+    {
+      name: 'mixed pricing overriding a legacy request quota type',
+      pricing: {
+        quota_type: 1,
+        billing_mode: 'tiered_expr',
+        billing_expr:
+          'len < 1000 ? tier("short", fixed(0.01)) : tier("long", p * 2 + c * 8)',
+      },
+      matches: ['token'],
+    },
+    {
+      name: 'dynamic token pricing overriding a legacy request quota type',
+      pricing: {
+        quota_type: 1,
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("base", p * 2 + c * 8)',
+      },
+      matches: ['token'],
+    },
+    {
+      name: 'token pricing with fixed syntax only in its tier label',
+      pricing: {
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("fixed(0.01)", p * 2)',
+      },
+      matches: ['token'],
+    },
+    {
+      name: 'task usage retaining its separate category',
+      pricing: {
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("base", u("seconds") * 0.4)',
+        billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+      },
+      matches: ['task'],
+    },
+    {
+      name: 'a plugin model whose ordinary requests pay a token ratio',
+      pricing: {
+        billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        ordinary_pricing: true,
+        billing_plugin_variants: [
+          {
+            plugin_key: 'alpha',
+            plugin_name: 'Alpha',
+            billing_mode: 'tiered_expr',
+            billing_expr: '',
+            billing_usage_schema: {
+              seconds: { type: 'number', unit: 'second' },
+            },
+          },
+        ],
+      },
+      matches: ['token'],
+    },
+    {
+      name: 'a plugin model without ordinary requests retaining the task category',
+      pricing: {
+        billing_usage_schema: { seconds: { type: 'number', unit: 'second' } },
+        billing_plugin_variants: [
+          {
+            plugin_key: 'alpha',
+            plugin_name: 'Alpha',
+            billing_mode: 'tiered_expr',
+            billing_expr: '',
+            billing_usage_schema: {
+              seconds: { type: 'number', unit: 'second' },
+            },
+          },
+        ],
+      },
+      matches: ['task'],
+    },
+    {
+      name: 'unparseable dynamic pricing retaining its legacy category',
+      pricing: {
+        quota_type: 1,
+        billing_mode: 'tiered_expr',
+        billing_expr: 'tier("request", fixed(',
+      },
+      matches: ['request'],
+    },
+  ])(
+    'classifies model filters consistently for $name',
+    ({ pricing, matches }) => {
+      const model: PricingModel = {
+        id: 1,
+        model_name: 'pricing-model',
+        quota_type: 0,
+        model_ratio: 1,
+        completion_ratio: 1,
+        enable_groups: ['default'],
+        ...pricing,
+      }
+      const models = [model]
+
+      for (const quotaType of ['token', 'request', 'task']) {
+        const included = matches.includes(quotaType)
+        expect(filterByQuotaType(models, quotaType)).toEqual(
+          included ? [model] : []
+        )
+      }
+      expect(filterByQuotaType(models, 'all')).toEqual([model])
+    }
+  )
+
   it('keeps search and price mode available while catalog filters are loading', () => {
     render(<PricingToolbar {...toolbarProps()} isLoading />)
 
@@ -101,12 +253,12 @@ describe('pricing controls', () => {
       </main>
     )
 
-    expect(getComputedStyle(screen.getByRole('combobox')).height).toBe('2.5rem')
+    expect(getComputedStyle(screen.getByRole('combobox')).height).toBe('40px')
     expect(
       getComputedStyle(
         screen.getByRole('group', { name: 'Price display mode' })
       ).height
-    ).toBe('2.5rem')
+    ).toBe('40px')
   })
 
   it('keeps page-size options inside the catalog theme and applies a selected page size', async () => {

@@ -63,6 +63,7 @@ export function PricingToolbar(props: PricingToolbarProps) {
       <div className='gateway-catalog-toolbar-actions'>
         {groups.length > 0 && (
           <Select
+            key={groups.join('\0')}
             value={selectedGroup}
             onValueChange={(value) => {
               if (value) {

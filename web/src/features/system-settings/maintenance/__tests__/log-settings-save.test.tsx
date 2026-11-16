@@ -122,6 +122,7 @@ async function renderSection(defaultEnabled: boolean) {
                 LogConsumeEnabled: defaultEnabled,
                 'log_setting.user_export_enabled': false,
                 'log_setting.max_range_days': 365,
+                'system_task_setting.retention_days': 30,
               }}
             />
           </SettingsPageProvider>

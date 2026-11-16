@@ -510,7 +510,7 @@ describe('catalog presentation', () => {
           const rate = badge.querySelector('.gateway-catalog-status-rate')
           assert(rate)
           const rateStyle = getComputedStyle(rate)
-          expect(rateStyle.width).toBe('4rem')
+          expect(rateStyle.width).toBe('64px')
           expect(rateStyle.gridTemplateColumns).toBe('0.375rem minmax(0, 1fr)')
           expect(rateStyle.textAlign).toBe('right')
           expect(rateStyle.whiteSpace).toBe('nowrap')

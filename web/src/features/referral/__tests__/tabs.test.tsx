@@ -64,7 +64,12 @@ beforeEach(() => {
         },
       }
     }
-    const page = Number(config?.params?.p ?? 1)
+    const page =
+      typeof config?.params === 'object' &&
+      config.params !== null &&
+      'p' in config.params
+        ? Number(config.params.p)
+        : 1
     let items: unknown[] = []
     if (url === '/api/user/aff/invited') {
       items = [

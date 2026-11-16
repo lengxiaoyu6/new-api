@@ -423,7 +423,12 @@ it('shows payment and administrator acquisitions with paginated attempt history'
       if (url === '/api/lottery/activities') {
         return { data: { success: true, data: [activity] } } as never
       }
-      const page = config?.params?.page ?? 1
+      const page =
+        typeof config?.params === 'object' &&
+        config.params !== null &&
+        'page' in config.params
+          ? Number(config.params.page)
+          : 1
       const items =
         page === 1
           ? [
