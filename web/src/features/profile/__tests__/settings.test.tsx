@@ -202,6 +202,130 @@ describe('user settings saves across profile and security', () => {
   })
 })
 
+describe('request redaction preference', () => {
+  it('starts off and saves an ordinary user’s explicit choice when redaction is available', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: profile },
+    })
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const onUpdate = vi.fn()
+    render(
+      <NotificationTab
+        profile={{ ...profile, request_redaction_available: true }}
+        onUpdate={onUpdate}
+        quotaRemindEnabled
+        quotaRemindThreshold={1000}
+      />
+    )
+    const toggle = screen.getByRole('switch', { name: 'Request redaction' })
+    expect(toggle).not.toBeChecked()
+    expect(toggle).not.toHaveAttribute('aria-disabled', 'true')
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }))
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled())
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/setting',
+      expect.objectContaining({ request_redaction_enabled: true })
+    )
+  })
+
+  it('shows saved consent and allows the user to turn it off', async () => {
+    const savedProfile = {
+      ...profile,
+      request_redaction_available: true,
+      setting: JSON.stringify({ request_redaction_enabled: true }),
+    }
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: { success: true, data: savedProfile },
+    })
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    const onUpdate = vi.fn()
+    render(
+      <NotificationTab
+        profile={savedProfile}
+        onUpdate={onUpdate}
+        quotaRemindEnabled
+        quotaRemindThreshold={1000}
+      />
+    )
+    const toggle = screen.getByRole('switch', { name: 'Request redaction' })
+    expect(toggle).toBeChecked()
+    fireEvent.click(toggle)
+    fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }))
+    await waitFor(() => expect(onUpdate).toHaveBeenCalled())
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/setting',
+      expect.objectContaining({ request_redaction_enabled: false })
+    )
+  })
+
+  it.each([false, undefined])(
+    'keeps redaction inactive when administrator availability is %s and retains saved consent',
+    async (available) => {
+      const savedProfile = {
+        ...profile,
+        request_redaction_available: available,
+        setting: JSON.stringify({ request_redaction_enabled: true }),
+      }
+      vi.spyOn(api, 'get').mockResolvedValue({
+        data: { success: true, data: savedProfile },
+      })
+      const put = vi
+        .spyOn(api, 'put')
+        .mockResolvedValue({ data: { success: true } })
+      const onUpdate = vi.fn()
+      render(
+        <NotificationTab
+          profile={savedProfile}
+          onUpdate={onUpdate}
+          quotaRemindEnabled
+          quotaRemindThreshold={1000}
+        />
+      )
+      const toggle = screen.getByRole('switch', { name: 'Request redaction' })
+      expect(toggle).toHaveAttribute('aria-disabled', 'true')
+      expect(toggle).not.toBeChecked()
+      expect(toggle).toHaveAccessibleDescription(
+        'Request redaction is unavailable until an administrator enables it.'
+      )
+      fireEvent.click(toggle)
+      fireEvent.click(screen.getByRole('button', { name: 'Save Settings' }))
+      await waitFor(() => expect(onUpdate).toHaveBeenCalled())
+      expect(put).toHaveBeenCalledWith(
+        '/api/user/setting',
+        expect.objectContaining({ request_redaction_enabled: true })
+      )
+    }
+  )
+
+  it('preserves redaction consent when saving an unrelated preference', async () => {
+    vi.spyOn(api, 'get').mockResolvedValue({
+      data: {
+        success: true,
+        data: {
+          ...profile,
+          setting: JSON.stringify({ request_redaction_enabled: true }),
+        },
+      },
+    })
+    const put = vi
+      .spyOn(api, 'put')
+      .mockResolvedValue({ data: { success: true } })
+    await updateUserSettings({ record_ip_log: true })
+    expect(put).toHaveBeenCalledWith(
+      '/api/user/setting',
+      expect.objectContaining({
+        request_redaction_enabled: true,
+        record_ip_log: true,
+      })
+    )
+  })
+})
+
 describe('notifications a user receives', () => {
   function renderNotificationTab(
     role: number,

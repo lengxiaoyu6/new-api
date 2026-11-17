@@ -20,6 +20,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/pkg/requestpatch"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	kitdto "github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/request_plugin_setting"
@@ -29,6 +30,13 @@ import (
 )
 
 const planContextKey = "request_plugin_plan"
+
+// newRequestPlan applies the authenticated user's consent before selecting
+// any redaction hooks, including reply checks and task or socket stages.
+func newRequestPlan(c *gin.Context) *Plan {
+	settings, _ := common.GetContextKeyType[kitdto.UserSetting](c, constant.ContextKeyUserSetting)
+	return newPlanOf(request_plugin_setting.GetInstances(), settings.RequestRedactionEnabled)
+}
 
 func planOf(c *gin.Context) *Plan {
 	if c == nil {
@@ -46,7 +54,7 @@ func planOf(c *gin.Context) *Plan {
 // the request, it starts capturing the response for Report; Reply starts it
 // for those a channel attempt brings.
 func Ingress(c *gin.Context, format types.RelayFormat) ([]relaycommon.RequestPluginStep, []relaycommon.RequestPluginRecord, *types.NewAPIError) {
-	plan := NewPlan()
+	plan := newRequestPlan(c)
 	if plan == nil {
 		return nil, nil, nil
 	}
@@ -63,7 +71,7 @@ func Ingress(c *gin.Context, format types.RelayFormat) ([]relaycommon.RequestPlu
 // again. It returns the audit steps and the public record for
 // RelayInfo.SetRequestPluginIngress.
 func SubmitIngress(c *gin.Context, format types.RelayFormat, model string) (bool, []relaycommon.RequestPluginStep, []relaycommon.RequestPluginRecord, *types.NewAPIError) {
-	plan := NewPlan()
+	plan := newRequestPlan(c)
 	if plan == nil {
 		return false, nil, nil, nil
 	}
@@ -646,7 +654,7 @@ func DryRun(ctx context.Context, input DryRunInput) DryRunResult {
 		instance := *input.Instance
 		// An unsaved instance runs on every model and channel.
 		instance.Enabled, instance.Global, instance.Models, instance.PluginScope = true, true, nil, nil
-		plan = newPlanOf([]request_plugin_setting.Instance{instance})
+		plan = newPlanOf([]request_plugin_setting.Instance{instance}, true)
 	}
 	if plan == nil {
 		return result

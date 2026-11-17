@@ -14,12 +14,18 @@ import (
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/pkg/requestpatch"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/requestplugin"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/request_plugin_setting"
+	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
@@ -1135,6 +1141,124 @@ func dryRunBuiltInAs(t *testing.T, key, format, path string, config map[string]a
 		Body: []byte(body), Instance: &request_plugin_setting.Instance{ID: "try", Name: "Try", Plugin: key, Config: validated}})
 	require.Nil(t, result.Failed)
 	return result
+}
+
+func TestRequestRedactionUserOptIn(t *testing.T) {
+	saved, err := common.Marshal(request_plugin_setting.GetInstances())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{request_plugin_setting.InstancesOption: string(saved)}))
+	})
+	redact, found := jsplugin.DefaultRegistry.Generation().Get("request-redact")
+	require.True(t, found)
+	redactConfig, err := redact.ValidateConfig(json.RawMessage(`{"categories":["email"],"replies":true}`))
+	require.NoError(t, err)
+	filter, found := jsplugin.DefaultRegistry.Generation().Get("request-filter")
+	require.True(t, found)
+	filterConfig, err := filter.ValidateConfig(json.RawMessage(`{}`))
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		preference string
+		enabled    bool
+		models     []string
+		groups     []string
+		masked     bool
+	}{
+		{name: "unchosen stays off", enabled: true},
+		{name: "explicit off", preference: `{"request_redaction_enabled":false}`, enabled: true},
+		{name: "user opts in", preference: `{"request_redaction_enabled":true}`, enabled: true, masked: true},
+		{name: "administrator disables the instance", preference: `{"request_redaction_enabled":true}`},
+		{name: "user cannot expand model scope", preference: `{"request_redaction_enabled":true}`, enabled: true, models: []string{"other-model"}},
+		{name: "user cannot expand group scope", preference: `{"request_redaction_enabled":true}`, enabled: true, groups: []string{"vip"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			instances, err := common.Marshal([]request_plugin_setting.Instance{
+				{ID: "redact", Name: "Redact", Plugin: "request-redact", Enabled: tc.enabled, Global: len(tc.groups) == 0, Groups: tc.groups, Models: tc.models, Config: redactConfig},
+				{ID: "filter", Name: "Filter", Plugin: "request-filter", Enabled: true, Global: true, Config: filterConfig},
+			})
+			require.NoError(t, err)
+			require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{request_plugin_setting.InstancesOption: string(instances)}))
+			assert.Equal(t, tc.enabled, requestplugin.RedactionAvailable())
+
+			for _, entry := range []string{"HTTP", "task", "Responses WebSocket", "Realtime"} {
+				t.Run(entry, func(t *testing.T) {
+					const body = `{"model":"gpt","messages":[{"role":"user","content":"Contact alice@example.com"}],"input":"Contact alice@example.com","prompt":"Contact alice@example.com"}`
+					recorder := httptest.NewRecorder()
+					c, _ := gin.CreateTestContext(recorder)
+					c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(body))
+					c.Request.Header.Set("Content-Type", "application/json")
+					common.SetContextKey(c, constant.ContextKeyOriginalModel, "gpt")
+					common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+					if tc.preference != "" {
+						var setting dto.UserSetting
+						require.NoError(t, common.UnmarshalJsonStr(tc.preference, &setting))
+						common.SetContextKey(c, constant.ContextKeyUserSetting, setting)
+					}
+					if entry == "Realtime" {
+						requestplugin.StartRealtime(c)
+						session := requestplugin.NewRealtime(c, &relaycommon.RelayInfo{OriginModelName: "gpt"}, func([]byte) {}, func([]byte) {})
+						require.NotNil(t, session, "request filtering stays enabled")
+						event := []byte(`{"type":"response.create","response":{"input":"Contact alice@example.com"}}`)
+						patched, dropped := session.ClientEvent("response.create", event)
+						assert.False(t, dropped)
+						if tc.masked {
+							assert.Equal(t, "Contact [REDACTED]", gjson.GetBytes(patched, "response.input").Str)
+						} else {
+							assert.Empty(t, patched)
+						}
+						return
+					}
+					var steps []relaycommon.RequestPluginStep
+					var apiErr *types.NewAPIError
+					field := "messages.0.content"
+					switch entry {
+					case "HTTP":
+						steps, _, apiErr = requestplugin.Ingress(c, types.RelayFormatOpenAI)
+					case "task":
+						field = "prompt"
+						_, steps, _, apiErr = requestplugin.SubmitIngress(c, types.RelayFormatTask, "gpt")
+					case "Responses WebSocket":
+						field = "input"
+						_, steps, _, apiErr = requestplugin.SocketIngress(c, types.RelayFormatOpenAIResponses)
+					}
+					require.Nil(t, apiErr)
+					storage, err := common.GetBodyStorage(c)
+					require.NoError(t, err)
+					t.Cleanup(func() { _ = storage.Close() })
+					patched, err := storage.Bytes()
+					require.NoError(t, err)
+					expected := "Contact alice@example.com"
+					if tc.masked {
+						expected = "Contact [REDACTED]"
+					}
+					assert.Equal(t, expected, gjson.GetBytes(patched, field).Str)
+					assert.Equal(t, tc.masked, slices.ContainsFunc(steps, func(step relaycommon.RequestPluginStep) bool {
+						return step.Plugin == "request-redact"
+					}))
+					assert.True(t, slices.ContainsFunc(steps, func(step relaycommon.RequestPluginStep) bool {
+						return step.Plugin == "request-filter"
+					}), "the user preference never disables request filtering")
+					if entry == "HTTP" {
+						info := &relaycommon.RelayInfo{OriginModelName: "gpt", RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeChatCompletions}
+						finish := requestplugin.Reply(c, types.RelayFormatOpenAI, info)
+						c.JSON(http.StatusOK, gin.H{"choices": []gin.H{{"index": 0, "message": gin.H{"role": "assistant", "content": "Contact alice@example.com"}, "finish_reason": "stop"}}})
+						finish()
+						reply := "Contact alice@example.com"
+						if tc.masked {
+							reply = "Contact ***"
+						}
+						assert.Equal(t, reply, gjson.Get(recorder.Body.String(), "choices.0.message.content").Str)
+					}
+				})
+			}
+		})
+	}
+	t.Run("administrator can try redaction without opting in", func(t *testing.T) {
+		result := dryRunBuiltIn(t, "request-redact", map[string]any{"categories": []string{"email"}}, `{"model":"gpt","messages":[{"role":"user","content":"alice@example.com"}]}`)
+		assert.Equal(t, "[REDACTED]", gjson.GetBytes(result.Body, "messages.0.content").Str)
+	})
 }
 
 func userContent(parts ...string) string {

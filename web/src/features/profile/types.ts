@@ -73,6 +73,8 @@ export interface UserProfile {
   created_time: number
   /** User settings (JSON string) */
   setting?: string
+  /** An administrator has enabled a request redaction instance */
+  request_redaction_available?: boolean
   /** WeChat ID (OAuth) */
   wechat_id?: string
   /** GitHub ID (OAuth) */
@@ -120,6 +122,8 @@ export interface UserSettings {
   accept_unset_model_ratio_model?: boolean
   /** Record IP log */
   record_ip_log?: boolean
+  /** Opt in to request redaction; absent means off */
+  request_redaction_enabled?: boolean
   /** Receive upstream model update notifications (admin only) */
   upstream_model_update_notify_enabled?: boolean
   /** Receive channel notifications (admin only); absent means on for root only */
@@ -154,6 +158,7 @@ export interface EmailBindingFlow extends AccountSecurityResult {
  * User settings update request
  */
 export interface UpdateUserSettingsRequest {
+  request_redaction_enabled?: boolean
   notify_type?: string
   quota_warning_threshold?: number
   quota_warning_enabled?: boolean

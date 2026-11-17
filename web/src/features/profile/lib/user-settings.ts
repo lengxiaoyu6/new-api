@@ -21,7 +21,10 @@ import type { NotifyType, UpdateUserSettingsRequest } from '../types'
 import { parseUserSettings } from './format'
 
 /** Switches whose absence means "never chosen", which the server resolves */
-type DefaultedSwitch = 'quota_warning_enabled' | 'channel_notify_enabled'
+type DefaultedSwitch =
+  | 'quota_warning_enabled'
+  | 'channel_notify_enabled'
+  | 'request_redaction_enabled'
 
 type NormalizedUserSettings = Required<
   Omit<UpdateUserSettingsRequest, DefaultedSwitch>
@@ -54,6 +57,7 @@ export function normalizeUserSettings(
     accept_unset_model_ratio_model:
       parsed.accept_unset_model_ratio_model || false,
     record_ip_log: parsed.record_ip_log || false,
+    request_redaction_enabled: parsed.request_redaction_enabled,
     upstream_model_update_notify_enabled:
       parsed.upstream_model_update_notify_enabled || false,
     channel_notify_enabled: parsed.channel_notify_enabled,

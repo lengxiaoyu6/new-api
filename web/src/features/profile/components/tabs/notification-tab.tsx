@@ -417,6 +417,30 @@ export function NotificationTab({
           </p>
         </div>
 
+        <SettingsControlGroup>
+          <SettingsSwitchField
+            controlId='requestRedaction'
+            label={t('Request redaction')}
+            description={
+              profile?.request_redaction_available
+                ? t(
+                    'Apply the configured redaction rules within the scope set by the administrator. Off by default.'
+                  )
+                : t(
+                    'Request redaction is unavailable until an administrator enables it.'
+                  )
+            }
+            checked={
+              profile?.request_redaction_available === true &&
+              (settings.request_redaction_enabled ?? false)
+            }
+            disabled={!profile?.request_redaction_available || loading}
+            onCheckedChange={(checked) =>
+              updateField('request_redaction_enabled', checked)
+            }
+          />
+        </SettingsControlGroup>
+
         {/* Accept Unset Model Price */}
         <div className='flex items-start justify-between gap-3 rounded-lg border p-3 sm:items-center sm:p-4'>
           <div className='space-y-0.5'>

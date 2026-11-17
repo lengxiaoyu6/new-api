@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/requestplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/service/authz"
@@ -527,6 +528,7 @@ func GetSelf(c *gin.Context) {
 		return
 	}
 	responseData := buildSelfUserData(user)
+	responseData["request_redaction_available"] = requestplugin.RedactionAvailable()
 	// The authenticated role is loaded from GetUserCache. It should equal the
 	// row role, but use it for capabilities so GetSelf and login/refresh remain
 	// consistent with the authorization decision made for this request.
@@ -1387,6 +1389,7 @@ type UpdateUserSettingRequest struct {
 	ChannelNotifyEnabled             *bool   `json:"channel_notify_enabled,omitempty"`
 	AcceptUnsetModelRatioModel       bool    `json:"accept_unset_model_ratio_model"`
 	RecordIpLog                      bool    `json:"record_ip_log"`
+	RequestRedactionEnabled          *bool   `json:"request_redaction_enabled,omitempty"`
 }
 
 func UpdateUserSetting(c *gin.Context) {
@@ -1483,6 +1486,9 @@ func UpdateUserSetting(c *gin.Context) {
 	settings.QuotaWarningThreshold = req.QuotaWarningThreshold
 	settings.AcceptUnsetRatioModel = req.AcceptUnsetModelRatioModel
 	settings.RecordIpLog = req.RecordIpLog
+	if req.RequestRedactionEnabled != nil {
+		settings.RequestRedactionEnabled = *req.RequestRedactionEnabled
+	}
 	if req.QuotaWarningEnabled != nil {
 		settings.QuotaWarningEnabled = req.QuotaWarningEnabled
 	}

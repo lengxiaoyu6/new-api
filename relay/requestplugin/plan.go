@@ -26,10 +26,11 @@ import (
 )
 
 const (
-	StageIngress  = "ingress"
-	StageRequest  = "request"
-	StageOutbound = "outbound"
-	StageEgress   = "egress"
+	StageIngress       = "ingress"
+	StageRequest       = "request"
+	StageOutbound      = "outbound"
+	StageEgress        = "egress"
+	redactionPluginKey = "request-redact"
 )
 
 // stageEffects are the effect types each stage may return. egress is
@@ -99,12 +100,26 @@ type Plan struct {
 	scopes map[string][]*request_plugin_setting.Scope
 }
 
-// NewPlan takes the plan of a new request: nil when no enabled instance has
-// an available plugin. The instances of a plugin that is missing, disabled
+// NewPlan snapshots all enabled instances for administrator dry runs, without
+// applying a user's redaction preference; relay entry points use newRequestPlan.
+// The instances of a plugin that is missing, disabled
 // or has no request processing part do not run. Those of a plugin that is
 // enabled but did not load stay in the plan as unavailable.
 func NewPlan() *Plan {
-	return newPlanOf(request_plugin_setting.GetInstances())
+	return newPlanOf(request_plugin_setting.GetInstances(), true)
+}
+
+// RedactionAvailable reports whether an administrator enabled a redaction
+// instance and its plugin is available. Its model, group and channel scope
+// still determines which requests it handles.
+func RedactionAvailable() bool {
+	plugin, _ := jsplugin.DefaultRegistry.GetIgnoringMasterSwitch(redactionPluginKey)
+	if plugin == nil || !plugin.Meta.HasTransformPart() {
+		return false
+	}
+	return slices.ContainsFunc(request_plugin_setting.GetInstances(), func(instance request_plugin_setting.Instance) bool {
+		return instance.Plugin == redactionPluginKey && instance.Enabled
+	})
 }
 
 // unloadedPlugins maps the key of each plugin the last plugin sync found
@@ -137,11 +152,11 @@ func unavailablePlugin(key string) (string, bool) {
 }
 
 // newPlanOf is the plan of instances, in their order.
-func newPlanOf(instances []request_plugin_setting.Instance) *Plan {
+func newPlanOf(instances []request_plugin_setting.Instance, redactionEnabled bool) *Plan {
 	var plan *Plan
 	var plugins map[string]*jsplugin.LoadedPlugin
 	for _, instance := range instances {
-		if !instance.Enabled {
+		if !instance.Enabled || instance.Plugin == redactionPluginKey && !redactionEnabled {
 			continue
 		}
 		if plugins == nil {

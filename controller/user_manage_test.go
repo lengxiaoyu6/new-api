@@ -836,6 +836,16 @@ func TestUpdateUserSettingKeepsWhatTheRequestLeavesOut(t *testing.T) {
 			body: `{"notify_type":"email","quota_warning_threshold":-1}`,
 			want: stored,
 		},
+		{
+			name:        "ordinary user opts in to request redaction",
+			role:        common.RoleCommonUser,
+			body:        `{"notify_type":"email","request_redaction_enabled":true}`,
+			wantSuccess: true,
+			want: kept(dto.UserSetting{
+				NotifyType: dto.NotifyTypeEmail, RequestRedactionEnabled: true,
+				QuotaWarningEnabled: &off, ChannelNotifyEnabled: &on, UpstreamModelUpdateNotifyEnabled: true,
+			}),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			db := setupManageUserTestDB(t)
@@ -854,6 +864,21 @@ func TestUpdateUserSettingKeepsWhatTheRequestLeavesOut(t *testing.T) {
 			assert.Contains(t, recorder.Body.String(), fmt.Sprintf(`"success":%t`, tc.wantSuccess))
 			require.NoError(t, db.First(&user, user.Id).Error)
 			assert.Equal(t, tc.want, user.GetSetting())
+			if tc.want.RequestRedactionEnabled {
+				// An older client may save unrelated settings without resetting
+				// consent. An explicit false revokes it, including cached relay settings.
+				for _, body := range []string{`{"notify_type":"email"}`, `{"notify_type":"email","request_redaction_enabled":false}`} {
+					c.Request = httptest.NewRequest(http.MethodPut, "/api/user/setting", strings.NewReader(body))
+					c.Request.Header.Set("Content-Type", "application/json")
+					UpdateUserSetting(c)
+					require.NoError(t, db.First(&user, user.Id).Error)
+					expected := !strings.Contains(body, `"request_redaction_enabled":false`)
+					assert.Equal(t, expected, user.GetSetting().RequestRedactionEnabled)
+					cached, err := model.GetUserCache(user.Id)
+					require.NoError(t, err)
+					assert.Equal(t, expected, cached.GetSetting().RequestRedactionEnabled)
+				}
+			}
 		})
 	}
 }
