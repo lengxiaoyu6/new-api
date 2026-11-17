@@ -20,6 +20,9 @@ import (
 // maxKeywordMatches bounds the keywords one utils.keywords call returns.
 const maxKeywordMatches = 32
 
+// maxKeywordAuditRunes bounds each configured keyword in an admin log.
+const maxKeywordAuditRunes = 256
+
 // keywordSearchChunk is how many runes of text one automaton search reads at
 // least. A search keeps every match it finds, so text is searched a chunk at
 // a time until the limit of keywords is found.
@@ -261,6 +264,14 @@ func (c *runtimeCall) keywords(r *moejs.Realm, fieldArgument, textArgument, opti
 	items := make([]moejs.Value, len(found))
 	for index, word := range found {
 		items[index] = moejs.String(word)
+		// Keep the configured spelling only, never the surrounding request
+		// text. Repeated searches in the same hook share one bounded audit.
+		if utf8.RuneCountInString(word) > maxKeywordAuditRunes {
+			word = string([]rune(word)[:maxKeywordAuditRunes]) + "…"
+		}
+		if len(c.transform.keywordMatches) < maxKeywordMatches && !slices.Contains(c.transform.keywordMatches, word) {
+			c.transform.keywordMatches = append(c.transform.keywordMatches, word)
+		}
 	}
 	return r.FromGo(r.NewArrayFromSlice(items))
 }

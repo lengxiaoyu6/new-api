@@ -384,6 +384,7 @@ func (p *Plan) Run(ctx context.Context, call Call) Outcome {
 		started := time.Now()
 		next, class, err := p.runInstance(ctx, call, instance, plugin, outcome.Body, outcome.Headers)
 		step.DurationMS = time.Since(started).Milliseconds()
+		step.KeywordMatches = next.keywordMatches
 		for _, finding := range next.findings {
 			step.Findings = append(step.Findings, relaycommon.RequestPluginFinding{Rule: finding.Rule, Category: finding.Category, Count: finding.Count})
 		}
@@ -430,13 +431,14 @@ func (p *Plan) Run(ctx context.Context, call Call) Outcome {
 // change is what one instance asked for, checked and ready to commit, with
 // its public record.
 type change struct {
-	body      []byte
-	headers   []requestpatch.Effect
-	reasoning *requestpatch.Effect
-	effects   int
-	findings  []jsplugin.TransformFinding
-	reject    *jsplugin.TransformResult
-	record    relaycommon.RequestPluginRecord
+	body           []byte
+	headers        []requestpatch.Effect
+	reasoning      *requestpatch.Effect
+	effects        int
+	findings       []jsplugin.TransformFinding
+	keywordMatches []string
+	reject         *jsplugin.TransformResult
+	record         relaycommon.RequestPluginRecord
 }
 
 // runInstance calls one instance on body and checks its effects. The error
@@ -488,7 +490,7 @@ func (p *Plan) runInstance(ctx context.Context, call Call, instance *request_plu
 		return change{}, class, err
 	}
 
-	next := change{body: body, findings: result.Findings}
+	next := change{body: body, findings: result.Findings, keywordMatches: result.KeywordMatches}
 	for _, finding := range result.Findings {
 		next.record.Findings = append(next.record.Findings, relaycommon.RequestPluginCount{Category: finding.Category, Count: finding.Count})
 	}

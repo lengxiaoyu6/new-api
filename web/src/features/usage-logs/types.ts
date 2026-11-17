@@ -196,6 +196,7 @@ export type RequestPluginAdminStep = {
   error?: string
   error_class?: string
   rule?: string
+  keyword_matches?: string[]
   findings?: { rule: string; category?: string; count: number }[]
 }
 

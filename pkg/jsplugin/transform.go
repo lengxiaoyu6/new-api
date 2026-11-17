@@ -169,6 +169,9 @@ type TransformContext struct {
 	Media MediaSource `json:"-"`
 	// keywordFields are the plugin's keywords format properties.
 	keywordFields []string
+	// keywordMatches holds configured keywords found by utils.keywords,
+	// for the host's administrator-only audit.
+	keywordMatches []string
 }
 
 type TransformMedia struct {
@@ -214,6 +217,8 @@ type TransformResult struct {
 	Code     string
 	Message  string
 	RuleID   string
+	// KeywordMatches comes from the host matcher, never the hook result.
+	KeywordMatches []string
 	// Notice is the plugin's plain explanation of what it did, which the host
 	// shows users in the log; nil when absent.
 	Notice LocalizedText
@@ -326,6 +331,7 @@ func (p *LoadedPlugin) CallTransform(ctx context.Context, tctx TransformContext,
 		failure.Class, failure.reason = TransformErrorResult, reason
 		return TransformResult{}, failure
 	}
+	decoded.KeywordMatches = tctx.keywordMatches
 	return decoded, nil
 }
 
@@ -524,6 +530,8 @@ type ReplyResult struct {
 	Notice   LocalizedText
 	Code     string
 	Message  string
+	// KeywordMatches comes from the host matcher, never the hook result.
+	KeywordMatches []string
 }
 
 // CallReply runs the reply hook with tctx.Stage "reply" on outputs and checks
@@ -555,6 +563,7 @@ func (p *LoadedPlugin) CallReply(ctx context.Context, tctx TransformContext, str
 		failure.Class, failure.reason = TransformErrorResult, reason
 		return ReplyResult{}, failure
 	}
+	decoded.KeywordMatches = tctx.keywordMatches
 	return decoded, nil
 }
 

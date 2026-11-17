@@ -1221,9 +1221,86 @@ func TestRequestFilterKeywords(t *testing.T) {
 
 	// Replies too, holding back the longest keyword.
 	replies := `{"keywords": "Forbidden\nab", "replies": true}`
-	assert.Equal(t, jsplugin.ReplyResult{Action: "stop", Code: "request_filtered", Findings: []jsplugin.TransformFinding{{Rule: "keywords", Count: 1}}},
+	assert.Equal(t, jsplugin.ReplyResult{Action: "stop", Code: "request_filtered", Findings: []jsplugin.TransformFinding{{Rule: "keywords", Count: 1}}, KeywordMatches: []string{"Forbidden"}},
 		runReplyHook(t, "request-filter", replies, true, false, "this is forbidden"))
 	assert.Equal(t, jsplugin.ReplyResult{Action: "continue", Hold: len("Forbidden") - 1}, runReplyHook(t, "request-filter", replies, true, false, "fine"))
+}
+
+func TestRequestFilterKeywordAudit(t *testing.T) {
+	const body = `{"model":"gpt","messages":[{"role":"user","content":"private request: https://GOV.CN/ GOV.CN"}]}`
+	config := map[string]any{"keywords": "example.org\ngov.cn"}
+	for _, stage := range []string{"ingress", "egress"} {
+		t.Run(stage, func(t *testing.T) {
+			encoded, err := common.Marshal(config)
+			require.NoError(t, err)
+			result := runRequestPlugin(t, "request-filter", stage, string(encoded), jsplugin.TransformRequest{Body: json.RawMessage(body)})
+			require.Equal(t, "reject", result.Action)
+			assert.Equal(t, []string{"gov.cn"}, result.KeywordMatches)
+			assert.NotContains(t, result.Message, "gov.cn")
+		})
+	}
+	t.Run("request log", func(t *testing.T) {
+		result := dryRunBuiltIn(t, "request-filter", config, body)
+		require.NotNil(t, result.Rejected)
+		audit, err := common.Marshal(result.Steps)
+		require.NoError(t, err)
+		assert.JSONEq(t, `["gov.cn"]`, gjson.GetBytes(audit, "0.keyword_matches").Raw)
+		assert.NotContains(t, string(audit), "private request")
+		public, err := common.Marshal(result.Record)
+		require.NoError(t, err)
+		assert.NotContains(t, string(public), "gov.cn")
+		assert.NotContains(t, string(public), "keyword_matches")
+	})
+	t.Run("reply log", func(t *testing.T) {
+		plugin, found := jsplugin.DefaultRegistry.Generation().Get("request-filter")
+		require.True(t, found)
+		validated, err := plugin.ValidateConfig(json.RawMessage(`{"keywords":"example.org\ngov.cn","replies":true}`))
+		require.NoError(t, err)
+		reply := "private reply: https://GOV.CN/ GOV.CN"
+		result := requestplugin.DryRun(t.Context(), requestplugin.DryRunInput{
+			Format: "openai", Path: "/v1/chat/completions", Model: "gpt", Group: "default",
+			Body: []byte(`{"model":"gpt","messages":[{"role":"user","content":"hello"}]}`), Reply: &reply,
+			Instance: &request_plugin_setting.Instance{ID: "try", Name: "Sensitive words", Plugin: "request-filter", Config: validated},
+		})
+		require.Nil(t, result.Failed)
+		audit, err := common.Marshal(result.Steps)
+		require.NoError(t, err)
+		assert.JSONEq(t, `["gov.cn"]`, gjson.GetBytes(audit, `#(stage=="reply").keyword_matches`).Raw)
+		assert.NotContains(t, string(audit), "private reply")
+		public, err := common.Marshal(result.Record)
+		require.NoError(t, err)
+		assert.NotContains(t, string(public), "gov.cn")
+	})
+	t.Run("attachment log", func(t *testing.T) {
+		result := dryRunBuiltIn(t, "request-filter", config,
+			userContent(fileAttachment("memo.txt", "text/plain", []byte("private attachment: GOV.CN"))))
+		require.NotNil(t, result.Rejected)
+		require.NotEmpty(t, result.Steps)
+		assert.Equal(t, []string{"gov.cn"}, result.Steps[0].KeywordMatches)
+	})
+	t.Run("no match", func(t *testing.T) {
+		result := dryRunBuiltIn(t, "request-filter", config, `{"model":"gpt","messages":[{"role":"user","content":"hello"}]}`)
+		require.Nil(t, result.Rejected)
+		for _, step := range result.Steps {
+			assert.Empty(t, step.KeywordMatches)
+		}
+	})
+	t.Run("bounded audit preserves rejection", func(t *testing.T) {
+		longWord := strings.Repeat("界", 300)
+		words := []string{longWord}
+		for index := range 32 {
+			words = append(words, fmt.Sprintf("blocked-%02d", index))
+		}
+		encoded, err := common.Marshal(map[string]any{"keywords": strings.Join(words, "\n")})
+		require.NoError(t, err)
+		request, err := common.Marshal(map[string]any{"model": "gpt", "messages": []map[string]any{{"role": "user", "content": strings.Join(words, " ")}}})
+		require.NoError(t, err)
+		result := runRequestPlugin(t, "request-filter", "ingress", string(encoded), jsplugin.TransformRequest{Body: request})
+		require.Equal(t, "reject", result.Action)
+		require.Len(t, result.KeywordMatches, 32)
+		assert.Equal(t, strings.Repeat("界", 256)+"…", result.KeywordMatches[0])
+		assert.Equal(t, "blocked-30", result.KeywordMatches[31])
+	})
 }
 
 // A migrated sensitive-word list checks at least the text the gateway's own

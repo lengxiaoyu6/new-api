@@ -124,16 +124,17 @@ type replyTarget struct {
 	// skipped is set when the instance let the rest of the answer pass, or
 	// failed and its plugin is optional: the text passes it unchanged for the
 	// rest of the answer.
-	skipped   bool
-	action    string
-	masked    int
-	findings  []relaycommon.RequestPluginFinding
-	notice    jsplugin.LocalizedText
-	duration  time.Duration
-	errClass  string
-	detail    string
-	rejected  string
-	unchecked bool
+	skipped        bool
+	action         string
+	masked         int
+	findings       []relaycommon.RequestPluginFinding
+	keywordMatches []string
+	notice         jsplugin.LocalizedText
+	duration       time.Duration
+	errClass       string
+	detail         string
+	rejected       string
+	unchecked      bool
 }
 
 // replyOutput is one answer of a reply: the upstream text the instances have
@@ -411,6 +412,11 @@ func (r *replyCheck) callTarget(target *replyTarget, outputs []jsplugin.ReplyOut
 	for _, finding := range result.Findings {
 		target.addFinding(finding)
 	}
+	for _, keyword := range result.KeywordMatches {
+		if len(target.keywordMatches) < 32 && !slices.Contains(target.keywordMatches, keyword) {
+			target.keywordMatches = append(target.keywordMatches, keyword)
+		}
+	}
 	if len(result.Notice) > 0 {
 		target.notice = maps.Clone(result.Notice)
 	}
@@ -444,16 +450,17 @@ func (r *replyCheck) steps() []Step {
 			continue
 		}
 		steps = append(steps, Step{RequestPluginStep: relaycommon.RequestPluginStep{
-			Instance:   target.instance.ID,
-			Name:       target.instance.Name,
-			Plugin:     target.instance.Plugin,
-			Version:    target.plugin.Meta.Version,
-			Stage:      StageReply,
-			Action:     target.action,
-			Effects:    target.masked,
-			Findings:   slices.Clone(target.findings),
-			DurationMS: target.duration.Milliseconds(),
-			Error:      target.errClass,
+			Instance:       target.instance.ID,
+			Name:           target.instance.Name,
+			Plugin:         target.instance.Plugin,
+			Version:        target.plugin.Meta.Version,
+			Stage:          StageReply,
+			Action:         target.action,
+			Effects:        target.masked,
+			Findings:       slices.Clone(target.findings),
+			KeywordMatches: slices.Clone(target.keywordMatches),
+			DurationMS:     target.duration.Milliseconds(),
+			Error:          target.errClass,
 		}, Detail: target.detail})
 	}
 	return steps

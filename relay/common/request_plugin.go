@@ -21,8 +21,8 @@ type RequestPluginFinding struct {
 }
 
 // RequestPluginStep is the administrators' audit record of one request
-// plugin instance run at one stage. It never holds request content or
-// plugin messages.
+// plugin instance run at one stage. KeywordMatches contains only configured
+// keywords; surrounding request content and plugin messages are never stored.
 type RequestPluginStep struct {
 	Instance string `json:"instance"`
 	Name     string `json:"name"`
@@ -31,10 +31,11 @@ type RequestPluginStep struct {
 	Stage    string `json:"stage"`
 	Action   string `json:"action"`
 	// RuleID is the rule a rejection names.
-	RuleID     string                 `json:"rule,omitempty"`
-	Effects    int                    `json:"effects"`
-	Findings   []RequestPluginFinding `json:"findings,omitempty"`
-	DurationMS int64                  `json:"duration_ms"`
+	RuleID         string                 `json:"rule,omitempty"`
+	Effects        int                    `json:"effects"`
+	Findings       []RequestPluginFinding `json:"findings,omitempty"`
+	KeywordMatches []string               `json:"keyword_matches,omitempty"`
+	DurationMS     int64                  `json:"duration_ms"`
 	// Error is the class of a failure.
 	Error string `json:"error_class,omitempty"`
 }

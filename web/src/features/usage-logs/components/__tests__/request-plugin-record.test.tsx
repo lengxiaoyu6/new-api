@@ -108,6 +108,15 @@ const other: LogOtherData = {
         error_class: 'timeout',
         findings: [{ rule: 'email-rule', category: 'email', count: 1 }],
       },
+      {
+        instance: 'rp_filter',
+        name: 'Sensitive words',
+        plugin: 'request-filter',
+        stage: 'ingress',
+        action: 'reject',
+        rule: 'keywords',
+        keyword_matches: ['gov.cn', 'secret.cn'],
+      },
     ],
   },
 }
@@ -258,6 +267,8 @@ describe('request processing in the log details', () => {
       expect(steps).toBeNull()
       expect(screen.queryByText('Hide personal data (rp_aaaa1111)')).toBeNull()
       expect(screen.queryByText('timeout')).toBeNull()
+      expect(screen.queryByText('gov.cn, secret.cn')).toBeNull()
+      expect(screen.queryByText('Sensitive words (rp_filter)')).toBeNull()
       return
     }
     expect(steps).toBeInTheDocument()
@@ -268,6 +279,9 @@ describe('request processing in the log details', () => {
     expect(screen.getByText('4 ms')).toBeInTheDocument()
     expect(screen.getByText('timeout')).toBeInTheDocument()
     expect(screen.getByText('email-rule')).toBeInTheDocument()
+    expect(screen.getByText('Sensitive words (rp_filter)')).toBeInTheDocument()
+    expect(screen.getByText('Matched keywords')).toBeInTheDocument()
+    expect(screen.getByText('gov.cn, secret.cn')).toBeInTheDocument()
   })
 })
 

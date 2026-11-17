@@ -483,6 +483,13 @@ export function RequestPluginAdminSteps(props: {
             {rules.length > 0 && (
               <DetailRow label={t('Rules')} value={rules.join(', ')} mono />
             )}
+            {step.keyword_matches?.length ? (
+              <DetailRow
+                label={t('Matched keywords')}
+                value={step.keyword_matches.join(', ')}
+                mono
+              />
+            ) : null}
           </div>
         )
       })}
