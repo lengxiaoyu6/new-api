@@ -141,7 +141,11 @@ export function getDynamicPriceUnitLabelKey(
   return null
 }
 
-const PRIMARY_DYNAMIC_FIELDS = new Set(['inputPrice', 'outputPrice'])
+const PRIMARY_DYNAMIC_FIELDS = new Set([
+  'inputPrice',
+  'outputPrice',
+  'fixedPrice',
+])
 
 function isTaskPricingTier(tier: DynamicPricingTier): tier is ParsedTaskTier {
   return (
@@ -606,22 +610,12 @@ export function getDynamicPricingSummary(
       ? entries.filter(
           (entry) => entry.unit !== 'request' && entry.unit !== 'image'
         )
-      : entries.filter(
-          (entry) =>
-            entry.unit === 'request' ||
-            entry.unit === 'image' ||
-            PRIMARY_DYNAMIC_FIELDS.has(entry.field)
-        ),
+      : entries.filter((entry) => PRIMARY_DYNAMIC_FIELDS.has(entry.field)),
     secondaryEntries: isTaskUsage
       ? entries.filter(
           (entry) => entry.unit === 'request' || entry.unit === 'image'
         )
-      : entries.filter(
-          (entry) =>
-            entry.unit !== 'request' &&
-            entry.unit !== 'image' &&
-            !PRIMARY_DYNAMIC_FIELDS.has(entry.field)
-        ),
+      : entries.filter((entry) => !PRIMARY_DYNAMIC_FIELDS.has(entry.field)),
     isTaskUsage,
     isTimePricing: timeTiers !== null,
     ...(isMixedBilling ? { isMixedBilling } : {}),

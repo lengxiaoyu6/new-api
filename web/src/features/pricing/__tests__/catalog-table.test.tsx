@@ -113,6 +113,74 @@ function renderCatalog(
 }
 
 describe('responsive catalog table', () => {
+  it.each(['table', 'mobile', 'card'] as const)(
+    'shows native OCR, TTS, and ASR unit prices independently of token units in the %s view',
+    async (view) => {
+      if (view === 'mobile') {
+        const original = window.matchMedia
+        vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({
+          ...original(query),
+          matches: query === '(max-width: 767px)' || original(query).matches,
+        }))
+      }
+      const prices = [
+        {
+          name: 'deepseek-ocr',
+          expression: 'tier("page", fixed(0.000225)) * page_count',
+          price: '0.000225',
+          unit: 'page',
+          label: 'Per page',
+        },
+        {
+          name: 'deepseek-tts',
+          expression: 'tier("character", fixed(0.0000225)) * character_count',
+          price: '0.000023',
+          unit: 'character',
+          label: 'Per character',
+        },
+        {
+          name: 'deepseek-asr',
+          expression:
+            'tier("second", fixed(0.000016111111111111112)) * audio_seconds',
+          price: '0.000016',
+          unit: 's',
+          label: 'Per second',
+        },
+      ]
+      const models: PricingModel[] = prices.map((entry, index) => ({
+        ...model,
+        id: index + 1,
+        model_name: entry.name,
+        billing_mode: 'tiered_expr',
+        billing_expr: entry.expression,
+      }))
+      const viewMode = view === 'card' ? 'card' : 'table'
+      const { rerender } = renderCatalog(models, {
+        viewMode,
+        tokenUnit: 'K',
+      })
+      await waitFor(() => {
+        for (const entry of prices) {
+          expect(
+            screen.getByText(`${entry.price}/${entry.unit}`, { exact: true })
+          ).toBeVisible()
+          expect(screen.getByText(entry.label)).toBeVisible()
+        }
+      })
+      rerender(
+        <QueryClientProvider client={client}>
+          <PricingTable models={models} viewMode={viewMode} tokenUnit='M' />
+        </QueryClientProvider>
+      )
+      for (const entry of prices) {
+        expect(
+          screen.getByText(`${entry.price}/${entry.unit}`, { exact: true })
+        ).toBeVisible()
+      }
+      expect(screen.queryByText('Dynamic Pricing')).not.toBeInTheDocument()
+    }
+  )
+
   it.each(['table', 'mobile'])(
     'shows availability only for the selected group and keeps group caches separate in the %s view',
     async (view) => {
