@@ -70,9 +70,16 @@ var GetTaskAdaptorFunc func(platform constant.TaskPlatform) TaskPollingAdaptor
 // state to the request plugins' report hooks (requestplugin.ReportTask).
 var ReportTaskFunc func(task *model.Task)
 
-// reportFinalTask reports a task once, after its final state is stored and
-// settled. A task no instance may report costs nothing.
+// CacheTaskArtifactsFunc is injected by main and queues successful video outputs
+// for local persistence without holding up polling or settlement.
+var CacheTaskArtifactsFunc func(task *model.Task)
+
+// reportFinalTask queues successful outputs and reports a task once, after its
+// final state is stored and settled.
 func reportFinalTask(task *model.Task) {
+	if task.Status == model.TaskStatusSuccess && CacheTaskArtifactsFunc != nil {
+		CacheTaskArtifactsFunc(task)
+	}
 	if ReportTaskFunc != nil && task.PrivateData.RequestPlugins != nil {
 		ReportTaskFunc(task)
 	}

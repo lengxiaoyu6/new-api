@@ -93,6 +93,9 @@ func VideoProxy(c *gin.Context) {
 				if artifact.Type != "video" {
 					continue
 				}
+				if serveCachedTaskVideo(c, task, artifact) {
+					return
+				}
 				adaptor, adaptorErr := initTaskArtifactAdaptor(task)
 				if adaptorErr == nil {
 					if provider, ok := adaptor.(relaychannel.TaskContentRequestProvider); ok {
@@ -111,6 +114,9 @@ func VideoProxy(c *gin.Context) {
 		} else {
 			logger.LogWarn(c.Request.Context(), common.LogText("Failed to project plugin video for task %s", taskID))
 		}
+	}
+	if !taskHasPluginExecution(task) && serveCachedTaskVideo(c, task, relaychannel.TaskArtifact{Key: "video", Type: "video"}) {
+		return
 	}
 	if descriptor == nil {
 		resultURL := task.GetResultURL()
@@ -133,36 +139,90 @@ func VideoProxy(c *gin.Context) {
 }
 
 func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest) error {
-	if descriptor == nil {
+	resp, err := requestTaskMedia(c, task, descriptor)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return writeTaskMediaResponse(c, resp)
+}
+
+func writeTaskMediaResponse(c *gin.Context, resp *http.Response) error {
+	if err := taskMediaResponseError(resp); err != nil {
+		if resp.StatusCode == http.StatusTooManyRequests {
+			if retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfter != "" &&
+				len(retryAfter) <= 256 && !strings.ContainsAny(retryAfter, "\r\n") {
+				c.Header("Retry-After", retryAfter)
+			}
+		}
+		return err
+	}
+	copyTaskMediaResponseHeaders(c.Writer.Header(), resp.Header)
+	setTaskMediaResponseSecurityHeaders(c.Writer.Header())
+	c.Status(resp.StatusCode)
+	c.Writer.WriteHeaderNow()
+	if c.Request.Method == http.MethodHead || resp.StatusCode == http.StatusNotModified {
+		return nil
+	}
+	if _, err := io.Copy(c.Writer, resp.Body); err != nil {
+		logger.LogError(c.Request.Context(), common.LogText("Failed to stream task media: %v", err))
+	}
+	return nil
+}
+
+func taskMediaResponseError(resp *http.Response) error {
+	switch resp.StatusCode {
+	case http.StatusOK, http.StatusPartialContent, http.StatusNotModified, http.StatusRequestedRangeNotSatisfiable:
+		return nil
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return &taskMediaProxyError{
+			status: http.StatusBadGateway, code: "artifact_upstream_auth_failed",
+			message: "Artifact upstream authentication failed",
+		}
+	case http.StatusNotFound, http.StatusGone:
+		return &taskMediaProxyError{
+			status: http.StatusGone, code: "artifact_gone",
+			message: "Artifact content is no longer available",
+		}
+	case http.StatusTooManyRequests:
+		return &taskMediaProxyError{
+			status: http.StatusServiceUnavailable, code: "artifact_upstream_busy",
+			message: "Artifact upstream is busy",
+		}
+	default:
+		return &taskMediaProxyError{
+			status: http.StatusBadGateway, code: "artifact_upstream_error",
+			message: fmt.Sprintf("Artifact upstream returned status %d", resp.StatusCode),
+		}
+	}
+}
+
+func requestTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.TaskContentRequest) (*http.Response, error) {
+	if descriptor == nil {
+		return nil, &taskMediaProxyError{
 			status: http.StatusInternalServerError, code: "artifact_plugin_error",
 			message: "Artifact content plugin returned no request",
 		}
 	}
 	rawURL := strings.TrimSpace(descriptor.URL)
 	if rawURL == "" {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusGone, code: "artifact_gone",
 			message: "Artifact content is no longer available",
 		}
 	}
 	if strings.HasPrefix(rawURL, "data:") {
 		if len(rawURL) > taskMediaDataURLMaxEncodedBytes {
-			return &taskMediaProxyError{
+			return nil, &taskMediaProxyError{
 				status: http.StatusBadGateway, code: "artifact_request_rejected",
 				message: "Artifact request was rejected", err: errTaskMediaRequestRejected,
 			}
 		}
-		if err := writeVideoDataURL(c, rawURL); err != nil {
-			return &taskMediaProxyError{
-				status: http.StatusBadGateway, code: "artifact_upstream_error",
-				message: "Failed to decode artifact content", err: err,
-			}
-		}
-		return nil
+		return taskMediaDataURLResponse(rawURL)
 	}
+
 	if len(rawURL) > 64<<10 {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request was rejected", err: errTaskMediaRequestRejected,
 		}
@@ -171,13 +231,13 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil || parsedURL == nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") ||
 		parsedURL.Host == "" || parsedURL.User != nil || parsedURL.Fragment != "" {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request was rejected", err: errTaskMediaRequestRejected,
 		}
 	}
 	if isTaskMediaFallbackLoop(rawURL, task.TaskID) || isSelfTaskMediaURL(c, parsedURL) {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact proxy loop was rejected", err: errTaskMediaRequestRejected,
 		}
@@ -190,13 +250,13 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodPost:
 	default:
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request method was rejected", err: errTaskMediaRequestRejected,
 		}
 	}
 	if len(descriptor.Body) > 1<<20 {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request body was rejected", err: errTaskMediaRequestRejected,
 		}
@@ -204,7 +264,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	if descriptor.Credentialless &&
 		(method != http.MethodGet && method != http.MethodHead ||
 			descriptor.Body != nil || len(descriptor.Headers) != 0) {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Credentialless artifact request was rejected", err: errTaskMediaRequestRejected,
 		}
@@ -212,7 +272,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 
 	channel, err := model.CacheGetChannel(task.ChannelId)
 	if err != nil {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusServiceUnavailable, code: "artifact_plugin_unavailable",
 			message: "Artifact channel is unavailable", err: err,
 		}
@@ -220,7 +280,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	setting := channel.GetSetting()
 	proxy := strings.TrimSpace(setting.Proxy)
 	if err := validateTaskMediaURL(rawURL, proxy); err != nil {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request was rejected", err: err,
 		}
@@ -230,7 +290,7 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	if proxy != "" {
 		client, err = service.GetHttpClientWithProxySettings(proxy, setting)
 		if err != nil {
-			return &taskMediaProxyError{
+			return nil, &taskMediaProxyError{
 				status: http.StatusInternalServerError, code: "artifact_internal_error",
 				message: "Failed to create artifact proxy client", err: err,
 			}
@@ -242,13 +302,13 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 
 	req, err := http.NewRequestWithContext(c.Request.Context(), method, parsedURL.String(), bytes.NewReader(descriptor.Body))
 	if err != nil {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusInternalServerError, code: "artifact_internal_error",
 			message: "Failed to create artifact request", err: err,
 		}
 	}
 	if err := applyTaskMediaRequestHeaders(req.Header, descriptor.Headers); err != nil {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request headers were rejected", err: err,
 		}
@@ -268,66 +328,28 @@ func proxyTaskMedia(c *gin.Context, task *model.Task, descriptor *relaychannel.T
 	resp, err := doTaskMediaRequest(&clientWithoutBodyTimeout, req, taskMediaResponseHeaderTimeout)
 	if err != nil {
 		if errors.Is(err, errTaskMediaRequestRejected) {
-			return &taskMediaProxyError{
+			return nil, &taskMediaProxyError{
 				status: http.StatusBadGateway, code: "artifact_request_rejected",
 				message: "Artifact redirect was rejected", err: err,
 			}
 		}
 		var netErr net.Error
 		if errors.Is(err, context.DeadlineExceeded) || errors.As(err, &netErr) && netErr.Timeout() {
-			return &taskMediaProxyError{
+			return nil, &taskMediaProxyError{
 				status: http.StatusGatewayTimeout, code: "artifact_upstream_timeout",
 				message: "Artifact upstream request timed out", err: err,
 			}
 		}
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_upstream_error",
 			message: "Failed to fetch artifact content", err: err,
 		}
 	}
-	defer resp.Body.Close()
-
 	if len(descriptor.ContentPath) > 0 && resp.StatusCode == http.StatusOK {
-		return writeTaskMediaContentPath(c, resp.Body, descriptor)
+		defer resp.Body.Close()
+		return readTaskMediaContentPath(resp.Body, descriptor)
 	}
-	switch resp.StatusCode {
-	case http.StatusOK, http.StatusPartialContent, http.StatusNotModified, http.StatusRequestedRangeNotSatisfiable:
-		copyTaskMediaResponseHeaders(c.Writer.Header(), resp.Header)
-		setTaskMediaResponseSecurityHeaders(c.Writer.Header())
-		c.Status(resp.StatusCode)
-		c.Writer.WriteHeaderNow()
-		if c.Request.Method == http.MethodHead || resp.StatusCode == http.StatusNotModified {
-			return nil
-		}
-		if _, err := io.Copy(c.Writer, resp.Body); err != nil {
-			logger.LogError(c.Request.Context(), common.LogText("Failed to stream task media: %v", err))
-		}
-		return nil
-	case http.StatusUnauthorized, http.StatusForbidden:
-		return &taskMediaProxyError{
-			status: http.StatusBadGateway, code: "artifact_upstream_auth_failed",
-			message: "Artifact upstream authentication failed",
-		}
-	case http.StatusNotFound, http.StatusGone:
-		return &taskMediaProxyError{
-			status: http.StatusGone, code: "artifact_gone",
-			message: "Artifact content is no longer available",
-		}
-	case http.StatusTooManyRequests:
-		if retryAfter := strings.TrimSpace(resp.Header.Get("Retry-After")); retryAfter != "" &&
-			len(retryAfter) <= 256 && !strings.ContainsAny(retryAfter, "\r\n") {
-			c.Header("Retry-After", retryAfter)
-		}
-		return &taskMediaProxyError{
-			status: http.StatusServiceUnavailable, code: "artifact_upstream_busy",
-			message: "Artifact upstream is busy",
-		}
-	default:
-		return &taskMediaProxyError{
-			status: http.StatusBadGateway, code: "artifact_upstream_error",
-			message: fmt.Sprintf("Artifact upstream returned status %d", resp.StatusCode),
-		}
-	}
+	return resp, nil
 }
 
 type taskMediaHTTPResult struct {
@@ -335,12 +357,12 @@ type taskMediaHTTPResult struct {
 	err      error
 }
 
-// writeTaskMediaContentPath answers with an artifact the upstream delivers
+// readTaskMediaContentPath reads an artifact the upstream delivers
 // inside a long-running operation: the base64 string at the descriptor's
 // ContentPath of the JSON reply. An operation that failed is an upstream
 // error, one not yet done is not ready, and one without the string, expired
 // or written to storage instead, no longer has the content.
-func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relaychannel.TaskContentRequest) error {
+func readTaskMediaContentPath(body io.Reader, descriptor *relaychannel.TaskContentRequest) (*http.Response, error) {
 	limitMB := constant.MaxFileDownloadMB
 	if limitMB <= 0 {
 		limitMB = 64
@@ -349,19 +371,19 @@ func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relay
 	limit := int64(limitMB)<<20*4/3 + 1<<20
 	raw, err := io.ReadAll(io.LimitReader(body, limit+1))
 	if err != nil {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_upstream_error",
 			message: "Failed to fetch artifact content", err: err,
 		}
 	}
 	if int64(len(raw)) > limit {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_request_rejected",
 			message: "Artifact request was rejected", err: errTaskMediaRequestRejected,
 		}
 	}
 	if !ojson.ValidBytes(raw) {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_upstream_error",
 			message: "Failed to decode artifact content",
 		}
@@ -370,14 +392,14 @@ func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relay
 	// artifact is written, so the base64 payload is not copied.
 	operation := ojson.GetBytesNoCopy(raw, "@this")
 	if failure := operation.Get("error"); failure.Exists() && failure.Type != ojson.Null {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusBadGateway, code: "artifact_upstream_error",
 			message: "Artifact upstream returned an error",
 		}
 	}
 	// An interaction reports completion through status, not done.
 	if operation.Get("done").Type != ojson.True && operation.Get("status").String() != "completed" {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusConflict, code: "artifact_not_ready",
 			message: "Task artifacts are not ready",
 		}
@@ -404,18 +426,12 @@ func writeTaskMediaContentPath(c *gin.Context, body io.Reader, descriptor *relay
 		content = content.Get(index)
 	}
 	if content.Type != ojson.String || content.Str == "" {
-		return &taskMediaProxyError{
+		return nil, &taskMediaProxyError{
 			status: http.StatusGone, code: "artifact_gone",
 			message: "Artifact content is no longer available",
 		}
 	}
-	if err := writeTaskMediaBase64(c, descriptor.MimeType, content.Str); err != nil {
-		return &taskMediaProxyError{
-			status: http.StatusBadGateway, code: "artifact_upstream_error",
-			message: "Failed to decode artifact content", err: err,
-		}
-	}
-	return nil
+	return taskMediaBase64Response(descriptor.MimeType, content.Str)
 }
 
 type taskMediaCancelBody struct {
@@ -656,35 +672,33 @@ func writeTaskMediaProxyError(c *gin.Context, err error) {
 	writeTaskArtifactError(c, proxyErr.status, proxyErr.code, proxyErr.message)
 }
 
-func writeVideoDataURL(c *gin.Context, dataURL string) error {
+func taskMediaDataURLResponse(dataURL string) (*http.Response, error) {
 	if len(dataURL) > taskMediaDataURLMaxEncodedBytes {
-		return errTaskMediaRequestRejected
+		return nil, errTaskMediaRequestRejected
 	}
 	parts := strings.SplitN(dataURL, ",", 2)
 	if len(parts) != 2 {
-		return fmt.Errorf("invalid data url")
+		return nil, fmt.Errorf("invalid data url")
 	}
 
 	header := parts[0]
 	payload := parts[1]
 	if !strings.HasPrefix(header, "data:") || !strings.Contains(header, ";base64") {
-		return fmt.Errorf("unsupported data url")
+		return nil, fmt.Errorf("unsupported data url")
 	}
 
 	mimeType := strings.TrimPrefix(header, "data:")
 	mimeType = strings.TrimSuffix(mimeType, ";base64")
-	return writeTaskMediaBase64(c, mimeType, payload)
+	return taskMediaBase64Response(mimeType, payload)
 }
 
-// writeTaskMediaBase64 answers with media the upstream delivered as base64,
-// decoding it while it streams; HEAD gets the headers only. The media type
-// defaults to video/mp4.
-func writeTaskMediaBase64(c *gin.Context, mimeType, payload string) error {
+// taskMediaBase64Response decodes inline media as a streaming response.
+func taskMediaBase64Response(mimeType, payload string) (*http.Response, error) {
 	if mimeType == "" {
 		mimeType = "video/mp4"
 	}
 	if len(mimeType) > 255 || !httpguts.ValidHeaderFieldValue(mimeType) {
-		return fmt.Errorf("invalid data url media type")
+		return nil, fmt.Errorf("invalid data url media type")
 	}
 
 	var encoding *base64.Encoding
@@ -698,16 +712,16 @@ func writeTaskMediaBase64(c *gin.Context, mimeType, payload string) error {
 		}
 	}
 	if encoding == nil {
-		return fmt.Errorf("invalid base64 data")
+		return nil, fmt.Errorf("invalid base64 data")
 	}
 
-	c.Writer.Header().Set("Content-Type", mimeType)
-	c.Writer.Header().Set("Content-Length", strconv.FormatInt(contentLength, 10))
-	setTaskMediaResponseSecurityHeaders(c.Writer.Header())
-	c.Writer.WriteHeader(http.StatusOK)
-	if c.Request.Method == http.MethodHead {
-		return nil
-	}
-	_, err := io.Copy(c.Writer, base64.NewDecoder(encoding, strings.NewReader(payload)))
-	return err
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type":   []string{mimeType},
+			"Content-Length": []string{strconv.FormatInt(contentLength, 10)},
+		},
+		ContentLength: contentLength,
+		Body:          io.NopCloser(base64.NewDecoder(encoding, strings.NewReader(payload))),
+	}, nil
 }

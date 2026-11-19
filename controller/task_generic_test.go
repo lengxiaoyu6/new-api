@@ -7,8 +7,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -406,6 +409,258 @@ func TestDisabledArtifactStorePreservesPluginUpstreamContent(t *testing.T) {
 	assert.Equal(t, "bytes 0-13/14", recorder.Header().Get("Content-Range"))
 }
 
+func TestXAIVideoContentResolvesRelativeUpstreamURL(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	allowPrivateTaskMediaTest(t)
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+
+	cdnRequests := make(chan string, 4)
+	cdn := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cdnRequests <- r.Method
+		assert.Equal(t, "/video.mp4", r.URL.Path)
+		assert.Equal(t, "signed", r.URL.Query().Get("signature"))
+		assert.Empty(t, r.Header.Get("Authorization"), "external content must not receive the channel key")
+		w.Header().Set("Content-Type", "video/mp4")
+		http.ServeContent(w, r, "video.mp4", time.Time{}, strings.NewReader("mp4!video!"))
+	}))
+	defer cdn.Close()
+	apiRequests := make(chan string, 4)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		apiRequests <- r.Method
+		assert.Equal(t, "1", r.URL.Query().Get("download"))
+		assert.Equal(t, "Bearer provider-key", r.Header.Get("Authorization"))
+		if r.Header.Get("Authorization") != "Bearer provider-key" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.URL.Path == "/v1/videos/upstream-video/redirect" {
+			http.Redirect(w, r, cdn.URL+"/video.mp4?signature=signed", http.StatusFound)
+			return
+		}
+		assert.Equal(t, "/v1/videos/upstream-video/content", r.URL.Path)
+		w.Header().Set("Content-Type", "video/mp4")
+		http.ServeContent(w, r, "video.mp4", time.Time{}, strings.NewReader("mp4!video!"))
+	}))
+	defer upstream.Close()
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", task.ChannelId).Updates(map[string]any{
+		"type":     constant.ChannelTypeXai,
+		"key":      "provider-key",
+		"base_url": upstream.URL + "/gateway/",
+	}).Error)
+	task.Platform = constant.TaskPlatform("xai")
+	task.PrivateData.UpstreamTaskID = "upstream-video"
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{
+		Key: "xai", Name: "xAI", Version: "1.2.0", APIVersion: 1,
+	}}
+	for _, tc := range []struct {
+		name        string
+		url         string
+		method      string
+		wantStatus  int
+		wantError   string
+		apiRequests int
+		cdnRequests int
+	}{
+		{
+			name: "relative content preserves Range and authentication", url: "/v1/videos/upstream-video/content?download=1",
+			method: http.MethodGet, wantStatus: http.StatusPartialContent, apiRequests: 1,
+		},
+		{
+			name: "HEAD uses the authenticated content endpoint", url: "/v1/videos/upstream-video/content?download=1",
+			method: http.MethodHead, wantStatus: http.StatusOK, apiRequests: 1,
+		},
+		{
+			name: "external signed videos receive no credentials", url: cdn.URL + "/video.mp4?signature=signed",
+			method: http.MethodGet, wantStatus: http.StatusPartialContent, cdnRequests: 1,
+		},
+		{
+			name: "authenticated downloads reject redirects to another origin", url: "/v1/videos/upstream-video/redirect?download=1",
+			method: http.MethodGet, wantStatus: http.StatusBadGateway, wantError: "artifact_request_rejected", apiRequests: 1,
+		},
+		{
+			name: "an authority cannot replace the configured origin", url: strings.TrimPrefix(cdn.URL, "http:") + "/video.mp4?signature=signed",
+			method: http.MethodGet, wantStatus: http.StatusGone, wantError: "artifact_gone",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task.SetData(map[string]any{
+				"model": "grok-imagine-video-1.5", "status": "done", "progress": 100,
+				"usage": map[string]any{"cost_in_usd_ticks": int64(16800000000)},
+				"video": map[string]any{
+					"duration": 12, "respect_moderation": true, "url": tc.url,
+				},
+			})
+			require.NoError(t, model.DB.Save(task).Error)
+			apiBefore, cdnBefore := len(apiRequests), len(cdnRequests)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Set("id", task.UserId)
+			c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+			c.Request = httptest.NewRequest(tc.method, "/v1/videos/"+task.TaskID+"/content", nil)
+			c.Request.Header.Set("Authorization", "Bearer client-token")
+			if tc.method == http.MethodGet {
+				c.Request.Header.Set("Range", "bytes=0-3")
+			}
+
+			VideoProxy(c)
+
+			assert.Equal(t, tc.apiRequests, len(apiRequests)-apiBefore)
+			assert.Equal(t, tc.cdnRequests, len(cdnRequests)-cdnBefore)
+			require.Equal(t, tc.wantStatus, recorder.Code, recorder.Body.String())
+			if tc.wantError != "" {
+				assert.Contains(t, recorder.Body.String(), `"code":"`+tc.wantError+`"`)
+				return
+			}
+			assert.Equal(t, "video/mp4", recorder.Header().Get("Content-Type"))
+			if tc.method == http.MethodHead {
+				assert.Empty(t, recorder.Body.String())
+				assert.Equal(t, "10", recorder.Header().Get("Content-Length"))
+				return
+			}
+			assert.Equal(t, "mp4!", recorder.Body.String())
+			assert.Equal(t, "bytes 0-3/10", recorder.Header().Get("Content-Range"))
+		})
+	}
+}
+
+func TestLocalVideoCachePrefetchAndDownloads(t *testing.T) {
+	task := setupGenericTaskTest(t)
+	allowPrivateTaskMediaTest(t)
+	previousMemoryCache := common.MemoryCacheEnabled
+	common.MemoryCacheEnabled = false
+	t.Cleanup(func() { common.MemoryCacheEnabled = previousMemoryCache })
+
+	root := filepath.Join(t.TempDir(), "cache")
+	t.Setenv(system_setting.TaskArtifactStoreModeEnv, system_setting.TaskArtifactStoreModeLocal)
+	t.Setenv(system_setting.TaskArtifactStoreLocalDirEnv, root)
+	t.Setenv(system_setting.TaskArtifactStoreLocalTTLEnv, "48")
+	cacheCtx, stopCache := context.WithCancel(t.Context())
+	require.NoError(t, service.InitTaskArtifactStore(cacheCtx))
+	previousQueue := taskVideoCacheQueue
+	StartTaskVideoCache(cacheCtx)
+	t.Cleanup(func() {
+		stopCache()
+		taskVideoCacheQueue = previousQueue
+		t.Setenv(system_setting.TaskArtifactStoreModeEnv, system_setting.TaskArtifactStoreModeUpstream)
+		require.NoError(t, service.InitTaskArtifactStore(context.Background()))
+	})
+
+	var requests atomic.Int32
+	var partial atomic.Bool
+	partial.Store(true)
+	started := make(chan struct{}, 1)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		assert.Equal(t, http.MethodGet, r.Method)
+		assert.Empty(t, r.Header.Get("Range"), "cache fills must fetch the complete file")
+		assert.Empty(t, r.Header.Get("If-None-Match"))
+		assert.Equal(t, "Bearer provider-key", r.Header.Get("Authorization"))
+		w.Header().Set("Content-Type", "video/mp4")
+		if partial.Load() {
+			w.Header().Set("Content-Range", "bytes 0-3/10")
+			w.WriteHeader(http.StatusPartialContent)
+			_, _ = w.Write([]byte("mp4!"))
+			return
+		}
+		if requests.Load() == 2 {
+			started <- struct{}{}
+		}
+		_, _ = w.Write([]byte("mp4!video!"))
+	}))
+	defer upstream.Close()
+	require.NoError(t, model.DB.Model(&model.Channel{}).Where("id = ?", task.ChannelId).Updates(map[string]any{
+		"type": constant.ChannelTypeXai, "key": "provider-key", "base_url": upstream.URL,
+	}).Error)
+	task.Platform = constant.TaskPlatform("xai")
+	task.PrivateData.Execution = &model.TaskExecutionSnapshot{TaskPlugin: &model.TaskPluginSnapshot{
+		Key: "xai", Name: "xAI", Version: "1.2.1", APIVersion: 1,
+	}}
+	task.SetData(map[string]any{
+		"model": "grok-imagine-video-1.5", "status": "done",
+		"video": map[string]any{"duration": 12, "url": "/v1/videos/upstream-video/content"},
+	})
+	require.NoError(t, model.DB.Save(task).Error)
+	request := func(method string, artifact bool, userID int, headers map[string]string) *httptest.ResponseRecorder {
+		recorder := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(recorder)
+		c.Set("id", userID)
+		target := "/v1/videos/" + task.TaskID + "/content"
+		c.Params = gin.Params{{Key: "task_id", Value: task.TaskID}}
+		if artifact {
+			target = "/v1/tasks/" + task.TaskID + "/artifacts/video/content"
+			c.Params = gin.Params{{Key: "key", Value: task.TaskID}, {Key: "artifact_key", Value: "video"}}
+		}
+		c.Request = httptest.NewRequest(method, target, nil)
+		c.Request.Header.Set("Authorization", "Bearer client-token")
+		for name, value := range headers {
+			c.Request.Header.Set(name, value)
+		}
+		if artifact {
+			TaskArtifactContent(c)
+		} else {
+			VideoProxy(c)
+		}
+		return recorder
+	}
+
+	// An upstream that ignores the full-file request must not poison the cache.
+	failed := request(http.MethodGet, false, task.UserId, nil)
+	require.Equal(t, http.StatusBadGateway, failed.Code, failed.Body.String())
+	ref, err := service.GetTaskArtifactStore().Resolve(task, "video")
+	require.NoError(t, err)
+	assert.Nil(t, ref)
+
+	partial.Store(false)
+	QueueTaskVideoCache(task)
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		require.FailNow(t, "background video prefetch did not start")
+	}
+	head := request(http.MethodHead, false, task.UserId, nil)
+	require.Equal(t, http.StatusOK, head.Code, head.Body.String())
+	assert.Empty(t, head.Body.String())
+	assert.Equal(t, "10", head.Header().Get("Content-Length"))
+	assert.Equal(t, int32(2), requests.Load())
+
+	ranged := request(http.MethodGet, true, task.UserId, map[string]string{"Range": "bytes=0-3"})
+	assert.Equal(t, http.StatusPartialContent, ranged.Code)
+	assert.Equal(t, "mp4!", ranged.Body.String())
+	assert.Equal(t, "bytes 0-3/10", ranged.Header().Get("Content-Range"))
+	assert.Equal(t, "private, no-store", ranged.Header().Get("Cache-Control"))
+	require.NotEmpty(t, ranged.Header().Get("ETag"))
+	require.Equal(t, head.Header().Get("ETag"), ranged.Header().Get("ETag"))
+	conditional := request(http.MethodGet, false, task.UserId, map[string]string{"If-None-Match": ranged.Header().Get("ETag")})
+	assert.Equal(t, http.StatusNotModified, conditional.Code, "response headers: %v", conditional.Header())
+	assert.Empty(t, conditional.Body.String())
+	foreign := request(http.MethodGet, false, task.UserId+1, nil)
+	assert.Equal(t, http.StatusNotFound, foreign.Code)
+	assert.NotContains(t, foreign.Body.String(), "mp4!")
+	assert.Equal(t, int32(2), requests.Load(), "cached download interfaces must not fetch upstream again")
+
+	ref, err = service.GetTaskArtifactStore().Resolve(task, "video")
+	require.NoError(t, err)
+	require.NotNil(t, ref)
+	ref.StoredAt = ref.StoredAt.Add(-49 * time.Hour)
+	metadata, err := common.Marshal(ref)
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(root, ref.ObjectKey, "metadata.json"), metadata, 0600))
+	refreshed := request(http.MethodGet, false, task.UserId, nil)
+	assert.Equal(t, http.StatusOK, refreshed.Code)
+	assert.Equal(t, "mp4!video!", refreshed.Body.String())
+	assert.Equal(t, int32(3), requests.Load(), "expired bytes must be replaced with a new complete fetch")
+
+	// An unavailable cache directory must preserve the upstream download.
+	require.NoError(t, os.Rename(root, root+"-unavailable"))
+	require.NoError(t, os.WriteFile(root, []byte("unavailable"), 0600))
+	fallback := request(http.MethodGet, false, task.UserId, nil)
+	assert.Equal(t, http.StatusOK, fallback.Code)
+	assert.Equal(t, "mp4!video!", fallback.Body.String())
+	assert.Equal(t, int32(4), requests.Load())
+}
+
 // hailuo looks the MiniMax download link up with utils.fetch; the signed OSS
 // link then gets a plain GET without the channel key, even for HEAD clients.
 func TestTaskArtifactContentFollowsHailuoRetrieveLink(t *testing.T) {
@@ -695,7 +950,7 @@ func TestWriteVideoDataURLStreamsAndSupportsHead(t *testing.T) {
 	getRecorder := httptest.NewRecorder()
 	getContext, _ := gin.CreateTestContext(getRecorder)
 	getContext.Request = httptest.NewRequest(http.MethodGet, "/content", nil)
-	require.NoError(t, writeVideoDataURL(getContext, dataURL))
+	require.NoError(t, proxyTaskMedia(getContext, nil, &relaychannel.TaskContentRequest{URL: dataURL}))
 	assert.Equal(t, http.StatusOK, getRecorder.Code)
 	assert.Equal(t, "complete-body", getRecorder.Body.String())
 	assert.Equal(t, "13", getRecorder.Header().Get("Content-Length"))
@@ -703,7 +958,7 @@ func TestWriteVideoDataURLStreamsAndSupportsHead(t *testing.T) {
 	headRecorder := httptest.NewRecorder()
 	headContext, _ := gin.CreateTestContext(headRecorder)
 	headContext.Request = httptest.NewRequest(http.MethodHead, "/content", nil)
-	require.NoError(t, writeVideoDataURL(headContext, dataURL))
+	require.NoError(t, proxyTaskMedia(headContext, nil, &relaychannel.TaskContentRequest{URL: dataURL}))
 	assert.Equal(t, http.StatusOK, headRecorder.Code)
 	assert.Empty(t, headRecorder.Body.String())
 	assert.Equal(t, "13", headRecorder.Header().Get("Content-Length"))
@@ -718,7 +973,7 @@ func TestWriteVideoDataURLRejectsOversizedPayloadBeforeDecode(t *testing.T) {
 	c, _ := gin.CreateTestContext(recorder)
 	c.Request = httptest.NewRequest(http.MethodGet, "/content", nil)
 
-	err := writeVideoDataURL(c, "data:video/mp4;base64,"+strings.Repeat("A", 64))
+	err := proxyTaskMedia(c, nil, &relaychannel.TaskContentRequest{URL: "data:video/mp4;base64," + strings.Repeat("A", 64)})
 
 	assert.ErrorIs(t, err, errTaskMediaRequestRejected)
 	assert.Empty(t, recorder.Header().Get("Content-Type"))

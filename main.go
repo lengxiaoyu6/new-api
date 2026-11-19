@@ -117,6 +117,15 @@ func main() {
 	// request runs without the uploaded plugins.
 	controller.SyncTaskPluginsOnce()
 
+	artifactContext, stopArtifactCache := context.WithCancel(context.Background())
+	defer stopArtifactCache()
+	if err := service.InitTaskArtifactStore(artifactContext); err != nil {
+		common.FatalLog(common.LogText("Failed to initialize task artifact cache: %v", err))
+		return
+	}
+	controller.StartTaskVideoCache(artifactContext)
+	service.CacheTaskArtifactsFunc = controller.QueueTaskVideoCache
+
 	// Every node reloads a topic within seconds of a write to it on any node.
 	// The periodic reloads below stay for writes that do not bump a topic.
 	service.RegisterSyncTopic(model.SyncTopicOptions, func(context.Context) error { return model.LoadOptionsFromDatabase() })

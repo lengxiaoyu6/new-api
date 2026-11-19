@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"unicode"
 
@@ -14,14 +15,18 @@ import (
 
 const (
 	TaskArtifactStoreModeUpstream = "upstream"
+	TaskArtifactStoreModeLocal    = "local"
 	TaskArtifactStoreModeS3       = "s3"
 
+	DefaultTaskArtifactStoreLocalTTLHours     = 48
 	DefaultTaskArtifactStorePresignTTLSeconds = 900
 	MaxTaskArtifactStorePresignTTLSeconds     = 7 * 24 * 60 * 60
 )
 
 const (
 	TaskArtifactStoreModeEnv         = "TASK_ARTIFACT_STORE_MODE"
+	TaskArtifactStoreLocalDirEnv     = "TASK_ARTIFACT_STORE_LOCAL_DIR"
+	TaskArtifactStoreLocalTTLEnv     = "TASK_ARTIFACT_STORE_LOCAL_TTL_HOURS"
 	TaskArtifactStoreS3EndpointEnv   = "TASK_ARTIFACT_STORE_S3_ENDPOINT"
 	TaskArtifactStoreS3BucketEnv     = "TASK_ARTIFACT_STORE_S3_BUCKET"
 	TaskArtifactStoreS3RegionEnv     = "TASK_ARTIFACT_STORE_S3_REGION"
@@ -36,10 +41,12 @@ var (
 	taskArtifactStoreRegionPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`)
 )
 
-// TaskArtifactStoreConfig reserves the configuration contract for a future S3
-// implementation. The current release always falls back to upstream proxying.
+// TaskArtifactStoreConfig configures startup-only artifact persistence.
+// S3 remains reserved; local mode caches video bytes on this instance.
 type TaskArtifactStoreConfig struct {
 	Mode                string
+	LocalDir            string
+	LocalTTLHours       int
 	S3Endpoint          string
 	S3Bucket            string
 	S3Region            string
@@ -54,6 +61,8 @@ type TaskArtifactStoreConfig struct {
 func LoadTaskArtifactStoreConfig() TaskArtifactStoreConfig {
 	config := TaskArtifactStoreConfig{
 		Mode:                common.GetEnvOrDefaultString(TaskArtifactStoreModeEnv, TaskArtifactStoreModeUpstream),
+		LocalDir:            common.GetEnvOrDefaultString(TaskArtifactStoreLocalDirEnv, "./data/task-artifacts"),
+		LocalTTLHours:       common.GetEnvOrDefault(TaskArtifactStoreLocalTTLEnv, DefaultTaskArtifactStoreLocalTTLHours),
 		S3Endpoint:          common.GetEnvOrDefaultString(TaskArtifactStoreS3EndpointEnv, ""),
 		S3Bucket:            common.GetEnvOrDefaultString(TaskArtifactStoreS3BucketEnv, ""),
 		S3Region:            common.GetEnvOrDefaultString(TaskArtifactStoreS3RegionEnv, ""),
@@ -77,8 +86,18 @@ func LoadTaskArtifactStoreConfig() TaskArtifactStoreConfig {
 // ValidateTaskArtifactStoreConfig performs syntax checks only. It never
 // resolves hosts, contacts an endpoint, or verifies credentials.
 func ValidateTaskArtifactStoreConfig(config TaskArtifactStoreConfig) error {
-	if config.Mode != TaskArtifactStoreModeUpstream && config.Mode != TaskArtifactStoreModeS3 {
+	if config.Mode != TaskArtifactStoreModeUpstream && config.Mode != TaskArtifactStoreModeLocal && config.Mode != TaskArtifactStoreModeS3 {
 		return fmt.Errorf("unsupported mode %q", config.Mode)
+	}
+	if config.Mode == TaskArtifactStoreModeLocal {
+		localDir, err := filepath.Abs(config.LocalDir)
+		if strings.TrimSpace(config.LocalDir) == "" || config.LocalDir != strings.TrimSpace(config.LocalDir) ||
+			strings.ContainsAny(config.LocalDir, "\x00\r\n") || err != nil || filepath.Dir(localDir) == localDir {
+			return errors.New("local artifact directory must be a dedicated non-root directory")
+		}
+		if config.LocalTTLHours < 1 || config.LocalTTLHours > 24*365 {
+			return errors.New("local artifact TTL must be between 1 and 8760 hours")
+		}
 	}
 	if config.S3PresignTTLSeconds <= 0 || config.S3PresignTTLSeconds > MaxTaskArtifactStorePresignTTLSeconds {
 		return fmt.Errorf("S3 presign TTL must be between 1 and %d seconds", MaxTaskArtifactStorePresignTTLSeconds)

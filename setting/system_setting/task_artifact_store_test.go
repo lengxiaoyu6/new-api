@@ -23,6 +23,16 @@ func TestValidateTaskArtifactStoreConfig(t *testing.T) {
 		Mode:                TaskArtifactStoreModeUpstream,
 		S3PresignTTLSeconds: DefaultTaskArtifactStorePresignTTLSeconds,
 	}))
+	local := TaskArtifactStoreConfig{
+		Mode: TaskArtifactStoreModeLocal, LocalDir: "./data/task-artifacts",
+		LocalTTLHours: 48, S3PresignTTLSeconds: DefaultTaskArtifactStorePresignTTLSeconds,
+	}
+	require.NoError(t, ValidateTaskArtifactStoreConfig(local))
+	local.LocalTTLHours = 0
+	assert.ErrorContains(t, ValidateTaskArtifactStoreConfig(local), "local artifact TTL")
+	local.LocalTTLHours = 48
+	local.LocalDir = "/"
+	assert.ErrorContains(t, ValidateTaskArtifactStoreConfig(local), "dedicated non-root directory")
 
 	tests := []struct {
 		name   string

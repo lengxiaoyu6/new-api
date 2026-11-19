@@ -878,6 +878,7 @@ func executeTaskSubmissionWith(
 	durable = true
 	requestplugin.TaskCreated(c)
 	if immediateTerminal {
+		defer QueueTaskVideoCache(task)
 		// Reported once settled, whatever the settlement did.
 		defer requestplugin.ReportTask(task)
 	}

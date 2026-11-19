@@ -340,6 +340,9 @@ func TaskArtifactContent(c *gin.Context) {
 			writeTaskArtifactError(c, http.StatusNotFound, "artifact_not_found", "Task or artifact not found")
 			return
 		}
+		if serveCachedTaskVideo(c, task, relaychannel.TaskArtifact{Key: "video", Type: "video"}) {
+			return
+		}
 		descriptor := &relaychannel.TaskContentRequest{
 			URL:            task.GetResultURL(),
 			Method:         c.Request.Method,
@@ -358,6 +361,9 @@ func TaskArtifactContent(c *gin.Context) {
 	found := false
 	for _, artifact := range artifacts {
 		if artifact.Key == artifactKey {
+			if serveCachedTaskVideo(c, task, artifact) {
+				return
+			}
 			found = true
 			break
 		}
@@ -368,8 +374,9 @@ func TaskArtifactContent(c *gin.Context) {
 	}
 	artifactStore := service.GetTaskArtifactStore()
 	if ref, resolveErr := artifactStore.Resolve(task, artifactKey); resolveErr == nil && ref != nil {
-		_ = artifactStore.Serve(c, task, ref)
-		return
+		if err := artifactStore.Serve(c, task, ref); err == nil || c.Writer.Written() {
+			return
+		}
 	}
 
 	adaptor, err := initTaskArtifactAdaptor(task)

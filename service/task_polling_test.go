@@ -1105,9 +1105,15 @@ func TestTaskReportsOnceAtTheFinalState(t *testing.T) {
 	ch := &model.Channel{Id: channelID, Type: constant.ChannelTypeKling, Name: "poll", Key: "sk-test", Status: common.ChannelStatusEnabled}
 
 	var reported []string
+	var cached []string
 	previous := ReportTaskFunc
+	previousCache := CacheTaskArtifactsFunc
 	ReportTaskFunc = func(task *model.Task) { reported = append(reported, task.TaskID+":"+string(task.Status)) }
-	t.Cleanup(func() { ReportTaskFunc = previous })
+	CacheTaskArtifactsFunc = func(task *model.Task) { cached = append(cached, task.TaskID) }
+	t.Cleanup(func() {
+		ReportTaskFunc = previous
+		CacheTaskArtifactsFunc = previousCache
+	})
 
 	newTask := func(id string, plugins bool) *model.Task {
 		task := makeTask(userID, channelID, 1_000, tokenID, BillingSourceWallet, 0)
@@ -1136,16 +1142,20 @@ func TestTaskReportsOnceAtTheFinalState(t *testing.T) {
 	poll(task, model.TaskStatusInProgress)
 	poll(reload(task), model.TaskStatusInProgress)
 	assert.Empty(t, reported)
+	assert.Empty(t, cached)
 
 	poll(reload(task), model.TaskStatusSuccess)
 	assert.Equal(t, []string{"report_once:SUCCESS"}, reported)
+	assert.Equal(t, []string{"report_once"}, cached)
 	// Another poller that read the row before it finished loses the update.
 	poll(stale, model.TaskStatusSuccess)
 	assert.Len(t, reported, 1)
+	assert.Equal(t, []string{"report_once"}, cached)
 
 	plain := newTask("no_plugins", false)
 	poll(plain, model.TaskStatusSuccess)
 	assert.Len(t, reported, 1)
+	assert.Equal(t, []string{"report_once", "no_plugins"}, cached)
 
 	failed := newTask("fails", true)
 	poll(failed, model.TaskStatusFailure)
@@ -1159,4 +1169,5 @@ func TestTaskReportsOnceAtTheFinalState(t *testing.T) {
 	sweepTimedOutTasks(context.Background())
 	sweepTimedOutTasks(context.Background())
 	assert.Equal(t, []string{"report_once:SUCCESS", "fails:FAILURE", "times_out:FAILURE"}, reported)
+	assert.Equal(t, []string{"report_once", "no_plugins"}, cached)
 }

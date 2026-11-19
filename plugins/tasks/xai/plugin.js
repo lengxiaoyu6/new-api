@@ -74,7 +74,7 @@ export const meta = {
     en: "xAI Grok Imagine video generation (text-to-video, image-to-video, reference-to-video, video editing, and video extension)",
     zh: "xAI Grok Imagine 视频生成（文生视频、图生视频、参考生视频、视频编辑、视频延长）",
   },
-  version: "1.2.0",
+  version: "1.2.1",
   author: { name: "QuantumNous" },
   channelTypes: [48], // xAI-type channels serve the video API with the same key
   baseUrl: "https://api.x.ai",
@@ -679,6 +679,18 @@ export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== "video") throw new Error("artifact_not_found");
   const url = videoURL(ctx.data);
   if (!url) throw new Error("artifact_not_found");
+  // Compatible upstreams may serve content at an authenticated API path.
+  // A root-relative path uses the channel's origin, including when its base
+  // URL has a prefix. Never send the channel key to a provider's CDN URL.
+  if (url.startsWith("/") && !url.startsWith("//")) {
+    const origin = trimmed(ctx.baseUrl).match(/^https?:\/\/[^/?#]+/i);
+    if (!origin) throw new Error("channel base URL is invalid");
+    return {
+      url: origin[0] + url,
+      method: ctx.clientRequest.method,
+      headers: { Authorization: "Bearer " + ctx.apiKey },
+    };
+  }
   return { url: url, method: ctx.clientRequest.method, credentialless: true };
 }
 
