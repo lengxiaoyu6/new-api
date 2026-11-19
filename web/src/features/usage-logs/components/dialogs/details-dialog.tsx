@@ -1064,6 +1064,31 @@ export function DetailsDialog(props: DetailsDialogProps) {
           </DetailSection>
         )}
 
+        {isTopup && !quotaOperation && (
+          <DetailSection label={t('Top-up')}>
+            <DetailRow
+              label={t('Balance before top-up')}
+              value={
+                typeof other?.quota_before === 'number' &&
+                Number.isFinite(other.quota_before)
+                  ? formatLogQuota(other.quota_before)
+                  : t('Not recorded')
+              }
+              mono
+            />
+            <DetailRow
+              label={t('Balance after top-up')}
+              value={
+                typeof other?.quota_after === 'number' &&
+                Number.isFinite(other.quota_after)
+                  ? formatLogQuota(other.quota_after)
+                  : t('Not recorded')
+              }
+              mono
+            />
+          </DetailSection>
+        )}
+
         {quotaOperation && (
           <DetailSection label={t('Quota adjustment details')}>
             <AuditDetailFields fields={quotaOperation.fields} />

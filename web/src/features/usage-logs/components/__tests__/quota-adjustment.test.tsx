@@ -42,7 +42,7 @@ import {
   useSystemConfigStore,
 } from '@/stores/system-config-store'
 
-import type { UsageLog } from '../../data/schema'
+import { type UsageLog, usageLogSchema } from '../../data/schema'
 import { renderAuditContent } from '../../lib/format'
 import type { LogOtherData } from '../../types'
 import { useCommonLogsColumns } from '../columns/common-logs-columns'
@@ -226,4 +226,86 @@ describe('quota adjustment log localization', () => {
     ).toBeNull()
     expect(renderAuditContent({}, i18n.t)).toBeNull()
   })
+
+  test.each([
+    {
+      name: 'zero opening balance for the log owner',
+      isAdmin: false,
+      other: { quota_before: 0, quota_after: 500000 },
+      before: '$0',
+      after: '$1',
+    },
+    {
+      name: 'negative opening balance for an administrator',
+      isAdmin: true,
+      other: { quota_before: -500000, quota_after: 0 },
+      before: '-$1',
+      after: '$0',
+    },
+    {
+      name: 'historical record without balance snapshots',
+      isAdmin: false,
+      other: {},
+      before: 'Not recorded',
+      after: 'Not recorded',
+    },
+    {
+      name: 'partially recorded balance',
+      isAdmin: false,
+      other: { quota_before: 0 },
+      before: '$0',
+      after: 'Not recorded',
+    },
+  ])(
+    'shows top-up balances and translates the labels for $name',
+    async (scenario) => {
+      const i18n = createInstance()
+      await i18n.init({
+        lng: 'en',
+        fallbackLng: 'en',
+        resources: { en, zh },
+        interpolation: { escapeValue: false },
+      })
+      render(
+        <I18nextProvider i18n={i18n}>
+          <QueryClientProvider client={queryClient}>
+            <DetailsDialog
+              log={usageLogSchema.parse({
+                id: 1,
+                user_id: 1,
+                created_at: 1,
+                type: 1,
+                content: 'Top-up succeeded',
+                other: JSON.stringify(scenario.other),
+              })}
+              isAdmin={scenario.isAdmin}
+              isRoot={false}
+              open
+              onOpenChange={() => undefined}
+            />
+          </QueryClientProvider>
+        </I18nextProvider>
+      )
+      const dialog = within(screen.getByRole('dialog'))
+      expect(
+        dialog.getByText('Balance before top-up').nextElementSibling
+      ).toHaveTextContent(scenario.before)
+      expect(
+        dialog.getByText('Balance after top-up').nextElementSibling
+      ).toHaveTextContent(scenario.after)
+      expect(dialog.queryByText('Quota adjustment details')).toBeNull()
+
+      await act(() => i18n.changeLanguage('zh'))
+      expect(
+        dialog.getByText('充值前余额').nextElementSibling
+      ).toHaveTextContent(
+        scenario.before === 'Not recorded' ? '未记录' : scenario.before
+      )
+      expect(
+        dialog.getByText('充值后余额').nextElementSibling
+      ).toHaveTextContent(
+        scenario.after === 'Not recorded' ? '未记录' : scenario.after
+      )
+    }
+  )
 })

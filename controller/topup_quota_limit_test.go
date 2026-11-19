@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -299,6 +300,180 @@ func TestFractionalRechargeDatabase(t *testing.T) {
 					}
 				})
 			}
+		})
+	}
+}
+
+func TestTopUpBalanceDatabase(t *testing.T) {
+	previousQuota, previousRebate := common.QuotaPerUnit, common.InviterTopupRebatePercent
+	previousBatch := common.BatchUpdateEnabled
+	common.QuotaPerUnit, common.InviterTopupRebatePercent = 5, 0
+	common.BatchUpdateEnabled = false
+	t.Cleanup(func() {
+		common.QuotaPerUnit, common.InviterTopupRebatePercent = previousQuota, previousRebate
+		common.BatchUpdateEnabled = previousBatch
+	})
+
+	for _, dialect := range []struct{ kind, env string }{{"sqlite", ""}, {"mysql", "TEST_MYSQL_DSN"}, {"postgres", "TEST_POSTGRES_DSN"}} {
+		t.Run(dialect.kind, func(t *testing.T) {
+			if dialect.env != "" && os.Getenv(dialect.env) == "" {
+				t.Skip("set " + dialect.env + " to run this database")
+			}
+			db := modelManagementDB(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, db.AutoMigrate(&model.TopUp{}, &model.Redemption{}, &model.PerPayOrder{}, &model.PerPayEvent{}))
+			// A separately configured log database must receive the same snapshot.
+			logDB, _ := newAuditTestDatabase(t, dialect.kind, os.Getenv(dialect.env))
+			require.NoError(t, logDB.AutoMigrate(&model.Log{}))
+			model.LOG_DB = logDB
+
+			for _, provider := range []string{
+				model.PaymentProviderEpay, model.PaymentProviderStripe, model.PaymentProviderCreem,
+				model.PaymentProviderWaffo, model.PaymentProviderWaffoPancake,
+				model.PaymentProviderPerPay, "manual", "redemption",
+			} {
+				t.Run(provider, func(t *testing.T) {
+					before := 7
+					if provider == model.PaymentProviderEpay {
+						before = 0
+					}
+					user := model.User{Username: "balance_" + provider, AffCode: provider, Quota: before, Status: common.UserStatusEnabled}
+					require.NoError(t, db.Create(&user).Error)
+					order := model.TopUp{
+						UserId: user.Id, Amount: 2, Money: 2, TradeNo: "balance-" + provider,
+						PaymentMethod: provider, PaymentProvider: provider, Status: common.TopUpStatusPending,
+					}
+					credit := 10
+					if provider == model.PaymentProviderCreem {
+						// Creem's Amount is already in quota units.
+						credit = 2
+					}
+					if provider == "redemption" {
+						code := model.Redemption{Key: order.TradeNo, Quota: credit, Status: common.RedemptionCodeStatusEnabled}
+						require.NoError(t, code.Insert())
+					} else {
+						require.NoError(t, order.Insert())
+					}
+					if provider == model.PaymentProviderPerPay {
+						require.NoError(t, db.Create(&model.PerPayOrder{
+							TradeNo: order.TradeNo, ClientID: "balance-client", Endpoint: "https://payment.example",
+							RequestedAmountCents: 200,
+						}).Error)
+					}
+					complete := func() error {
+						switch provider {
+						case model.PaymentProviderEpay:
+							_, err := model.RechargeEpay(order.TradeNo, "", "")
+							return err
+						case model.PaymentProviderStripe:
+							return model.Recharge(order.TradeNo, "balance-customer", "")
+						case model.PaymentProviderCreem:
+							return model.RechargeCreem(order.TradeNo, "", "", "")
+						case model.PaymentProviderWaffo:
+							return model.RechargeWaffo(order.TradeNo, "")
+						case model.PaymentProviderWaffoPancake:
+							return model.RechargeWaffoPancake(order.TradeNo)
+						case model.PaymentProviderPerPay:
+							return model.ApplyPerPaySnapshot("balance-client", "https://payment.example", model.PerPaySnapshot{
+								OrderID: "balance-order", MerchantOrderNo: order.TradeNo, Currency: "CNY",
+								RequestedAmountCents: 200, PayableAmountCents: 201, ReceivedAmountCents: 201,
+								PaymentStatus: "CONFIRMED", RefundStatus: "NONE", CheckoutStatus: "CLOSED", Version: 1,
+							}, nil, "")
+						case "manual":
+							return model.ManualCompleteTopUp(order.TradeNo, "")
+						default:
+							_, err := model.Redeem(order.TradeNo, user.Id)
+							return err
+						}
+					}
+					require.NoError(t, complete())
+					require.NoError(t, db.First(&user, user.Id).Error)
+					assert.Equal(t, before+credit, user.Quota)
+					// A replay cannot credit again or create another balance record.
+					switch provider {
+					case model.PaymentProviderStripe, model.PaymentProviderCreem, "redemption":
+						require.Error(t, complete())
+					default:
+						require.NoError(t, complete())
+					}
+					require.NoError(t, db.First(&user, user.Id).Error)
+					assert.Equal(t, before+credit, user.Quota)
+
+					// Subsequent consumption cannot change the recorded balances.
+					require.NoError(t, db.Model(&user).Update("quota", 1).Error)
+					logs, total, err := model.GetUserLogs(user.Id, model.LogFilter{Type: model.LogTypeTopup}, 0, 10)
+					require.NoError(t, err)
+					assert.EqualValues(t, 1, total)
+					require.Len(t, logs, 1)
+					var other map[string]any
+					require.NoError(t, common.UnmarshalJsonStr(logs[0].Other, &other))
+					assert.Equal(t, float64(before), other["quota_before"])
+					assert.Equal(t, float64(before+credit), other["quota_after"])
+					assert.NotContains(t, other, "admin_info")
+					var orphanLogs int64
+					require.NoError(t, logDB.Model(&model.Log{}).Where("user_id = 0").Count(&orphanLogs).Error)
+					assert.Zero(t, orphanLogs)
+				})
+			}
+
+			t.Run("wallet limit rolls back the order without a balance log", func(t *testing.T) {
+				user := model.User{Username: "balance_limit", AffCode: "balance-limit", Quota: common.MaxWalletQuota, Status: common.UserStatusEnabled}
+				require.NoError(t, db.Create(&user).Error)
+				order := model.TopUp{UserId: user.Id, Amount: 2, TradeNo: "balance-limit", PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
+				require.NoError(t, order.Insert())
+				_, err := model.RechargeEpay(order.TradeNo, "", "")
+				require.ErrorIs(t, err, model.ErrTopUpQuotaLimitExceeded)
+				require.NoError(t, db.First(&user, user.Id).Error)
+				assert.Equal(t, common.MaxWalletQuota, user.Quota)
+				assert.Equal(t, common.TopUpStatusPending, model.GetTopUpByTradeNo(order.TradeNo).Status)
+				var count int64
+				require.NoError(t, logDB.Model(&model.Log{}).Where("user_id = ?", user.Id).Count(&count).Error)
+				assert.Zero(t, count)
+			})
+
+			t.Run("concurrent top-ups retain each committed balance", func(t *testing.T) {
+				user := model.User{Username: "balance_concurrent", AffCode: "balance-concurrent", Quota: 7, Status: common.UserStatusEnabled}
+				require.NoError(t, db.Create(&user).Error)
+				if dialect.kind == "sqlite" {
+					// SQLite permits one writer. Serial connections avoid busy
+					// failures while both independent requests remain in flight.
+					connection, err := db.DB()
+					require.NoError(t, err)
+					connection.SetMaxOpenConns(1)
+				}
+				results := make(chan error, 2)
+				start := make(chan struct{})
+				var requests sync.WaitGroup
+				for i := range 2 {
+					order := model.TopUp{UserId: user.Id, Amount: 2, TradeNo: fmt.Sprintf("balance-concurrent-%d", i), PaymentProvider: model.PaymentProviderEpay, Status: common.TopUpStatusPending}
+					require.NoError(t, order.Insert())
+					requests.Go(func() {
+						<-start
+						_, err := model.RechargeEpay(order.TradeNo, "", "")
+						results <- err
+					})
+				}
+				close(start)
+				requests.Wait()
+				close(results)
+				for err := range results {
+					require.NoError(t, err)
+				}
+				require.NoError(t, db.First(&user, user.Id).Error)
+				assert.Equal(t, 27, user.Quota)
+				var logs []model.Log
+				require.NoError(t, logDB.Where("user_id = ?", user.Id).Find(&logs).Error)
+				require.Len(t, logs, 2)
+				var balances [][2]int
+				for _, entry := range logs {
+					var other struct {
+						Before int `json:"quota_before"`
+						After  int `json:"quota_after"`
+					}
+					require.NoError(t, common.UnmarshalJsonStr(entry.Other, &other))
+					balances = append(balances, [2]int{other.Before, other.After})
+				}
+				assert.ElementsMatch(t, [][2]int{{7, 17}, {17, 27}}, balances)
+			})
 		})
 	}
 }

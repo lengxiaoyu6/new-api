@@ -88,6 +88,7 @@ func GetPerPayOrdersToCheck(now int64, clientID, endpoint string) ([]PerPayOrder
 func ApplyPerPaySnapshot(clientID, endpoint string, snapshot PerPaySnapshot, event *PerPayEvent, callerIP string) error {
 	var topUp TopUp
 	var creditedQuota, inviterID, rebateQuota int
+	var balance *TopUpBalance
 	err := DB.Transaction(func(tx *gorm.DB) error {
 		if err := lockForUpdate(tx).Where("trade_no = ?", snapshot.MerchantOrderNo).First(&topUp).Error; err != nil {
 			return err
@@ -189,7 +190,8 @@ func ApplyPerPaySnapshot(clientID, endpoint string, snapshot PerPaySnapshot, eve
 		if err := tx.Save(&topUp).Error; err != nil {
 			return err
 		}
-		if err := creditTopUpQuota(tx, topUp.UserId, creditedQuota, nil); err != nil {
+		balance, err = creditTopUpQuota(tx, topUp.UserId, creditedQuota, nil)
+		if err != nil {
 			return err
 		}
 		inviterID, rebateQuota, err = grantTopupInviterRebate(tx, topUp.UserId, creditedQuota)
@@ -202,7 +204,7 @@ func ApplyPerPaySnapshot(clientID, endpoint string, snapshot PerPaySnapshot, eve
 		syncCreditUserQuotaCache(topUp.UserId, creditedQuota, common.LogText("PerPay topup"))
 		RecordTopupLog(topUp.UserId, common.NewMessage("{{provider}} top-up succeeded, amount added: {{quota}}, payment amount: {{amount}}",
 			map[string]any{"provider": "PerPay", "quota": logger.FormatQuota(creditedQuota), "amount": fmt.Sprintf("%.2f", topUp.Money)}),
-			callerIP, PaymentProviderPerPay, PaymentProviderPerPay)
+			callerIP, PaymentProviderPerPay, PaymentProviderPerPay, balance)
 		recordTopupInviterRebateLog(inviterID, topUp.UserId, rebateQuota, creditedQuota, topUp.TradeNo)
 	}
 	return nil

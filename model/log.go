@@ -303,9 +303,13 @@ func GetAffiliateLogsByUserId(userId int, pageInfo *common.PageInfo) (logs []*Lo
 	return logs, total, nil
 }
 
-func RecordTopupLog(userId int, content *common.Message, callerIp string, paymentMethod string, callbackPaymentMethod string) {
+func RecordTopupLog(userId int, content *common.Message, callerIp string, paymentMethod string, callbackPaymentMethod string, balance *TopUpBalance) {
 	username, _ := GetUsernameById(userId, false)
 	other := NewLogOther()
+	if balance != nil {
+		other.SetPublic("quota_before", balance.Before)
+		other.SetPublic("quota_after", balance.After)
+	}
 	other.MergeAdmin(map[string]any{
 		"server_ip":               common.GetIp(),
 		"node_name":               common.NodeName,

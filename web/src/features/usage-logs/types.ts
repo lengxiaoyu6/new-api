@@ -201,6 +201,8 @@ export type RequestPluginAdminStep = {
 }
 
 export interface LogOtherData {
+  quota_before?: number
+  quota_after?: number
   admin_info?: {
     response_model?: LogOtherData['response_model']
     request_policy?: PolicyEvent[]

@@ -148,6 +148,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 	}
 	common.RandomSleep()
 	var rebateInviterId, rebateQuota int
+	var balance *TopUpBalance
 	err = DB.Transaction(func(tx *gorm.DB) error {
 		err := lockForUpdate(tx).Where(keyCol+" = ?", key).First(redemption).Error
 		if err != nil {
@@ -175,7 +176,8 @@ func Redeem(key string, userId int) (quota int, err error) {
 		if result.RowsAffected == 0 {
 			return errors.New("redemption code already used")
 		}
-		if err := creditTopUpQuota(tx, userId, redemption.Quota, nil); err != nil {
+		balance, err = creditTopUpQuota(tx, userId, redemption.Quota, nil)
+		if err != nil {
 			return err
 		}
 		rebateInviterId, rebateQuota, err = grantTopupInviterRebate(tx, userId, redemption.Quota)
@@ -186,7 +188,7 @@ func Redeem(key string, userId int) (quota int, err error) {
 		return 0, ErrRedeemFailed
 	}
 	syncCreditUserQuotaCache(userId, redemption.Quota, common.LogText("redemption"))
-	RecordLog(userId, LogTypeTopup, common.NewMessage("Topped up {{quota}} with a redemption code, code ID {{id}}", map[string]any{"quota": logger.FormatQuota(redemption.Quota), "id": redemption.Id}))
+	RecordTopupLog(userId, common.NewMessage("Topped up {{quota}} with a redemption code, code ID {{id}}", map[string]any{"quota": logger.FormatQuota(redemption.Quota), "id": redemption.Id}), "", "", "", balance)
 	if rebateInviterId != 0 && rebateQuota > 0 {
 		RecordAffiliateLog(rebateInviterId, "topup", rebateQuota, map[string]interface{}{
 			"invitee_id":    userId,
